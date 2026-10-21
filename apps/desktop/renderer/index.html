@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>CPclaw</title>
+    <style>
+      body { font-family: sans-serif; margin: 16px; color: #1c1917; background: #f5f5f4; }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      .columns { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 12px; }
+      section { background: #fff; border: 1px solid #e7e5e4; padding: 12px; min-height: 520px; }
+      h2 { font-size: 16px; margin: 0 0 8px; }
+      label { display: block; margin-top: 8px; font-size: 13px; }
+      input, select, button { font-size: 14px; }
+      input, select { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px; }
+      button { margin-top: 8px; margin-right: 8px; padding: 6px 12px; }
+      pre { white-space: pre-wrap; font-size: 13px; }
+      @media (max-width: 800px) {
+        .columns { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>本地工作台</h1>
+    <div class="columns">
+      <section>
+        <h2>任务</h2>
+        <div id="tasks">尚未加载</div>
+        <label>模式
+          <select id="mode">
+            <option value="ask">问答</option>
+            <option value="plan">规划</option>
+            <option value="execute" selected>执行</option>
+          </select>
+        </label>
+        <label>预算次数
+          <input id="budget" type="number" min="0" max="10000" value="4" />
+        </label>
+        <label>输出目录
+          <input id="output" type="text" placeholder="绝对路径" />
+        </label>
+        <button id="create" type="button">新建任务</button>
+      </section>
+      <section>
+        <h2>执行</h2>
+        <p>重复点击只受理一次。这个窗口不接触内核类型。</p>
+        <button id="send" type="button">发送</button>
+        <div id="status">尚未发送</div>
+        <label>补充输入
+          <input id="note" type="text" />
+        </label>
+        <button id="enqueue" type="button">加入队列</button>
+        <button id="stage" type="button">暂存报告</button>
+        <pre id="queue"></pre>
+      </section>
+      <section>
+        <h2>审阅与个人笔记</h2>
+        <div id="changes">没有待审变更</div>
+        <label>笔记文件
+          <input id="wiki-path" type="text" placeholder="明确选出的文件，不是目录" />
+        </label>
+        <button id="wiki" type="button">选为来源</button>
+        <pre id="wiki-list"></pre>
+      </section>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "@cpclaw/desktop-host",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "import": "./dist/workspace.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@cpclaw/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "typescript": "5.8.3"
+  }
+}

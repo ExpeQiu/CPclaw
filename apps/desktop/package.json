@@ -1,0 +1,15 @@
+{
+  "name": "@cpclaw/desktop",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@cpclaw/contracts": "workspace:*",
+    "@cpclaw/desktop-host": "workspace:*",
+    "electron": "33.4.11"
+  }
+}
