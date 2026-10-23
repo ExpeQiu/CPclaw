@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { buildSyntheticReport, checkReport, type ReportCheck } from "@cpclaw/contracts";
 import { writeReportFile, type WriteResult } from "@cpclaw/desktop-host";
 
+export { baselinePassed, runBusinessBaseline } from "./baseline.js";
+export type { BaselineCase, BaselineObservation, BaselineReport } from "./baseline.js";
+
 export const SYNTHETIC_MATERIALS = [
   {
     fileName: "policy-excerpt.md",

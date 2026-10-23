@@ -132,6 +132,43 @@ document.getElementById("wiki").addEventListener("click", async () => {
   await refresh();
 });
 
+let lastDoctorReport = null;
+
+document.getElementById("doctor").addEventListener("click", async () => {
+  const output = document.getElementById("output").value;
+  const result = await window.cpclaw.runDoctor({
+    grantedDirectories: output ? [output] : [],
+  });
+  const out = document.getElementById("doctor-out");
+  if (!result.ok) {
+    out.textContent = result.message;
+    return;
+  }
+  lastDoctorReport = result.report;
+  out.textContent = result.report.checks
+    .map((item) => `${item.id}\t${item.status}\t${item.summary}`)
+    .join("\n");
+});
+
+document.getElementById("doctor-export").addEventListener("click", async () => {
+  const out = document.getElementById("doctor-out");
+  if (lastDoctorReport === null) {
+    out.textContent = "请先运行诊断";
+    return;
+  }
+  const includeExtra = document.getElementById("diag-extra").checked;
+  const result = await window.cpclaw.exportDiagnostic({
+    report: lastDoctorReport,
+    includeExtra,
+    extraScopes: includeExtra ? ["sync_meta"] : [],
+  });
+  if (!result.ok) {
+    out.textContent = result.message;
+    return;
+  }
+  out.textContent = `已导出 ${result.fileName}（${result.bytes} 字节）\n` + out.textContent;
+});
+
 refresh().catch((error) => {
   document.getElementById("tasks").textContent = error instanceof Error ? error.message : "工作台无法加载";
 });

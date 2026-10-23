@@ -60,6 +60,12 @@
         </label>
         <button id="wiki" type="button">选为来源</button>
         <pre id="wiki-list"></pre>
+        <h2>设置 / 诊断</h2>
+        <p>只读检查，不自动修复。默认包不含正文与凭证。</p>
+        <label><input id="diag-extra" type="checkbox" /> 额外诊断包（同步元数据）</label>
+        <button id="doctor" type="button">运行诊断</button>
+        <button id="doctor-export" type="button">导出诊断包</button>
+        <pre id="doctor-out">尚未诊断</pre>
       </section>
     </div>
     <script src="./renderer.js"></script>

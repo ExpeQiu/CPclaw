@@ -10,5 +10,7 @@
 			"path": "../../13 Github/deepseek-harness"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
 }

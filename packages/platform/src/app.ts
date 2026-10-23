@@ -2,10 +2,36 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { appendAuthorityRevocation, applyAuthorityLedger } from "./authority-ledger.js";
 import type { PlatformConfig } from "./config.js";
+import {
+  createChannelApi,
+  ensureChannelSchema,
+  type BindingView,
+  type ChannelAck,
+  type ChannelApi,
+  type CommandReceiptView,
+  type ConversationBindingView,
+  type DeviceEndpointView,
+  type OutboundDeliveryView,
+} from "./channel.js";
+import {
+  createEnterpriseApi,
+  ensureEnterpriseSchema,
+  seedKnowledgeAcl,
+  type EnterpriseApi,
+  type KnowledgeHit,
+  type LearningCandidateView,
+  type LogBatchReceipt,
+  type OrgResourceView,
+  type SkillReleaseView,
+  type UploadView,
+  type WikiPageView,
+} from "./enterprise.js";
 import { MODEL_ID, parseBootstrap, type EmployeeRole, type SeedEmployee } from "./fixture.js";
 import { platformLog } from "./log.js";
 import { hashPassword, hashRefresh, newRefreshToken, readAccess, signAccess, verifyPassword } from "./token.js";
+import type { RelayEnvelope } from "@cpclaw/contracts";
 
 export type PlatformCode =
   | "AUTH_REQUIRED"
@@ -167,6 +193,182 @@ export type PlatformApp = {
   setQuota(accessToken: string, input: { employeeId: string; limitTokens: number; concurrentLimit: number }): { ok: true } | PlatformFailure;
   providerView(accessToken: string): { ok: true; model: typeof MODEL_ID; keyPresent: boolean } | PlatformFailure;
   backup(accessToken: string): { ok: true; fileName: string; bytes: number } | PlatformFailure;
+  createUpload(
+    accessToken: string,
+    input: { purpose: string; contentSha256: string; byteSize: number; idempotencyKey: string },
+  ): { ok: true; upload: UploadView } | PlatformFailure;
+  putUploadContent(accessToken: string, uploadId: string, content: string): { ok: true; upload: UploadView } | PlatformFailure;
+  completeUpload(accessToken: string, uploadId: string): { ok: true; upload: UploadView } | PlatformFailure;
+  cancelUpload(accessToken: string, uploadId: string): { ok: true; upload: UploadView } | PlatformFailure;
+  getUpload(accessToken: string, uploadId: string): { ok: true; upload: UploadView } | PlatformFailure;
+  readPrivateFile(accessToken: string, fileId: string): { ok: true; fileId: string; body: string } | PlatformFailure;
+  cleanupStaging(accessToken: string): { ok: true; removed: number } | PlatformFailure;
+  receiveLogBatch(
+    accessToken: string,
+    input: {
+      batchId: string;
+      deviceEpoch: string;
+      cursorFrom: number;
+      events: Array<{ seq: number; event: string; message: string; fields?: Record<string, string | number | boolean> }>;
+    },
+  ): { ok: true; receipt: LogBatchReceipt } | PlatformFailure;
+  getLogBatchReceipt(accessToken: string, batchId: string): { ok: true; receipt: LogBatchReceipt } | PlatformFailure;
+  publishSkillRelease(
+    accessToken: string,
+    input: { skillId: string; version: string; title: string; platforms: string[]; packageBody: string },
+  ): { ok: true; release: SkillReleaseView } | PlatformFailure;
+  submitSkill(
+    accessToken: string,
+    input: { skillId: string; version: string; platforms: string[]; packageBody: string },
+  ): { ok: true; submissionId: string; status: string } | PlatformFailure;
+  reviseSkillSubmission(
+    accessToken: string,
+    input: { submissionId: string; packageBody: string; platforms: string[] },
+  ): { ok: true; submissionId: string; status: string; approvedRevision: number } | PlatformFailure;
+  reviewSkillSubmission(
+    accessToken: string,
+    input: { submissionId: string; decision: "approve" | "reject"; note?: string },
+  ): { ok: true; status: string } | PlatformFailure;
+  listAvailableSkills(accessToken: string): { ok: true; skills: SkillReleaseView[] } | PlatformFailure;
+  downloadSkillRelease(
+    accessToken: string,
+    skillId: string,
+    version: string,
+  ): { ok: true; contentSha256: string; packageBody: string; platforms: string[] } | PlatformFailure;
+  ingestKnowledge(
+    accessToken: string,
+    input: { docId: string; title: string; format: string; body: string; aclGroup: string },
+  ): { ok: true; docId: string; version: number } | PlatformFailure;
+  searchKnowledge(accessToken: string, query: string): { ok: true; hits: KnowledgeHit[] } | PlatformFailure;
+  citeKnowledge(
+    accessToken: string,
+    docId: string,
+    locator: string,
+  ): { ok: true; docId: string; version: number; excerpt: string } | PlatformFailure;
+  revokeKnowledge(accessToken: string, docId: string): { ok: true } | PlatformFailure;
+  draftWiki(
+    accessToken: string,
+    input: { pageId: string; title: string; body: string; sourceDocIds: string[] },
+  ): { ok: true; page: WikiPageView } | PlatformFailure;
+  reviseWiki(
+    accessToken: string,
+    input: { pageId: string; title: string; body: string; sourceDocIds: string[]; baseRevision: number },
+  ): { ok: true; page: WikiPageView } | PlatformFailure;
+  submitWikiReview(accessToken: string, pageId: string): { ok: true; page: WikiPageView } | PlatformFailure;
+  reviewWiki(
+    accessToken: string,
+    input: { pageId: string; revision: number; decision: "approve" | "reject" },
+  ): { ok: true; page: WikiPageView } | PlatformFailure;
+  getPublishedWiki(accessToken: string, pageId: string): { ok: true; page: WikiPageView } | PlatformFailure;
+  setLearningEnabled(accessToken: string, enabled: boolean): { ok: true; enabled: boolean } | PlatformFailure;
+  learningEnabled(accessToken: string): { ok: true; enabled: boolean } | PlatformFailure;
+  submitLearningCandidate(
+    accessToken: string,
+    input: { kind: "experience" | "memory" | "skill"; title: string; body: string; sourceTaskId?: string },
+  ): { ok: true; candidate: LearningCandidateView } | PlatformFailure;
+  reviewLearningCandidate(
+    accessToken: string,
+    input: { candidateId: string; decision: "approve" | "reject" },
+  ): { ok: true; candidate: LearningCandidateView; resourceId?: string } | PlatformFailure;
+  reviseLearningCandidate(
+    accessToken: string,
+    input: { candidateId: string; title: string; body: string },
+  ): { ok: true; candidate: LearningCandidateView } | PlatformFailure;
+  listOrgResources(accessToken: string): { ok: true; resources: OrgResourceView[] } | PlatformFailure;
+  recordFeedback(
+    accessToken: string,
+    input: { resourceId: string; helpful: boolean; note?: string },
+  ): { ok: true } | PlatformFailure;
+  retireOrgResource(accessToken: string, resourceId: string): { ok: true } | PlatformFailure;
+  ensureChannelInstallation(
+    accessToken: string,
+    input: { channel: string; channelTenantId: string; appId: string },
+  ): { ok: true; installationId: string } | PlatformFailure;
+  startChannelPairing(
+    accessToken: string,
+    input: { channel: string; channelTenantId: string; appId: string },
+  ): { ok: true; pairingToken: string; expiresAtMs: number } | PlatformFailure;
+  completeChannelPairing(
+    accessToken: string,
+    input: { pairingToken: string; externalUserId: string },
+  ): { ok: true; binding: BindingView } | PlatformFailure;
+  revokeChannelBinding(accessToken: string, bindingId: string): { ok: true } | PlatformFailure;
+  listChannelBindings(accessToken: string): { ok: true; bindings: BindingView[] } | PlatformFailure;
+  registerRemoteDevice(
+    accessToken: string,
+    input: { deviceId: string },
+  ): { ok: true; device: DeviceEndpointView } | PlatformFailure;
+  setRemoteEnabled(
+    accessToken: string,
+    input: { deviceId: string; enabled: boolean },
+  ): { ok: true; device: DeviceEndpointView } | PlatformFailure;
+  connectRemoteDevice(
+    accessToken: string,
+    deviceId: string,
+  ): { ok: true; device: DeviceEndpointView } | PlatformFailure;
+  disconnectRemoteDevice(
+    accessToken: string,
+    deviceId: string,
+  ): { ok: true; device: DeviceEndpointView } | PlatformFailure;
+  bindImConversation(
+    accessToken: string,
+    input: {
+      bindingId: string;
+      conversationId: string;
+      deviceId: string;
+      taskId?: string;
+      outputScope?: "summary" | "status_only";
+      allowInput?: boolean;
+      allowControl?: boolean;
+    },
+  ): { ok: true; conversation: ConversationBindingView } | PlatformFailure;
+  linkImTask(
+    accessToken: string,
+    input: { conversationKey: string; taskId: string },
+  ): { ok: true; conversation: ConversationBindingView } | PlatformFailure;
+  revokeImConversation(accessToken: string, conversationKey: string): { ok: true } | PlatformFailure;
+  receiveChannelEvent(input: {
+    channel: string;
+    channelTenantId: string;
+    appId: string;
+    conversationId: string;
+    externalUserId: string;
+    messageId: string;
+    text: string;
+    kind?: string;
+  }): { ok: true; ack: ChannelAck } | PlatformFailure;
+  pollRelayCommands(
+    accessToken: string,
+    deviceId: string,
+  ): { ok: true; commands: RelayEnvelope[] } | PlatformFailure;
+  acceptRelayCommand(
+    accessToken: string,
+    input: { deviceId: string; commandId: string; taskId: string },
+  ): { ok: true; receipt: CommandReceiptView; replayed: boolean } | PlatformFailure;
+  markRelayDeliveryUnknown(
+    accessToken: string,
+    commandId: string,
+  ): { ok: true; receipt: CommandReceiptView } | PlatformFailure;
+  enqueueImOutbound(
+    accessToken: string,
+    input: { commandId: string; body: string; failMode?: "none" | "once" | "always" },
+  ): { ok: true; delivery: OutboundDeliveryView } | PlatformFailure;
+  retryImOutbound(
+    accessToken: string,
+    deliveryId: string,
+  ): { ok: true; delivery: OutboundDeliveryView } | PlatformFailure;
+  getRelayCommand(
+    accessToken: string,
+    commandId: string,
+  ): { ok: true; receipt: CommandReceiptView } | PlatformFailure;
+  getImOutbound(
+    accessToken: string,
+    deliveryId: string,
+  ): { ok: true; delivery: OutboundDeliveryView } | PlatformFailure;
+  getImConversation(
+    accessToken: string,
+    conversationKey: string,
+  ): { ok: true; conversation: ConversationBindingView } | PlatformFailure;
   close(): void;
 };
 
@@ -223,6 +425,7 @@ export function openPlatform(config: PlatformConfig): { ok: true; app: PlatformA
     db.close();
     return ready;
   }
+  applyAuthorityLedger(db, config.dataDir);
   chmodSync(join(config.dataDir, "platform.sqlite"), 0o600);
   return { ok: true, app: createApp(db, config) };
 }
@@ -234,16 +437,42 @@ function ensureSchema(db: DatabaseSync, config: PlatformConfig): { ok: true } | 
     db.prepare("INSERT INTO schema_meta (version) VALUES (?)").run(1);
   }
   const versionRow = rowOf(db.prepare("SELECT version FROM schema_meta").get());
-  const version = versionRow === undefined ? undefined : numberOf(versionRow, "version");
-  if (version !== 1) {
+  let version = versionRow === undefined ? undefined : numberOf(versionRow, "version");
+  if (version === 1) {
+    ensureEnterpriseSchema(db);
+    seedKnowledgeAcl(db);
+    db.prepare("UPDATE schema_meta SET version = 2").run();
+    version = 2;
+    platformLog(config.dataDir, "info", "platform_schema_migrated", "平台库已升到企业资源 schema", { version: 2 });
+  }
+  if (version === 2) {
+    ensureChannelSchema(db);
+    db.prepare("UPDATE schema_meta SET version = 3").run();
+    version = 3;
+    platformLog(config.dataDir, "info", "platform_schema_migrated", "平台库已升到渠道中继 schema", { version: 3 });
+  }
+  if (version !== undefined && version > 3) {
+    platformLog(config.dataDir, "error", "platform_schema_incompatible", "平台 schema 高于本机支持，拒绝写入", {
+      version,
+      supported: 3,
+    });
+    return {
+      ok: false,
+      message: `平台 schema ${version} 高于本机支持的 3，已保留原文件并拒绝打开`,
+    };
+  }
+  if (version !== 3) {
     return { ok: false, message: "平台数据库版本无法识别，拒绝继续写入" };
   }
+  ensureEnterpriseSchema(db);
+  ensureChannelSchema(db);
   const countRow = rowOf(db.prepare("SELECT COUNT(*) AS count FROM employees").get());
   const count = countRow === undefined ? undefined : numberOf(countRow, "count");
   if (count === undefined) {
     return { ok: false, message: "无法读取员工表" };
   }
   if (count > 0) {
+    seedKnowledgeAcl(db);
     platformLog(config.dataDir, "info", "platform_db_ready", "平台库已有员工，跳过初始化", { employees: count });
     return { ok: true };
   }
@@ -268,6 +497,7 @@ function ensureSchema(db: DatabaseSync, config: PlatformConfig): { ok: true } | 
         ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0)`,
       ).run(employee.employeeId, MODEL_ID, employee.limitTokens, employee.concurrentLimit, employee.reserveTokens);
     }
+    seedKnowledgeAcl(db);
   });
   platformLog(config.dataDir, "info", "platform_seeded", "空库已写入初始员工", {
     seed: config.seed.kind,
@@ -304,6 +534,8 @@ function loadSeed(config: PlatformConfig): { ok: true; employees: readonly SeedE
 function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
   const inflight = new Map<string, Promise<LoginSuccess | PlatformFailure>>();
   let closed = false;
+  let enterprise: EnterpriseApi | undefined;
+  let channel: ChannelApi | undefined;
 
   function audit(orgId: string, actorId: string, action: string, target: string): void {
     db.prepare("INSERT INTO audit_log (at_ms, org_id, actor_id, action, target) VALUES (?, ?, ?, ?, ?)").run(
@@ -706,6 +938,13 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         db.prepare("UPDATE sessions SET status = 'revoked' WHERE session_id = ? AND status = 'active'").run(sessionId);
         audit(actor.orgId, actor.employeeId, "revoke", sessionId);
       });
+      appendAuthorityRevocation(config.dataDir, {
+        kind: "session",
+        id: sessionId,
+        at: config.now(),
+        orgId: actor.orgId,
+        actorId: actor.employeeId,
+      });
       platformLog(config.dataDir, "info", "session_revoked", "设备会话已撤销", { sessionId });
       return { ok: true };
     },
@@ -729,6 +968,13 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         db.prepare("UPDATE employees SET status = 'disabled' WHERE employee_id = ?").run(employeeId);
         db.prepare("UPDATE sessions SET status = 'revoked' WHERE employee_id = ? AND status = 'active'").run(employeeId);
         audit(actor.orgId, actor.employeeId, "disable", employeeId);
+      });
+      appendAuthorityRevocation(config.dataDir, {
+        kind: "employee",
+        id: employeeId,
+        at: config.now(),
+        orgId: actor.orgId,
+        actorId: actor.employeeId,
       });
       platformLog(config.dataDir, "info", "employee_disabled", "员工已停用", { target: employeeId });
       return { ok: true };
@@ -793,6 +1039,385 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
       return { ok: true, fileName, bytes };
     },
 
+    createUpload(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().createUpload(actor, input);
+    },
+    putUploadContent(accessToken, uploadId, content) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().putUploadContent(actor, uploadId, content);
+    },
+    completeUpload(accessToken, uploadId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().completeUpload(actor, uploadId);
+    },
+    cancelUpload(accessToken, uploadId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().cancelUpload(actor, uploadId);
+    },
+    getUpload(accessToken, uploadId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().getUpload(actor, uploadId);
+    },
+    readPrivateFile(accessToken, fileId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().readPrivateFile(actor, fileId);
+    },
+    cleanupStaging(accessToken) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().cleanupStaging(actor);
+    },
+    receiveLogBatch(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().receiveLogBatch(actor, input);
+    },
+    getLogBatchReceipt(accessToken, batchId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().getLogBatchReceipt(actor, batchId);
+    },
+    publishSkillRelease(accessToken, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().publishSkillRelease(actor, input);
+    },
+    submitSkill(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().submitSkill(actor, input);
+    },
+    reviseSkillSubmission(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviseSkillSubmission(actor, input);
+    },
+    reviewSkillSubmission(accessToken, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviewSkillSubmission(actor, input);
+    },
+    listAvailableSkills(accessToken) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().listAvailableSkills(actor);
+    },
+    downloadSkillRelease(accessToken, skillId, version) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().downloadSkillRelease(actor, skillId, version);
+    },
+    ingestKnowledge(accessToken, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().ingestKnowledge(actor, input);
+    },
+    searchKnowledge(accessToken, query) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().searchKnowledge(actor, query);
+    },
+    citeKnowledge(accessToken, docId, locator) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().citeKnowledge(actor, docId, locator);
+    },
+    revokeKnowledge(accessToken, docId) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      const revoked = enterpriseApi().revokeKnowledge(actor, docId);
+      if (revoked.ok) {
+        appendAuthorityRevocation(config.dataDir, {
+          kind: "knowledge",
+          id: docId,
+          at: config.now(),
+          orgId: actor.orgId,
+          actorId: actor.employeeId,
+        });
+      }
+      return revoked;
+    },
+    draftWiki(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().draftWiki(actor, input);
+    },
+    reviseWiki(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviseWiki(actor, input);
+    },
+    submitWikiReview(accessToken, pageId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().submitWikiReview(actor, pageId);
+    },
+    reviewWiki(accessToken, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviewWiki(actor, input);
+    },
+    getPublishedWiki(accessToken, pageId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().getPublishedWiki(actor, pageId);
+    },
+    setLearningEnabled(accessToken, enabled) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().setLearningEnabled(actor, enabled);
+    },
+    learningEnabled(accessToken) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().learningEnabled(actor);
+    },
+    submitLearningCandidate(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().submitLearningCandidate(actor, input);
+    },
+    reviewLearningCandidate(accessToken, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviewLearningCandidate(actor, input);
+    },
+    reviseLearningCandidate(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().reviseLearningCandidate(actor, input);
+    },
+    listOrgResources(accessToken) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().listOrgResources(actor);
+    },
+    recordFeedback(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().recordFeedback(actor, input);
+    },
+    retireOrgResource(accessToken, resourceId) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return enterpriseApi().retireOrgResource(actor, resourceId);
+    },
+
+    ensureChannelInstallation(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().ensureInstallation(actor, input);
+    },
+    startChannelPairing(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().startPairing(actor, input);
+    },
+    completeChannelPairing(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().completePairing(actor, input);
+    },
+    revokeChannelBinding(accessToken, bindingId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().revokeBinding(actor, bindingId);
+    },
+    listChannelBindings(accessToken) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().listBindings(actor);
+    },
+    registerRemoteDevice(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().registerDevice(actor, input);
+    },
+    setRemoteEnabled(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().setRemoteEnabled(actor, input);
+    },
+    connectRemoteDevice(accessToken, deviceId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().connectDevice(actor, deviceId);
+    },
+    disconnectRemoteDevice(accessToken, deviceId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().disconnectDevice(actor, deviceId);
+    },
+    bindImConversation(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().bindConversation(actor, input);
+    },
+    linkImTask(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().linkTask(actor, input);
+    },
+    revokeImConversation(accessToken, conversationKey) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().revokeConversation(actor, conversationKey);
+    },
+    receiveChannelEvent(input) {
+      return channelApi().receiveChannelEvent(input);
+    },
+    pollRelayCommands(accessToken, deviceId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().pollCommands(actor, deviceId);
+    },
+    acceptRelayCommand(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().acceptCommand(actor, input);
+    },
+    markRelayDeliveryUnknown(accessToken, commandId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().markDeliveryUnknown(actor, commandId);
+    },
+    enqueueImOutbound(accessToken, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().enqueueOutbound(actor, input);
+    },
+    retryImOutbound(accessToken, deliveryId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().retryOutbound(actor, deliveryId);
+    },
+    getRelayCommand(accessToken, commandId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().getCommand(actor, commandId);
+    },
+    getImOutbound(accessToken, deliveryId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().getOutbound(actor, deliveryId);
+    },
+    getImConversation(accessToken, conversationKey) {
+      const actor = principal(accessToken);
+      if (!actor.ok) {
+        return actor;
+      }
+      return channelApi().getConversation(actor, conversationKey);
+    },
+
     close() {
       if (closed) {
         return;
@@ -801,6 +1426,20 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
       db.close();
     },
   };
+
+  function enterpriseApi(): EnterpriseApi {
+    if (enterprise === undefined) {
+      enterprise = createEnterpriseApi(db, config, audit);
+    }
+    return enterprise;
+  }
+
+  function channelApi(): ChannelApi {
+    if (channel === undefined) {
+      channel = createChannelApi(db, config, audit);
+    }
+    return channel;
+  }
 
   function rotate(refreshToken: string): LoginSuccess | PlatformFailure {
     const hash = hashRefresh(refreshToken);

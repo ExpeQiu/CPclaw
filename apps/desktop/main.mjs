@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { acceptTask, readCurrentAccountSession } from "@cpclaw/desktop-host";
+// Electron 主进程不得加载 desktop-host 桶导出（会拉进 node:sqlite）。
+// 无库模块用子路径；诊断与工作台走系统 Node 的 workspace-worker。
+import { acceptTask } from "@cpclaw/desktop-host/accept-task";
+import { readCurrentAccountSession } from "@cpclaw/desktop-host/account-session";
 import { createWorkspaceClient } from "./workspace-client.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +38,36 @@ ipcMain.handle("workspace.call", (_event, call) => {
     return { ok: false, code: "SCHEMA_INVALID", message: "命令不符合形状" };
   }
   return workspaceClient.request({ method: call.method, input: call.input, actorId });
+});
+
+ipcMain.handle("doctor.run", (_event, input) => {
+  const grants = Array.isArray(input?.grantedDirectories) ? input.grantedDirectories : [];
+  return workspaceClient.request({
+    method: "doctor.run",
+    actorId: currentActor() ?? "local-doctor",
+    input: {
+      platformReachable: input?.platformReachable,
+      modelKeyPresent: input?.modelKeyPresent,
+      grantedDirectories: grants.filter((item) => typeof item === "string"),
+      connectorConfigured: input?.connectorConfigured,
+      imPaired: input?.imPaired,
+    },
+  });
+});
+
+ipcMain.handle("doctor.export", (_event, payload) => {
+  if (typeof payload !== "object" || payload === null || typeof payload.report !== "object") {
+    return { ok: false, code: "SCHEMA_INVALID", message: "诊断报告不符合形状" };
+  }
+  return workspaceClient.request({
+    method: "doctor.export",
+    actorId: currentActor() ?? "local-doctor",
+    input: {
+      report: payload.report,
+      includeExtra: payload.includeExtra === true,
+      extraScopes: Array.isArray(payload.extraScopes) ? payload.extraScopes : [],
+    },
+  });
 });
 
 async function createWindow() {

@@ -13,6 +13,7 @@ const result = resolvePlatformConfig(
     AI_MOCK_MODE: pick("AI_MOCK_MODE"),
     CPCLAW_DATA_DIR: pick("CPCLAW_DATA_DIR"),
     CPCLAW_PLATFORM_PORT: pick("CPCLAW_PLATFORM_PORT"),
+    CPCLAW_LISTEN_HOST: pick("CPCLAW_LISTEN_HOST"),
     CPCLAW_SESSION_SECRET: pick("CPCLAW_SESSION_SECRET"),
     CPCLAW_PLATFORM_SEED: pick("CPCLAW_PLATFORM_SEED"),
     CPCLAW_BOOTSTRAP_FILE: pick("CPCLAW_BOOTSTRAP_FILE"),
@@ -42,6 +43,7 @@ function shQuote(value) {
 process.stdout.write(`AI_MOCK_MODE=${shQuote("true")}\n`);
 process.stdout.write(`CPCLAW_DATA_DIR=${shQuote(result.config.dataDir)}\n`);
 process.stdout.write(`CPCLAW_PLATFORM_PORT=${shQuote(String(result.config.port))}\n`);
+process.stdout.write(`CPCLAW_LISTEN_HOST=${shQuote(result.config.listenHost)}\n`);
 process.stdout.write(`CPCLAW_SESSION_SECRET=${shQuote(result.config.sessionSecret)}\n`);
 process.stdout.write(`CPCLAW_PLATFORM_SEED=${shQuote(result.config.seed.kind === "fixture" ? "fixture" : "")}\n`);
 if (result.config.seed.kind === "bootstrap") {

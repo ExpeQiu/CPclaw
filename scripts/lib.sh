@@ -20,7 +20,7 @@ cpclaw_load_dotenv() {
     esac
     key="${line%%=*}"
     case "$key" in
-      AI_MOCK_MODE|CPCLAW_DATA_DIR|CPCLAW_DEV_HOST_PORT|CPCLAW_PLATFORM_PORT|CPCLAW_SESSION_SECRET|CPCLAW_PLATFORM_SEED|CPCLAW_BOOTSTRAP_FILE|CPCLAW_ACCESS_TTL_SEC|CPCLAW_REFRESH_TTL_SEC) ;;
+      AI_MOCK_MODE|CPCLAW_DATA_DIR|CPCLAW_DEV_HOST_PORT|CPCLAW_PLATFORM_PORT|CPCLAW_LISTEN_HOST|CPCLAW_PLATFORM_URL|CPCLAW_SESSION_SECRET|CPCLAW_PLATFORM_SEED|CPCLAW_BOOTSTRAP_FILE|CPCLAW_ACCESS_TTL_SEC|CPCLAW_REFRESH_TTL_SEC|CPCLAW_REMOTE_HOST|CPCLAW_REMOTE_USER|CPCLAW_REMOTE_DIR|CPCLAW_FIREWALL_ACK|CPCLAW_FIREWALL_SOURCE_IP) ;;
       *) continue ;;
     esac
     if [[ -z "${!key+x}" ]]; then
@@ -79,4 +79,28 @@ cpclaw_pid_is_platform() {
     *scripts/platform-host.mjs*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# 若设置了 CPCLAW_PLATFORM_URL，则健康检查远程平台；空字符串拒绝。未设置则跳过。
+cpclaw_remote_platform_preflight() {
+  local root="$1"
+  if [[ -z "${CPCLAW_PLATFORM_URL+x}" ]]; then
+    return 0
+  fi
+  if [[ "${CPCLAW_PLATFORM_URL}" == "" ]]; then
+    echo "CPCLAW_PLATFORM_URL 为空字符串，不会回落到本机平台" >&2
+    return 1
+  fi
+  local url_env base mode
+  url_env="$(cd "$root" && node scripts/resolve-platform-url.mjs)"
+  base="$(printf "%s\n" "$url_env" | awk -F= '/^CPCLAW_PLATFORM_BASE=/{print substr($0, index($0, "=")+1)}')"
+  mode="$(printf "%s\n" "$url_env" | awk -F= '/^CPCLAW_PLATFORM_MODE=/{print substr($0, index($0, "=")+1)}')"
+  base="${base//\'/}"
+  mode="${mode//\'/}"
+  if [[ "$mode" != "remote" ]]; then
+    echo "期望远程平台，实际 mode=${mode}" >&2
+    return 1
+  fi
+  echo "远程平台预检 ${base}"
+  curl -fsS --max-time 5 "${base}/health" | node "$root/scripts/check-platform-health.mjs"
 }

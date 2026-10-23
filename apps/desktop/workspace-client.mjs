@@ -18,6 +18,7 @@ export function createWorkspaceClient(dataDir, desktopDir) {
     if (child !== null) {
       return child;
     }
+    // 必须用 PATH 上的系统 Node（含 node:sqlite），不能用 Electron 内嵌 Node。
     const next = spawn("node", [join(desktopDir, "workspace-worker.mjs")], {
       cwd: desktopDir,
       env: { ...process.env, CPCLAW_DATA_DIR: dataDir },

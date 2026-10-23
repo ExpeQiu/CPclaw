@@ -7,6 +7,7 @@ export type PlatformSeed =
 export type PlatformConfig = {
   dataDir: string;
   port: number;
+  listenHost: string;
   sessionSecret: string;
   accessTtlSec: number;
   refreshTtlSec: number;
@@ -22,6 +23,7 @@ export type PlatformConfigFailure = {
 };
 
 const DEFAULT_PORT = 3928;
+const DEFAULT_LISTEN_HOST = "127.0.0.1";
 const DEFAULT_ACCESS_TTL_SEC = 900;
 const DEFAULT_REFRESH_TTL_SEC = 604_800;
 const MAX_PATH_LENGTH = 1024;
@@ -78,6 +80,24 @@ function readPort(env: Record<string, string | undefined>): number | PlatformCon
     return fail("CONFIG_INVALID", "CPCLAW_PLATFORM_PORT 必须是 1024 到 65535 的整数");
   }
   return port;
+}
+
+function readListenHost(env: Record<string, string | undefined>): string | PlatformConfigFailure {
+  const state = presence(env, "CPCLAW_LISTEN_HOST");
+  if (state === "empty") {
+    return fail("CONFIG_INVALID", "CPCLAW_LISTEN_HOST 为空字符串，不会回落到 127.0.0.1");
+  }
+  if (state === "missing") {
+    return DEFAULT_LISTEN_HOST;
+  }
+  const raw = env.CPCLAW_LISTEN_HOST;
+  if (raw === undefined) {
+    return DEFAULT_LISTEN_HOST;
+  }
+  if (raw === "127.0.0.1" || raw === "0.0.0.0" || raw === "::1" || raw === "::") {
+    return raw;
+  }
+  return fail("CONFIG_INVALID", "CPCLAW_LISTEN_HOST 只接受 127.0.0.1、0.0.0.0、::1 或 ::");
 }
 
 function readTtl(
@@ -142,6 +162,10 @@ export function resolvePlatformConfig(
   if (typeof port !== "number") {
     return port;
   }
+  const listenHost = readListenHost(env);
+  if (typeof listenHost !== "string") {
+    return listenHost;
+  }
   const accessTtlSec = readTtl(env, "CPCLAW_ACCESS_TTL_SEC", DEFAULT_ACCESS_TTL_SEC, 60, 3600);
   if (typeof accessTtlSec !== "number") {
     return accessTtlSec;
@@ -200,6 +224,7 @@ export function resolvePlatformConfig(
   const config: PlatformConfig = {
     dataDir,
     port,
+    listenHost,
     sessionSecret,
     accessTtlSec,
     refreshTtlSec,

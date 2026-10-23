@@ -1,10 +1,31 @@
 const base = process.argv[2];
-if (typeof base !== "string" || !base.startsWith("http://127.0.0.1:")) {
-  process.stderr.write("缺少本机平台地址\n");
+if (typeof base !== "string" || base === "") {
+  process.stderr.write("缺少平台地址\n");
   process.exit(1);
 }
 
-const login = await fetch(`${base}/v1/session/login`, {
+let parsed;
+try {
+  parsed = new URL(base);
+} catch {
+  process.stderr.write("平台地址不是合法 URL\n");
+  process.exit(1);
+}
+if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+  process.stderr.write("平台地址只接受 http 或 https\n");
+  process.exit(1);
+}
+if (!parsed.port) {
+  process.stderr.write("平台地址必须显式包含端口\n");
+  process.exit(1);
+}
+if (parsed.pathname !== "/" && parsed.pathname !== "") {
+  process.stderr.write("平台地址不得带路径\n");
+  process.exit(1);
+}
+const origin = `${parsed.protocol}//${parsed.hostname}:${parsed.port}`;
+
+const login = await fetch(`${origin}/v1/session/login`, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -21,7 +42,7 @@ if (login.status !== 200 || employee.role !== "employee") {
   process.exit(1);
 }
 
-const adminCall = await fetch(`${base}/v1/admin/employees`, {
+const adminCall = await fetch(`${origin}/v1/admin/employees`, {
   headers: { authorization: `Bearer ${employee.accessToken}` },
 });
 if (adminCall.status !== 403) {
@@ -29,7 +50,7 @@ if (adminCall.status !== 403) {
   process.exit(1);
 }
 
-const adminLogin = await fetch(`${base}/v1/session/login`, {
+const adminLogin = await fetch(`${origin}/v1/session/login`, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -44,7 +65,7 @@ if (adminLogin.status !== 200 || admin.role !== "admin") {
   process.exit(1);
 }
 
-const revoked = await fetch(`${base}/v1/admin/sessions/revoke`, {
+const revoked = await fetch(`${origin}/v1/admin/sessions/revoke`, {
   method: "POST",
   headers: {
     authorization: `Bearer ${admin.accessToken}`,
@@ -57,7 +78,7 @@ if (revoked.status !== 200) {
   process.exit(1);
 }
 
-const after = await fetch(`${base}/v1/me/sessions`, {
+const after = await fetch(`${origin}/v1/me/sessions`, {
   headers: { authorization: `Bearer ${employee.accessToken}` },
 });
 if (after.status !== 401) {
@@ -65,7 +86,7 @@ if (after.status !== 401) {
   process.exit(1);
 }
 
-const provider = await fetch(`${base}/v1/admin/provider`, {
+const provider = await fetch(`${origin}/v1/admin/provider`, {
   headers: { authorization: `Bearer ${admin.accessToken}` },
 });
 const providerBody = await provider.json();
@@ -75,4 +96,4 @@ if (provider.status !== 200 || providerBody.model !== "MiniMax-M3" || encoded.in
   process.exit(1);
 }
 
-process.stdout.write("平台登录、撤销和员工隔离检查通过\n");
+process.stdout.write(`平台登录、撤销和员工隔离检查通过 base=${origin}\n`);

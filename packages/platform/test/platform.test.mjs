@@ -24,6 +24,7 @@ function openFixture() {
   const opened = openPlatform({
     dataDir,
     port: 0,
+    listenHost: "127.0.0.1",
     sessionSecret: secret,
     accessTtlSec: 60,
     refreshTtlSec: 3600,
@@ -59,6 +60,24 @@ test("空密钥、空种子和缺失种子都不能启动", () => {
   assert.equal(resolvePlatformConfig({ ...base, CPCLAW_PLATFORM_SEED: "fixture" }, home).ok, false);
   assert.equal(resolvePlatformConfig({ ...base, CPCLAW_SESSION_SECRET: secret, CPCLAW_PLATFORM_SEED: "" }, home).ok, false);
   assert.equal(resolvePlatformConfig({ ...base, CPCLAW_SESSION_SECRET: secret }, home).ok, false);
+  assert.equal(resolvePlatformConfig({
+    ...base,
+    CPCLAW_SESSION_SECRET: secret,
+    CPCLAW_PLATFORM_SEED: "fixture",
+    CPCLAW_LISTEN_HOST: "",
+  }, home).ok, false);
+  const dockerHost = resolvePlatformConfig({
+    ...base,
+    CPCLAW_SESSION_SECRET: secret,
+    CPCLAW_PLATFORM_SEED: "fixture",
+    CPCLAW_LISTEN_HOST: "0.0.0.0",
+    CPCLAW_DATA_DIR: "/data",
+  }, home);
+  assert.equal(dockerHost.ok, true);
+  if (dockerHost.ok) {
+    assert.equal(dockerHost.config.listenHost, "0.0.0.0");
+    assert.equal(dockerHost.config.dataDir, "/data");
+  }
   const leaked = resolvePlatformConfig({
     ...base,
     CPCLAW_SESSION_SECRET: secret,
@@ -303,6 +322,7 @@ test("流式响应分片返回，管理接口不包含供应商密钥", async ()
   const opened = openPlatform({
     dataDir,
     port: 0,
+    listenHost: "127.0.0.1",
     sessionSecret: secret,
     accessTtlSec: 60,
     refreshTtlSec: 3600,
@@ -391,6 +411,7 @@ test("引导文件可以初始化，已有员工不会被合成账号覆盖", ()
   const config = {
     dataDir,
     port: 0,
+    listenHost: "127.0.0.1",
     sessionSecret: secret,
     accessTtlSec: 60,
     refreshTtlSec: 3600,

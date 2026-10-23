@@ -7,4 +7,10 @@ contextBridge.exposeInMainWorld("cpclaw", {
   workspace(call) {
     return ipcRenderer.invoke("workspace.call", call);
   },
+  runDoctor(input) {
+    return ipcRenderer.invoke("doctor.run", input ?? {});
+  },
+  exportDiagnostic(payload) {
+    return ipcRenderer.invoke("doctor.export", payload);
+  },
 });

@@ -140,6 +140,12 @@ export function readCurrentAccountSession(
   const sessionId = Reflect.get(sessionParsed, "sessionId");
   const refreshToken = Reflect.get(sessionParsed, "refreshToken");
   const schemaVersion = Reflect.get(sessionParsed, "schemaVersion");
+  if (typeof schemaVersion === "number" && schemaVersion !== 1) {
+    return {
+      ok: false,
+      message: `会话 schema ${schemaVersion} 与本机支持的 1 不兼容，拒绝错误打开`,
+    };
+  }
   if (storedId !== employeeId || schemaVersion !== 1 || typeof sessionId !== "string" || typeof refreshToken !== "string") {
     return { ok: false, message: "会话文件与当前账号不一致" };
   }

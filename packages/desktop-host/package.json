@@ -11,6 +11,14 @@
     "./workspace": {
       "types": "./dist/workspace.d.ts",
       "import": "./dist/workspace.js"
+    },
+    "./accept-task": {
+      "types": "./dist/accept-task.d.ts",
+      "import": "./dist/accept-task.js"
+    },
+    "./account-session": {
+      "types": "./dist/account-session.d.ts",
+      "import": "./dist/account-session.js"
     }
   },
   "scripts": {

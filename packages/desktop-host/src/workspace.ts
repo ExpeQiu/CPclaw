@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { isAbsolute, join } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { checkReport, type TaskMode } from "@cpclaw/contracts";
+import { inspectWorkspaceCompat } from "./compat.js";
 import { isPathInside, resolveWriteTarget } from "./file-tool.js";
 import { hostLog } from "./host-log.js";
 
@@ -78,6 +79,8 @@ CREATE TABLE inputs (
   seq INTEGER NOT NULL,
   body TEXT NOT NULL,
   consumed INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'desktop',
+  command_id TEXT,
   PRIMARY KEY (task_id, seq)
 ) STRICT;
 CREATE TABLE changes (
@@ -276,6 +279,13 @@ export class LocalWorkspace {
       throw new Error("数据目录必须是绝对路径");
     }
     mkdirSync(dataDir, { recursive: true });
+    const dbPath = join(dataDir, "workspace.sqlite");
+    if (existsSync(dbPath)) {
+      const compat = inspectWorkspaceCompat(dataDir);
+      if (!compat.ok && compat.code === "SCHEMA_INCOMPATIBLE") {
+        throw new Error(compat.message);
+      }
+    }
     return new LocalWorkspace(dataDir);
   }
 
@@ -412,18 +422,39 @@ export class LocalWorkspace {
     };
   }
 
-  enqueueInput(taskId: string, body: string): { ok: true; seq: number } | WorkspaceFailure {
+  enqueueInput(
+    taskId: string,
+    body: string,
+    meta?: { source?: "desktop" | "feishu" | "wecom"; commandId?: string },
+  ): { ok: true; seq: number; source: string } | WorkspaceFailure {
     if (body.length === 0 || body.length > 2000) {
       return fail("SCHEMA_INVALID", "补充内容长度不符合限制");
+    }
+    const source = meta?.source ?? "desktop";
+    if (source !== "desktop" && source !== "feishu" && source !== "wecom") {
+      return fail("SCHEMA_INVALID", "输入来源不符合限制");
+    }
+    if (meta?.commandId !== undefined && !isId(meta.commandId)) {
+      return fail("SCHEMA_INVALID", "命令标识不符合限制");
     }
     return this.transaction(() => {
       if (this.taskRow(taskId) === undefined) {
         return fail("NOT_FOUND", "任务不存在");
       }
+      if (meta?.commandId !== undefined) {
+        const dup = this.db
+          .prepare("SELECT seq FROM inputs WHERE task_id = ? AND command_id = ?")
+          .get(taskId, meta.commandId);
+        if (dup !== undefined) {
+          return { ok: true as const, seq: cellNumber(dup, "seq"), source };
+        }
+      }
       const row = this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS n FROM inputs WHERE task_id = ?").get(taskId);
       const seq = (row === undefined ? 0 : cellNumber(row, "n")) + 1;
-      this.db.prepare("INSERT INTO inputs (task_id, seq, body, consumed) VALUES (?, ?, ?, 0)").run(taskId, seq, body);
-      return { ok: true as const, seq };
+      this.db
+        .prepare("INSERT INTO inputs (task_id, seq, body, consumed, source, command_id) VALUES (?, ?, ?, 0, ?, ?)")
+        .run(taskId, seq, body, source, meta?.commandId ?? null);
+      return { ok: true as const, seq, source };
     });
   }
 
@@ -1080,7 +1111,7 @@ export class LocalWorkspace {
       budgetLimitCalls: number;
       runId: string | null;
       runStatus: string | null;
-      inputs: { seq: number; body: string; consumed: boolean }[];
+      inputs: { seq: number; body: string; consumed: boolean; source: string; commandId: string | null }[];
     }[];
     changes: { changeId: string; taskId: string; path: string; status: string }[];
     wiki: { pageId: string; path: string; revision: number; excerpt: string }[];
@@ -1091,7 +1122,9 @@ export class LocalWorkspace {
       tasks: tasks.map((task) => {
         const taskId = cellString(task, "task_id");
         const run = this.db.prepare("SELECT run_id, status FROM runs WHERE task_id = ? ORDER BY attempt DESC LIMIT 1").get(taskId);
-        const inputs = this.db.prepare("SELECT seq, body, consumed FROM inputs WHERE task_id = ? ORDER BY seq").all(taskId);
+        const inputs = this.db
+          .prepare("SELECT seq, body, consumed, source, command_id FROM inputs WHERE task_id = ? ORDER BY seq")
+          .all(taskId);
         const budget = this.budgetOf(taskId);
         return {
           taskId,
@@ -1107,6 +1140,8 @@ export class LocalWorkspace {
             seq: cellNumber(item, "seq"),
             body: cellString(item, "body"),
             consumed: cellNumber(item, "consumed") === 1,
+            source: cellString(item, "source"),
+            commandId: cellNullable(item, "command_id"),
           })),
         };
       }),
@@ -1140,11 +1175,33 @@ export class LocalWorkspace {
     const table = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();
     if (table === undefined) {
       this.db.exec(SCHEMA);
-      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema', '1')").run();
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('schema', '2')").run();
       return;
     }
     const version = this.db.prepare("SELECT value FROM meta WHERE key = 'schema'").get();
-    if (version === undefined || cellString(version, "value") !== "1") {
+    if (version === undefined) {
+      throw new Error("工作区数据库版本无法识别");
+    }
+    let current = cellString(version, "value");
+    if (current === "1") {
+      this.db.exec("ALTER TABLE inputs ADD COLUMN source TEXT NOT NULL DEFAULT 'desktop'");
+      this.db.exec("ALTER TABLE inputs ADD COLUMN command_id TEXT");
+      this.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema'").run();
+      current = "2";
+      hostLog(this.dataDir, "info", "workspace_schema_migrated", "工作区库已升到输入来源 schema", { version: 2 });
+    }
+    const numeric = Number(current);
+    if (!Number.isInteger(numeric) || numeric < 1) {
+      throw new Error("工作区数据库版本无法识别");
+    }
+    if (numeric > 2) {
+      hostLog(this.dataDir, "error", "workspace_schema_incompatible", "工作区 schema 高于本机支持，拒绝写入", {
+        version: numeric,
+        supported: 2,
+      });
+      throw new Error(`工作区 schema ${numeric} 高于本机支持的 2，已保留原文件并拒绝打开`);
+    }
+    if (current !== "2") {
       throw new Error("工作区数据库版本无法识别");
     }
   }

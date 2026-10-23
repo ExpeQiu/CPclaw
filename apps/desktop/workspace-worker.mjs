@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { buildSyntheticReport, parseTaskMode } from "@cpclaw/contracts";
+import { exportDiagnosticPack, runDoctor } from "@cpclaw/desktop-host";
 import { openLocalWorkspace } from "@cpclaw/desktop-host/workspace";
 
 const dataDir = process.env.CPCLAW_DATA_DIR;
@@ -42,9 +43,36 @@ function dispatch(message) {
       return decide(input);
     case "selectWiki":
       return selectWiki(actorId, input);
+    case "doctor.run":
+      return doctorRun(input);
+    case "doctor.export":
+      return doctorExport(input);
     default:
       return fail("SCHEMA_INVALID", "未知工作台命令");
   }
+}
+
+function doctorRun(input) {
+  const grants = Array.isArray(input.grantedDirectories) ? input.grantedDirectories : [];
+  const report = runDoctor({
+    dataDir,
+    platformReachable: input.platformReachable,
+    modelKeyPresent: input.modelKeyPresent,
+    grantedDirectories: grants.filter((item) => typeof item === "string"),
+    connectorConfigured: input.connectorConfigured,
+    imPaired: input.imPaired,
+  });
+  return { ok: true, report };
+}
+
+function doctorExport(input) {
+  if (typeof input.report !== "object" || input.report === null) {
+    return fail("SCHEMA_INVALID", "诊断报告不符合形状");
+  }
+  return exportDiagnosticPack(dataDir, input.report, {
+    includeExtra: input.includeExtra === true,
+    extraScopes: Array.isArray(input.extraScopes) ? input.extraScopes : [],
+  });
 }
 
 function createTask(actorId, input) {

@@ -1,0 +1,36 @@
+# 验证用控制面。数据卷落在远端机本地路径，不写回开发者本机。
+# 部署前必须确认安全组/防火墙：3928 仅对本机出口 IP 放行（见 deploy-platform-remote.sh）。
+services:
+  platform:
+    build:
+      context: ../..
+      dockerfile: deploy/platform/Dockerfile
+    image: cpclaw-platform:mock
+    container_name: cpclaw-platform
+    restart: unless-stopped
+    ports:
+      - "3928:3928"
+    env_file:
+      - .env
+    environment:
+      AI_MOCK_MODE: "true"
+      CPCLAW_DATA_DIR: /data
+      CPCLAW_PLATFORM_PORT: "3928"
+      CPCLAW_LISTEN_HOST: "0.0.0.0"
+    volumes:
+      - platform_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3928/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  platform_data:

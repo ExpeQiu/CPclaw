@@ -1,3 +1,5 @@
+export { inboundDedupKey, parseRelayEnvelope } from "./channel.js";
+export type { ChannelKind, RelayCommandKind, RelayEnvelope, RelayParseResult } from "./channel.js";
 export { resolveDevHostConfig } from "./config.js";
 export type { ConfigFailureCode, ConfigResult, DevHostConfig } from "./config.js";
 export { createHealthReport, healthReportSchema, parseHealthReport } from "./health.js";

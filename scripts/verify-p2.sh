@@ -59,7 +59,9 @@ trap on_exit EXIT
 
 {
   echo "---- $(date -u +"%Y-%m-%dT%H:%M:%SZ") verify P2 ----"
+  cpclaw_load_dotenv "$ROOT/.env"
   cpclaw_require_runtime
   cpclaw_build "$ROOT"
+  cpclaw_remote_platform_preflight "$ROOT"
   (cd "$ROOT" && pnpm --filter @cpclaw/desktop-host test)
 } 2>&1 | tee -a "$VERIFY_LOG"

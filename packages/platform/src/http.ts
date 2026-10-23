@@ -162,7 +162,11 @@ function modelField(body: Record<string, unknown>): { ok: true; model?: string }
   return { ok: true, model };
 }
 
-export function listenPlatform(app: PlatformApp, options: { port: number; dataDir: string }): Promise<{ port: number; close: () => Promise<void> }> {
+export function listenPlatform(
+  app: PlatformApp,
+  options: { port: number; dataDir: string; listenHost?: string },
+): Promise<{ port: number; close: () => Promise<void> }> {
+  const listenHost = options.listenHost ?? "127.0.0.1";
   const server = createServer((req, res) => {
     void handle(app, options.dataDir, req, res);
   });
@@ -171,15 +175,15 @@ export function listenPlatform(app: PlatformApp, options: { port: number; dataDi
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => {
       const code = "code" in error ? String(error.code) : "UNKNOWN";
-      platformLog(options.dataDir, "error", "listen_failed", "平台端口监听失败", { code });
+      platformLog(options.dataDir, "error", "listen_failed", "平台端口监听失败", { code, listenHost });
       reject(error);
     };
     server.once("error", onError);
-    server.listen(options.port, "127.0.0.1", () => {
+    server.listen(options.port, listenHost, () => {
       server.removeListener("error", onError);
       const address = server.address();
       const port = typeof address === "object" && address !== null ? address.port : options.port;
-      platformLog(options.dataDir, "info", "listening", "平台端口已监听", { port });
+      platformLog(options.dataDir, "info", "listening", "平台端口已监听", { port, listenHost });
       resolve({
         port,
         close: () => new Promise((done, fail) => {
@@ -453,5 +457,9 @@ export async function servePlatform(config: PlatformConfig): Promise<{ port: num
     platformLog(config.dataDir, "error", "platform_open_failed", opened.message);
     throw new Error(opened.message);
   }
-  return listenPlatform(opened.app, { port: config.port, dataDir: config.dataDir });
+  return listenPlatform(opened.app, {
+    port: config.port,
+    dataDir: config.dataDir,
+    listenHost: config.listenHost,
+  });
 }
