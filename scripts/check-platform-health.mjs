@@ -14,8 +14,8 @@ if (
   body.schemaVersion !== 1 ||
   body.status !== "ok" ||
   body.service !== "cpclaw-platform" ||
-  body.mode !== "mock" ||
-  body.aiMockMode !== true
+  !["mock", "real"].includes(body.mode) ||
+  body.aiMockMode !== (body.mode === "mock")
 ) {
   process.stderr.write("平台健康响应不符合约定\n");
   process.exit(1);

@@ -1,3 +1,4 @@
+import { resolveGatewayConfig, type RealGatewayConfig } from "@cpclaw/model-gateway";
 import { fixtureEmployees, type SeedEmployee } from "./fixture.js";
 
 export type PlatformSeed =
@@ -13,6 +14,8 @@ export type PlatformConfig = {
   refreshTtlSec: number;
   seed: PlatformSeed;
   keyPresent: boolean;
+  reportGateway?: RealGatewayConfig;
+  aiMockMode?: boolean;
   now: () => number;
 };
 
@@ -135,8 +138,8 @@ export function resolvePlatformConfig(
   if (env.AI_MOCK_MODE === "") {
     return fail("CONFIG_INVALID", "AI_MOCK_MODE 为空字符串，不会回落到 true");
   }
-  if (env.AI_MOCK_MODE !== "true") {
-    return fail("MOCK_MODE_REQUIRED", "本机平台进程只接受 AI_MOCK_MODE=true");
+  if (env.AI_MOCK_MODE !== "true" && env.AI_MOCK_MODE !== "false") {
+    return fail("MOCK_MODE_REQUIRED", "AI_MOCK_MODE 只接受 true 或 false");
   }
 
   const dataDirState = presence(env, "CPCLAW_DATA_DIR");
@@ -230,7 +233,14 @@ export function resolvePlatformConfig(
     refreshTtlSec,
     seed,
     keyPresent: rawKey !== undefined && rawKey !== "",
+    aiMockMode: env.AI_MOCK_MODE === "true",
     now: options.now ?? (() => Date.now()),
   };
+  if (env.CPCLAW_REPORT_MODEL_MODE !== undefined && env.CPCLAW_REPORT_MODEL_MODE !== "mock" && env.CPCLAW_REPORT_MODEL_MODE !== "real") return fail("CONFIG_INVALID", "CPCLAW_REPORT_MODEL_MODE 只接受 mock 或 real");
+  if (env.CPCLAW_REPORT_MODEL_MODE === "real" || env.AI_MOCK_MODE === "false") {
+    const gateway = resolveGatewayConfig({ ...env, AI_MOCK_MODE: "false" });
+    if ("ok" in gateway) return fail("CONFIG_INVALID", gateway.message);
+    if (gateway.mode === "real") config.reportGateway = { ...gateway, timeoutMs: 60_000 };
+  }
   return { ok: true, config };
 }

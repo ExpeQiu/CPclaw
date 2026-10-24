@@ -19,7 +19,7 @@ usage() {
   CPCLAW_FIREWALL_SOURCE_IP  可选；设置后在远端 iptables 只放行该 IPv4 访问 3928
   CPCLAW_SESSION_SECRET  写入远端 .env；至少 32 位
 
-本脚本不会把供应商密钥同步到远端。fixture 口令仅 Mock。
+真实模型密钥经 SSH stdin 写入远端私有 .env，不进入镜像。fixture 仍是验证身份。
 阿里云安全组仍须另行收紧；iptables 是主机层补充。
 EOF
 }
@@ -67,6 +67,23 @@ echo "防火墙确认: CPCLAW_FIREWALL_ACK=yes（3928 仅受信源）"
 
 ssh -o BatchMode=yes -o ConnectTimeout=15 "$TARGET" "mkdir -p '${REMOTE_DIR}'"
 
+# 发布前保存可回滚制品与一致数据库备份；备份在 repo 之外。
+ssh "$TARGET" "bash -s" <<EOF
+set -euo pipefail
+BACKUP="${REMOTE_DIR}/backups/\$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "\$BACKUP"
+chmod 700 "\$BACKUP"
+if [ -d '${REMOTE_DIR}/repo' ]; then tar -czf "\$BACKUP/repo.tgz" -C '${REMOTE_DIR}' repo; fi
+if docker inspect cpclaw-platform >/dev/null 2>&1; then
+  docker exec cpclaw-platform node -e 'const {DatabaseSync}=require("node:sqlite"); const fs=require("node:fs"); const db=new DatabaseSync("/data/platform.sqlite"); const path="/data/predeploy-"+Date.now()+".sqlite"; db.prepare("VACUUM INTO ?").run(path); db.close(); fs.writeFileSync("/data/predeploy-path",path);'
+  DBPATH=\$(docker exec cpclaw-platform cat /data/predeploy-path)
+  docker cp "cpclaw-platform:\$DBPATH" "\$BACKUP/platform.sqlite"
+  docker cp cpclaw-platform:/data/authority-ledger.json "\$BACKUP/authority-ledger.json"
+  docker image tag \$(docker inspect cpclaw-platform --format '{{.Image}}') cpclaw-platform:rollback
+fi
+echo "发布备份: \$BACKUP"
+EOF
+
 # 同步构建上下文（排除本机依赖与证据）。远端再 docker build。
 rsync -az --delete \
   --exclude '.git' \
@@ -79,16 +96,8 @@ rsync -az --delete \
   --exclude '**/._*' \
   "$ROOT/" "${TARGET}:${REMOTE_DIR}/repo/"
 
-# 远端 .env：密钥不经仓库，经 SSH 写入。
-ssh "$TARGET" "cat > '${REMOTE_DIR}/repo/deploy/platform/.env'" <<EOF
-AI_MOCK_MODE=true
-CPCLAW_DATA_DIR=/data
-CPCLAW_PLATFORM_PORT=3928
-CPCLAW_LISTEN_HOST=0.0.0.0
-CPCLAW_PLATFORM_SEED=fixture
-CPCLAW_SESSION_SECRET=${CPCLAW_SESSION_SECRET}
-EOF
-ssh "$TARGET" "chmod 600 '${REMOTE_DIR}/repo/deploy/platform/.env'"
+# 不经命令行或日志传递供应商密钥。
+node "$ROOT/scripts/write-platform-env.mjs" "$TARGET" "$REMOTE_DIR" "$ROOT/.env"
 
 ssh "$TARGET" "bash -s" <<EOF
 set -euo pipefail
@@ -125,6 +134,10 @@ while iptables -C INPUT -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment
 done
 iptables -I INPUT 1 -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment 'cpclaw-3928-allow'
 iptables -A INPUT -p tcp --dport 3928 -j DROP -m comment --comment 'cpclaw-3928-deny'
+# Docker 发布端口走 FORWARD；INPUT 规则不能保护容器端口。
+IFACE=\$(ip route show default | awk '{print \$5; exit}')
+iptables -I DOCKER-USER 1 -i "\$IFACE" -p tcp --dport 3928 -j DROP -m comment --comment cpclaw-3928-docker-deny
+iptables -I DOCKER-USER 1 -i "\$IFACE" -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment cpclaw-3928-docker-allow
 EOF
 fi
 
@@ -143,7 +156,7 @@ if [[ "$ok" -ne 1 ]]; then
   exit 1
 fi
 
-echo "平台已部署 http://${REMOTE_HOST}:3928 mode=mock"
+echo "平台已部署 http://${REMOTE_HOST}:3928 mode=real"
 if [[ -z "$SOURCE_IP" ]]; then
   echo "警告: 未设置 CPCLAW_FIREWALL_SOURCE_IP，主机 iptables 未自动收紧 3928。请确认云安全组已白名单。" >&2
 fi

@@ -691,6 +691,17 @@ export class LocalWorkspace {
     });
   }
 
+  checkWriteTarget(taskId: string, path: string): { ok: true } | WorkspaceFailure {
+    const task = this.taskRow(taskId);
+    if (task === undefined) return fail("NOT_FOUND", "任务不存在");
+    const mode = cellString(task, "mode");
+    if (mode === "ask" || mode === "plan") return fail("MODE_READONLY", "问答和规划模式不能写文件");
+    const grant = this.writeGrant(taskId, path);
+    if (grant === undefined) return fail("OUTSIDE_GRANT", "目标不在授权目录内");
+    const resolved = this.resolveGrant(grant, path);
+    return resolved.ok ? { ok: true } : resolved;
+  }
+
   stageChange(input: {
     changeId: string;
     taskId: string;

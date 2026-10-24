@@ -1,6 +1,14 @@
 import { homedir } from "node:os";
 import { resolvePlatformConfig, servePlatform } from "@cpclaw/platform";
 
+if (process.env.CPCLAW_MODEL_ENV_FILE) {
+  const { readFileSync } = await import("node:fs");
+  const { parseEnv } = await import("node:util");
+  const vars = parseEnv(readFileSync(process.env.CPCLAW_MODEL_ENV_FILE, "utf8"));
+  for (const name of ["MINIMAX_API_KEY", "MINIMAX_BASE_URL", "MINIMAX_OPENAI_BASE_URL", "CPCLAW_REPORT_MODEL_MODE"]) {
+    if (process.env[name] === undefined && vars[name] !== undefined) process.env[name] = vars[name];
+  }
+}
 function pick(name) {
   if (!Object.prototype.hasOwnProperty.call(process.env, name)) {
     return undefined;
@@ -20,6 +28,9 @@ const result = resolvePlatformConfig(
     CPCLAW_ACCESS_TTL_SEC: pick("CPCLAW_ACCESS_TTL_SEC"),
     CPCLAW_REFRESH_TTL_SEC: pick("CPCLAW_REFRESH_TTL_SEC"),
     MINIMAX_API_KEY: pick("MINIMAX_API_KEY"),
+    CPCLAW_REPORT_MODEL_MODE: pick("CPCLAW_REPORT_MODEL_MODE"),
+    MINIMAX_OPENAI_BASE_URL: pick("MINIMAX_OPENAI_BASE_URL"),
+    MINIMAX_BASE_URL: pick("MINIMAX_BASE_URL"),
   },
   { homeDir: homedir() },
 );

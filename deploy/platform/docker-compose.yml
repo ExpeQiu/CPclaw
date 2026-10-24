@@ -5,7 +5,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/platform/Dockerfile
-    image: cpclaw-platform:mock
+    image: cpclaw-platform:current
     container_name: cpclaw-platform
     restart: unless-stopped
     ports:
@@ -13,7 +13,7 @@ services:
     env_file:
       - .env
     environment:
-      AI_MOCK_MODE: "true"
+      AI_MOCK_MODE: "${AI_MOCK_MODE:-true}"
       CPCLAW_DATA_DIR: /data
       CPCLAW_PLATFORM_PORT: "3928"
       CPCLAW_LISTEN_HOST: "0.0.0.0"

@@ -1,0 +1,30 @@
+import {app,BrowserWindow} from 'electron';
+import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import assert from 'node:assert/strict';
+const dir=process.env.CPCLAW_TEST_DESKTOP_DIR||resolve(import.meta.dirname,'../apps/desktop');
+const temporary=mkdtempSync('/tmp/cpclaw-markdown-');app.setPath('userData',join(temporary,'profile'));
+app.whenReady().then(async()=>{try{
+ const renderer=join(dir,'renderer');
+ const html=readFileSync(join(renderer,'index.html'),'utf8').replace('<head>',`<head><base href="${pathToFileURL(renderer+'/').href}">`).replace(/<script src="\.\/(?!markdown\.js)[^"]+"><\/script>/g,'');
+ const page=join(temporary,'index.html');writeFileSync(page,html);
+ const w=new BrowserWindow({width:1100,height:850,show:false,webPreferences:{backgroundThrottling:false}});await w.loadFile(page);
+ const js=code=>w.webContents.executeJavaScript(code);
+ const result=await js(String.raw`(()=>{
+   document.getElementById('welcome').hidden=true;
+   const a=document.createElement('article');a.className='chat-message assistant';const root=document.createElement('div');root.className='message-body';a.append(root);document.getElementById('conversation').append(a);
+   renderChatMarkdown(root,'已完成文档。\n\n> **来源文档**：《智能驾驶观点整理》\n> **文档性质**：核心观点提炼\n\n## 核心结论\n- **安全优先**，再考虑效率\n- 验证原始来源\n\n| 项目 | 结果 |\n| --- | --- |\n| 渲染 | 通过 |\n\n完整内容见右侧文档预览。');
+   const valid=!!root.querySelector('blockquote strong')&&!!root.querySelector('h2')&&!!root.querySelector('li strong')&&!!root.querySelector('table td')&&!root.textContent.includes('**')&&!root.textContent.includes('> ');
+   window.__markdownRoot=root;
+   const temp=document.createElement('div');renderChatMarkdown(temp,'第一段',true);const p=temp.firstChild;renderChatMarkdown(temp,'第一段继续输出',true);const stable=temp.firstChild===p;
+   renderChatMarkdown(temp,'**未闭合',true);const partial=!temp.textContent.includes('**');renderChatMarkdown(temp,'**已经闭合**');const bold=temp.querySelector('strong')?.textContent==='已经闭合';
+   renderChatMarkdown(temp,'<img src=x onerror=alert(1)> [危险](javascript:alert(1))');const safe=!temp.querySelector('img,script,a');
+   const preview=document.createElement('div');preview.className='markdown-preview';renderChatMarkdown(preview,'### 数据闭环\n\n| 环节 | 大会观点 | 含义 |\n\n|---|---|---|\n\n| 采集闭环 | 数据采集 | 核心 KPI |\n\n| 仿真 | 场景生成 | 一致口径 |\n\n---\n\n- [x] 已验证\n- 父项\n  - **子项**\n\n小节标题\n------');const previewValid=preview.querySelectorAll('table tbody tr').length===2&&preview.querySelectorAll('table th').length===3&&!!preview.querySelector('hr')&&!!preview.querySelector('li input:checked')&&!!preview.querySelector('li ul li strong')&&!!preview.querySelector('h2');
+   return {valid,previewValid,stable,partial,bold,safe,rail:document.querySelector('.quick-rail').getBoundingClientRect().width};
+ })()`);
+ assert.ok(result.valid);assert.ok(result.previewValid);assert.ok(result.stable);assert.ok(result.partial);assert.ok(result.bold);assert.ok(result.safe);assert.equal(result.rail,44);
+ await js('new Promise(resolve=>requestAnimationFrame(resolve))');
+ const screenshot=join(temporary,'chat-markdown.png');writeFileSync(screenshot,(await w.webContents.capturePage()).toPNG());
+ console.log(JSON.stringify({markdown:true,streaming:true,stableParagraph:true,htmlSafe:true,layout:true,screenshot}));w.destroy();app.exit(0);
+}catch(error){console.error(error);app.exit(1);}});

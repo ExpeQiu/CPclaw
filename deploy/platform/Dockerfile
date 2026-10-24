@@ -9,6 +9,7 @@ COPY tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/contracts/tsconfig.json packages/contracts/tsconfig.json
 COPY packages/contracts/src packages/contracts/src
+COPY packages/model-gateway packages/model-gateway
 COPY packages/platform/package.json packages/platform/package.json
 COPY packages/platform/tsconfig.json packages/platform/tsconfig.json
 COPY packages/platform/src packages/platform/src
@@ -23,9 +24,10 @@ RUN printf '%s\n' \
   '  "packageManager": "pnpm@9.0.0",' \
   '  "dependencies": { "@cpclaw/platform": "workspace:*" }' \
   '}' > package.json \
-  && printf '%s\n' 'packages:' '- "packages/contracts"' '- "packages/platform"' > pnpm-workspace.yaml \
+  && printf '%s\n' 'packages:' '- "packages/contracts"' '- "packages/platform"' '- "packages/model-gateway"' > pnpm-workspace.yaml \
   && pnpm install \
   && pnpm --filter @cpclaw/contracts run build \
+  && pnpm --filter @cpclaw/model-gateway run build \
   && pnpm --filter @cpclaw/platform run build
 
 FROM ${NODE_IMAGE} AS runtime

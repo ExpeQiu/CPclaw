@@ -46,3 +46,5 @@ export type { PlatformConfig, PlatformConfigFailure, PlatformSeed } from "./conf
 export { listenPlatform, servePlatform } from "./http.js";
 export { restorePlatformSqlite } from "./recovery.js";
 export type { RestoreResult } from "./recovery.js";
+
+export { marketPage } from "./market-page.js";

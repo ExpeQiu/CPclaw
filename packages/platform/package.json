@@ -14,7 +14,8 @@
     "test": "tsc -p tsconfig.json && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@cpclaw/contracts": "workspace:*"
+    "@cpclaw/contracts": "workspace:*",
+    "@cpclaw/model-gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.18.6",

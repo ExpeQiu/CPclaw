@@ -12,7 +12,7 @@ export function adminPage(): string {
   </style>
 </head>
 <body>
-  <h1>CPclaw 管理</h1>
+  <h1>CPclaw 管理</h1><p><a href="/market">技能市场与审核管理</a></p>
   <form id="login-form">
     <label>员工编号 <input id="employee-id" name="employeeId" autocomplete="username" required></label>
     <label>口令 <input id="password" name="password" type="password" autocomplete="current-password" required></label>

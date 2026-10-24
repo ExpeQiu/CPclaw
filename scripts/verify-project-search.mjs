@@ -1,0 +1,16 @@
+import {mkdtempSync,mkdirSync,writeFileSync,symlinkSync,realpathSync} from 'node:fs';
+import {join} from 'node:path';
+import assert from 'node:assert/strict';
+import {searchProject,retrievalMessage} from '../apps/desktop/project-search.mjs';
+const root=realpathSync(mkdtempSync('/tmp/cpclaw-search-'));
+mkdirSync(join(root,'规范'));mkdirSync(join(root,'.hidden'));mkdirSync(join(root,'node_modules'));mkdirSync(join(root,'CPclaw成果'));
+writeFileSync(join(root,'规范','验收标准.md'),'# 验收标准\n\n验收标准要求：必须检查数据来源，标识 AUTO-LOCAL-873。\n');
+writeFileSync(join(root,'无关.txt'),'今天午餐吃面条');
+for(const dir of ['.hidden','node_modules','CPclaw成果'])writeFileSync(join(root,dir,'验收标准.md'),'验收标准：不应被读取');
+const outside=join(mkdtempSync('/tmp/cpclaw-search-outside-'),'验收标准.md');writeFileSync(outside,'不应泄漏');symlinkSync(outside,join(root,'链接.md'));
+let r=await searchProject(root,'请说明验收标准');assert.equal(r.sources.length,1);assert.equal(r.sources[0].path,'规范/验收标准.md');assert.match(r.context,/AUTO-LOCAL-873/);assert.ok(!r.context.includes('不应'));assert.match(retrievalMessage(r),/仅作为参考数据/);
+assert.equal((await searchProject(root,'你好，谢谢')).sources.length,0);assert.equal((await searchProject(root,'火星气象观测')).sources.length,0);
+writeFileSync(join(root,'规范','验收标准.md'),'验收标准已更新为 NEW-VALUE');r=await searchProject(root,'验收标准');assert.match(r.context,/NEW-VALUE/);assert.ok(!r.context.includes('AUTO-LOCAL-873'));
+assert.equal((await searchProject(root,'验收标准',{budget:100})).context,'');assert.equal((await searchProject(root,'验收标准',{maxFiles:0})).status,'limited');
+const controller=new AbortController();controller.abort();await assert.rejects(searchProject(root,'验收标准',{signal:controller.signal}));
+console.log('PASS: 中文检索、相关片段、来源行号、无关结果排除、隐藏与依赖目录排除、链接隔离、文件更新、读取预算与取消。');

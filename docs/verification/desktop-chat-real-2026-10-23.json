@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "base": "http://47.113.225.93:3928",
+  "mode": "real",
+  "directory": "/tmp/cpclaw-chat-real-WLWuEP",
+  "checks": [
+    "真实平台登录",
+    "独立桌面工作进程接收真实正文增量",
+    "多轮上下文恢复随机测试码",
+    "完成回复本地保存",
+    "收到首段后取消真实请求，保留部分回复"
+  ],
+  "finishedAt": "2026-10-23T05:55:07.927Z",
+  "deltaEvents": 8
+}

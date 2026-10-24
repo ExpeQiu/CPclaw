@@ -10,7 +10,12 @@
   },
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" --if-present run build",
-    "test": "pnpm --filter \"./packages/*\" --if-present run test"
+    "test": "pnpm --filter \"./packages/*\" --if-present run test",
+    "package:desktop": "pnpm build && node scripts/package-desktop.mjs",
+    "test:desktop:knowledge": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-knowledge.mjs",
+    "test:desktop:chat": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-chat.mjs",
+    "test:desktop:market": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-market.mjs",
+    "test:desktop:documents": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-documents.mjs"
   },
   "dependencies": {
     "@cpclaw/contracts": "workspace:*",

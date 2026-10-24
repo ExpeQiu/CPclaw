@@ -26,7 +26,8 @@
     "test": "tsc -p tsconfig.json && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@cpclaw/contracts": "workspace:*"
+    "@cpclaw/contracts": "workspace:*",
+    "@cpclaw/harness-adapter": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.18.6",

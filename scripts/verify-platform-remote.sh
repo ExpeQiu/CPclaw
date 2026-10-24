@@ -38,15 +38,17 @@ mkdir -p "$EVIDENCE_DIR"
 EVIDENCE_FILE="$EVIDENCE_DIR/platform-remote-last.json"
 
 echo "远程健康检查 ${BASE}"
-curl -fsS --max-time 5 "${BASE}/health" | node "$ROOT/scripts/check-platform-health.mjs"
+HEALTH="$(curl -fsS --max-time 5 "${BASE}/health")"
+printf "%s\n" "$HEALTH" | node "$ROOT/scripts/check-platform-health.mjs"
+MODEL_MODE="$(printf "%s" "$HEALTH" | node --input-type=module -e 'let s="";for await (const c of process.stdin)s+=c; process.stdout.write(JSON.parse(s).mode);')"
 node "$ROOT/scripts/check-platform.mjs" "$BASE"
 
-CPCLAW_EVIDENCE_FILE="$EVIDENCE_FILE" CPCLAW_PLATFORM_BASE="$BASE" node --input-type=module -e '
+CPCLAW_EVIDENCE_MODE="${MODEL_MODE}-remote" CPCLAW_EVIDENCE_FILE="$EVIDENCE_FILE" CPCLAW_PLATFORM_BASE="$BASE" node --input-type=module -e '
 import { writeFileSync } from "node:fs";
 writeFileSync(process.env.CPCLAW_EVIDENCE_FILE, JSON.stringify({
   workPackage: "platform-remote-smoke",
   passed: true,
-  mode: "mock-remote",
+  mode: process.env.CPCLAW_EVIDENCE_MODE,
   base: process.env.CPCLAW_PLATFORM_BASE,
   skipped: ["OIDC", "真实 MiniMax", "正式阶段通过"],
   finishedAt: new Date().toISOString(),

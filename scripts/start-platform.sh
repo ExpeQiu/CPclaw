@@ -12,7 +12,7 @@ usage() {
 
 在 127.0.0.1 启动平台进程。AI_MOCK_MODE 必须是精确的 true。
 空库需要 CPCLAW_PLATFORM_SEED=fixture，或 CPCLAW_BOOTSTRAP_FILE。
-fixture 只用于验证，口令是仓库里的合成值。供应商密钥不会传给这个进程。
+fixture 只用于验证，口令是仓库里的合成值。真实报告网关密钥仅由平台进程读取。
 EOF
 }
 
@@ -29,7 +29,7 @@ cpclaw_load_dotenv "$ROOT/.env"
 cpclaw_require_runtime
 cpclaw_build "$ROOT"
 
-if ! CONFIG_ENV="$(cd "$ROOT" && node scripts/resolve-platform.mjs)"; then
+if ! CONFIG_ENV="$(cd "$ROOT" && CPCLAW_MODEL_ENV_FILE="$ROOT/.env" node scripts/resolve-platform.mjs)"; then
   exit 1
 fi
 
@@ -86,6 +86,7 @@ if lsof -nP -iTCP:"${CPCLAW_PLATFORM_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 PLATFORM_ENV=(
+  "CPCLAW_MODEL_ENV_FILE=$ROOT/.env"
   "PATH=$PATH"
   "HOME=$HOME"
   "AI_MOCK_MODE=$AI_MOCK_MODE"

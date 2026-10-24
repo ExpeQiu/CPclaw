@@ -42,3 +42,5 @@ export { LOG_BATCH_MAX, LOG_QUEUE_CAP, openSyncStore } from "./sync.js";
 export type { LogBatchPayload, SyncStore, UploadJobView } from "./sync.js";
 export { installSkillPackage, readCurrentSkill } from "./skill-install.js";
 export type { InstalledSkill } from "./skill-install.js";
+
+export { runBoundReportLoop } from "./harness-report.js";

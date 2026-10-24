@@ -1,0 +1,1 @@
+{"passed":true,"node":"v22.23.3","harness":"0.1.6-alpha.2","finalResponse":"# 任务目标\n验证包内运行。\n# 材料与来源\npolicy.md#p1\n# 要点\n保留来源 policy.md#p1\n# 未覆盖项\n未验证真实模型。","toolCalls":1,"modelCalls":2,"childCommandSeenAfterClose":false,"model":"local deterministic fixture; no real model called"}

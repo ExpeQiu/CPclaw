@@ -1,0 +1,76 @@
+import { app, BrowserWindow } from 'electron';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import assert from 'node:assert/strict';
+const temp=mkdtempSync('/tmp/cpclaw-extensions-ui-');
+app.setPath('userData',join(temp,'profile'));
+app.whenReady().then(async () => {
+setTimeout(()=>{console.error('UI verification timed out');app.exit(1);},30000).unref();
+try {
+ const renderer=resolve(import.meta.dirname,'../apps/desktop/renderer');
+ let html=readFileSync(join(renderer,'index.html'),'utf8').replace(/<script src="[^\"]+"><\/script>/g,'');
+ const fixture=`<script>
+window.calls=[];window.cpclaw={extensionAction:async input=>{calls.push(input);return input.action==='inspect'?{ok:true,state:'scope',version:'1.0.1',message:'授权权限不足，请更新 CLI 与 Skill 后重新授权。'}:{ok:true};},onExtensionEvent:cb=>window.extensionEvent=cb};
+window.chatAccount=null;window.setStatus=()=>{};
+window.marketOverlay=document.createElement('section');marketOverlay.className='market-overlay';marketOverlay.hidden=true;document.body.append(marketOverlay);
+window.marketClose=document.createElement('button');marketClose.onclick=()=>marketOverlay.hidden=true;
+window.openPanel=name=>{document.getElementById('panel-title').textContent=name==='extensions'?'拓展应用':name;document.getElementById('inspector').hidden=false;for(const p of ['extensions','documents','sources','settings','review'])document.getElementById('panel-'+p).hidden=p!==name;};
+document.getElementById('close-panel').onclick=()=>document.getElementById('inspector').hidden=true;
+</script><script src="${pathToFileURL(join(renderer,'extensions.js'))}"></script><script src="${pathToFileURL(join(renderer,'quick-rail.js'))}"></script>`;
+ html=html.replace('<head>','<head><base href="'+pathToFileURL(renderer+'/')+'">').replace('</body>',fixture+'</body>');
+ const page=join(temp,'index.html');writeFileSync(page,html);
+ const w=new BrowserWindow({width:1500,height:900,show:true});const errors=[];
+ w.webContents.on('console-message',(_e,level,message)=>{if(level===3)errors.push(message);});
+ await w.loadFile(page);const js=s=>w.webContents.executeJavaScript(s);
+ const settle=()=>js('new Promise(r=>setTimeout(r,120))');
+ const evidence=resolve(import.meta.dirname,'../docs/verification/extensions');mkdirSync(evidence,{recursive:true});
+ await js("document.getElementById('rail-extensions').click()");await settle();
+ assert.equal(await js("document.getElementById('extension-picker').open"),true);
+ assert.equal(await js("document.getElementById('inspector').hidden"),true);
+ const beforeSelect=await js('calls.length');
+ await js("document.getElementById('extension-service-dreamina').click()");
+ assert.equal(await js('calls.length'),beforeSelect);
+ assert.equal(await js("document.getElementById('extension-service-dreamina').getAttribute('aria-pressed')"),'true');
+ assert.equal(await js("document.getElementById('extension-check').closest('#extension-service-details')!==null"),true);
+ assert.equal(await js("document.querySelector('.extension-service-list').getBoundingClientRect().right<=document.getElementById('extension-service-details').getBoundingClientRect().left"),true);
+
+ await js("document.getElementById('extension-check').click()");await settle();
+ assert.match(await js("document.getElementById('extension-summary').textContent"),/权限不足/);
+ writeFileSync(join(evidence,'extensions-picker.png'),(await w.webContents.capturePage()).toPNG());
+ w.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});w.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});await settle();
+ assert.equal(await js("document.getElementById('extension-picker').open"),false);
+ assert.equal(await js("document.getElementById('inspector').hidden"),true);
+ await js("document.getElementById('rail-extensions').click()");await settle();
+ await js("document.getElementById('extension-start').click()");await settle();
+ assert.equal(await js("document.getElementById('extension-picker').open"),false);
+ assert.equal(await js("document.getElementById('panel-extensions').hidden"),false);
+ assert.equal(await js("document.getElementById('extension-cli-panel').hidden"),false);
+ assert.equal(await js("document.getElementById('rail-extensions').getAttribute('aria-current')"),'true');
+ assert.match(await js("document.getElementById('extension-cli-status').textContent"),/左侧描述任务/);
+ await js("document.getElementById('extension-native').click()");await settle();
+ assert.equal(await js("calls.some(c=>c.action==='open')"),true);
+ assert.equal(await js("calls.some(c=>c.action==='bounds'&&c.bounds.width>100)"),true);
+ await js("document.getElementById('rail-extensions').click()");await settle();
+ assert.equal(await js("document.getElementById('extension-picker').open"),true);
+ assert.equal(await js("calls.at(-1).action"),'hide');
+ await js("document.getElementById('extension-picker-close').click()");await settle();
+ assert.equal(await js("calls.at(-1).action"),'bounds');
+ await js("extensionEvent({state:'failed',message:'页面加载失败'})");await settle();
+ assert.equal(await js("document.getElementById('extension-cli-panel').hidden"),false);
+ assert.equal(await js("calls.at(-1).action"),'hide');
+ assert.equal(await js("Boolean(document.querySelector('.extension-toolbar,#extension-list,#extension-expand,#extension-back'))"),false);
+ await js("document.getElementById('close-panel').click()");await settle();
+ assert.equal(await js("document.getElementById('inspector').hidden"),true);
+ await js("document.getElementById('rail-extensions').click()");await settle();
+ w.setSize(800,720);await settle();
+ assert.equal(await js("document.getElementById('extension-picker').getBoundingClientRect().width<=innerWidth"),true);
+ writeFileSync(join(evidence,'extensions-picker-narrow.png'),(await w.webContents.capturePage()).toPNG());
+ await js("document.getElementById('extension-start').click()");await settle();
+ assert.equal(await js("document.documentElement.scrollWidth<=innerWidth"),true);
+ writeFileSync(join(evidence,'extensions-narrow.png'),(await w.webContents.capturePage()).toPNG());
+ w.setSize(1500,900);await settle();writeFileSync(join(evidence,'extensions-wide.png'),(await w.webContents.capturePage()).toPNG());
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,checks:['picker-first','picker-escape','selection-opens-panel','native-hidden-under-picker','scope-status','rail-selection','native-bounds','failure-fallback','toolbar-removed','close','narrow-layout'],screenshots:evidence}));app.exit(0);
+} catch(e){console.error(e);app.exit(1);}
+
+});

@@ -61,6 +61,9 @@ importers:
       '@cpclaw/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@cpclaw/harness-adapter':
+        specifier: workspace:*
+        version: link:../harness-adapter
     devDependencies:
       '@types/node':
         specifier: 22.18.6
@@ -100,6 +103,9 @@ importers:
       '@cpclaw/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@cpclaw/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
     devDependencies:
       '@types/node':
         specifier: 22.18.6

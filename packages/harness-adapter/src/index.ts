@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const SOURCE_START_TIMEOUT_MS = 180_000;
 
@@ -25,7 +26,7 @@ function isSdkModule(value: unknown): value is SdkModule {
 }
 
 async function loadSdk(): Promise<SdkModule> {
-  const loaded: unknown = await import(SDK_SPECIFIER);
+  const loaded: unknown = await import(process.env.CPCLAW_HARNESS_BUNDLE ? pathToFileURL(join(process.env.CPCLAW_HARNESS_BUNDLE, "node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js")).href : SDK_SPECIFIER);
   if (!isSdkModule(loaded)) {
     throw new Error("未能从 @deepseek-ai/dsh-sdk-client 加载 DeepSeekHarness");
   }
@@ -211,4 +212,100 @@ export async function cancelHarness(input: {
     runRejected,
     childCommandSeenAfterClose: processStillMentions(markerPatch(input.dshHome)),
   };
+}
+
+export async function runReportLoop(input: {
+  homeParent: string; platformBase: string; accessToken: string;
+  goal: string; materials: { fileName: string; paragraphs: { id: string; text: string }[] }[];
+  signal: AbortSignal; beforeCall: () => void; unknownUsage: () => void;
+  service?: { context: string; execute: (request: string) => Promise<string> };
+}): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean }> {
+  const { createServer } = await import("node:http");
+  const { randomUUID } = await import("node:crypto");
+  const { mkdtempSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const homeDir = mkdtempSync(join(input.homeParent, "harness-"));
+  const nonce = randomUUID();
+  let modelCalls = 0, toolCalls = 0;
+  let fatal: unknown;
+  let harness: SdkHarness | undefined;
+  const server = createServer((req, res) => {
+    void (async () => {
+      if (input.signal.aborted || fatal || req.headers.authorization !== `Bearer ${nonce}`) { res.writeHead(403); res.end(); return; }
+      if (input.service && req.method === "POST" && req.url === "/service") {
+        if (++toolCalls > 40) throw new Error("服务步骤超过 40 次，请分批执行");
+        let raw = ""; for await (const chunk of req) { raw += String(chunk); if (raw.length > 16000) throw new Error("服务参数超限"); }
+        const result = await input.service.execute(raw);
+        res.writeHead(200, { "content-type": "application/json" }); res.end(result); return;
+      }
+      if (req.method === "GET" && req.url === "/material") {
+        toolCalls++;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(input.materials));
+        return;
+      }
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") { res.writeHead(404); res.end(); return; }
+      let charged = false;
+      try {
+        let raw = "";
+        for await (const chunk of req) { raw += String(chunk); if (Buffer.byteLength(raw) > (input.service ? 240_000 : 16_000)) throw new Error("模型上下文超过验证上限"); }
+        const body: unknown = JSON.parse(raw);
+        if (modelCalls >= (input.service ? 24 : 8)) throw Error("模型步骤达到上限，请继续当前任务");
+        input.beforeCall(); charged = true; modelCalls++;
+        const response = await fetch(`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
+          method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": `loop-${randomUUID()}` },
+          body: JSON.stringify(body), signal: input.signal,
+        });
+        if (!response.ok) throw new Error(`远程 Harness 网关返回 ${response.status}`);
+        const text = await response.text();
+        res.writeHead(200, { "content-type": "text/event-stream" }); res.end(text);
+      } catch (error) {
+        if (charged) input.unknownUsage();
+        fatal = error;
+        res.writeHead(502); res.end();
+        void harness?.close().catch(() => undefined);
+      }
+    })().catch(() => { res.destroy(); });
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("本地工具网关没有端口");
+  const base = `http://127.0.0.1:${address.port}`;
+  writeFileSync(join(homeDir, "settings.yaml"), `llm-pi-ai:\n  providers:\n    cpclaw-real:\n      apiKeyEnv: CPCLAW_LOOP_KEY\n      api: openai-completions\n      baseURL: ${base}/v1\n      models:\n        - id: MiniMax-M3\n`);
+  const patch = markerPatch(homeDir);
+  const plugin = fileURLToPath(new URL(input.service ? "../src/service-plugin.mjs" : "../src/material-plugin.mjs", import.meta.url));
+  writeFileSync(patch, [
+    "- id: llm-deepseek\n  disabled: true",
+    "- id: persistent-bash\n  disabled: true",
+    "- id: persistent-pwsh\n  disabled: true",
+    "- id: session-log-deepseek\n  disabled: true",
+    `- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: false\n    personaPrefix: ${JSON.stringify(input.service ? input.service.context : "你是报告助手。必须先调用 read_material，再依据返回材料生成中文报告，不得编造来源。只输出报告正文，必须逐字使用这四个标题（井号后有空格）：# 任务目标、# 材料与来源、# 要点、# 未覆盖项。每段材料都必须引用 fileName#段落id。")}`,
+    `- insert:\n    - id: llm-pi-ai\n      name: '@deepseek-ai/dsh-llm-pi-ai'\n      config: ${JSON.stringify({ providers: { 'cpclaw-real': { apiKeyEnv: 'CPCLAW_LOOP_KEY', api: 'openai-completions', baseURL: base + '/v1', models: [{ id: 'MiniMax-M3' }] } } })}\n    - id: cpclaw-service\n      name: ${JSON.stringify(plugin)}`,
+  ].join("\n"));
+  const env = scrubbedEnv(homeDir);
+  delete env.CPCLAW_MOCK_LLM_KEY;
+  env.CPCLAW_LOOP_KEY = nonce; env.CPCLAW_TOOL_URL = base;
+  const abort = () => { void harness?.close().catch(() => undefined); };
+  try {
+    const sdk = await loadSdk();
+    harness = new sdk.DeepSeekHarness({ profile: "sdk-minimal", provider: "cpclaw-real", model: "MiniMax-M3", cwd: homeDir, processCwd: homeDir, dshHome: homeDir, patches: [patch], env, maxTokens: 2048, initializeTimeoutMs: SOURCE_START_TIMEOUT_MS, requestTimeoutMs: input.service ? 1_800_000 : 90_000 });
+    input.signal.addEventListener("abort", abort, { once: true });
+    input.signal.throwIfAborted();
+    let result;
+    try { result = await harness.run(input.service ? input.goal : `任务目标：${input.goal}。先调用 read_material 获取本次获准的材料，再输出带全部段落来源的四节 Markdown 报告。`); }
+    catch (error) { throw fatal ?? error; }
+    if (fatal) throw fatal;
+    input.signal.throwIfAborted();
+    if ((!input.service && (toolCalls < 1 || modelCalls < 2)) || !result.finalResponse.trim()) throw new Error("Harness 未完成工具调用和模型续答");
+    await harness.close();
+    const remains = processStillMentions(patch);
+    if (remains) throw new Error("Harness 子进程未回收");
+    const finalResponse = result.finalResponse.replace(/^#(?=任务目标|材料与来源|要点|未覆盖项)/gm, "# ");
+    return { finalResponse, toolCalls, modelCalls, childCommandSeenAfterClose: remains };
+  } finally {
+    input.signal.removeEventListener("abort", abort);
+    await harness?.close().catch(() => undefined);
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }

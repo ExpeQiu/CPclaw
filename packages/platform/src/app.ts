@@ -1,3 +1,5 @@
+import { createKnowledge, type KnowledgeResult } from './knowledge.js';
+import { createMarket, type MarketResult } from './market.js';
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -178,11 +180,14 @@ function requestIdOk(value: string): boolean {
 }
 
 export type PlatformApp = {
+  knowledge(accessToken: string, action: string, input: Record<string, unknown>): KnowledgeResult;
+  market(accessToken: string, action: string, input: Record<string, unknown>): MarketResult;
   login(input: { employeeId: string; password: string; deviceLabel: string }): LoginSuccess | PlatformFailure;
   refresh(refreshToken: string): Promise<LoginSuccess | PlatformFailure>;
   logout(accessToken: string): { ok: true } | PlatformFailure;
   listOwnSessions(accessToken: string): { ok: true; sessions: SessionView[] } | PlatformFailure;
   readOwnQuota(accessToken: string): { ok: true; quota: QuotaView } | PlatformFailure;
+  beginReport(accessToken: string, requestId: string): (ReserveSuccess & { finish: (usage: UsageView) => SettleSuccess | PlatformFailure }) | PlatformFailure;
   reserve(accessToken: string, input: { requestId: string; model?: string }): ReserveSuccess | PlatformFailure;
   settle(accessToken: string, input: { requestId: string; usage: UsageView }): SettleSuccess | PlatformFailure;
   invoke(accessToken: string, input: { requestId: string; kind: string; model?: string }): InvokeSuccess | PlatformFailure;
@@ -388,6 +393,7 @@ export type ReserveSuccess = {
   requestId: string;
   model: typeof MODEL_ID;
   reservedTokens: number;
+  replayed?: boolean;
   status: "open" | "settled" | "unknown";
   usage?: UsageView;
 };
@@ -662,7 +668,23 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
     return undefined;
   }
 
+  const knowledge = createKnowledge(db, config.now);
+  const market = createMarket(db, config.now);
   const app: PlatformApp = {
+    knowledge(accessToken, action, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) return actor;
+      const result = knowledge(actor, action, input);
+      if (result.ok && !['list','read'].includes(action)) audit(actor.orgId, actor.employeeId, `knowledge_${action}`, String(input.id ?? 'new'));
+      return result;
+    },
+    market(accessToken, action, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) return actor;
+      const result = market(actor, action, input);
+      if (result.ok && action !== "list") audit(actor.orgId, actor.employeeId, `market_${action}`, String(input.id ?? "new"));
+      return result;
+    },
     login(input) {
       if (!/^[a-z][a-z0-9-]{0,31}$/.test(input.employeeId) || !deviceLabelOk(input.deviceLabel)) {
         return failure("AUTH_REQUIRED", "账号或口令不正确");
@@ -773,6 +795,16 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         return failure("NOT_FOUND", "没有该员工的额度账户");
       }
       return { ok: true, quota };
+    },
+
+    beginReport(accessToken, requestId) {
+      const actor = principal(accessToken);
+      if (!actor.ok) return actor;
+      if (!requestIdOk(requestId)) return failure("CONFIG_INVALID", "requestId 格式不符合限制");
+      const held = withTx(db, () => hold(actor, requestId));
+      if (!held.ok) return held;
+      // 已授权的在途调用即使后来撤销会话，也必须结清并释放并发位。
+      return { ...held, finish: (usage) => withTx(db, () => closeReservation(actor, requestId, usage)) };
     },
 
     reserve(accessToken, input) {
@@ -1508,6 +1540,7 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         requestId,
         model: MODEL_ID,
         reservedTokens,
+        replayed: true,
         status,
       };
       if (status !== "open") {
