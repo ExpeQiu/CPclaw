@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync} from 'node:fs';
 import {createServiceRuntime,dreaminaService,publicServices,sanitizeServiceResult} from '../service-runtime.mjs';
 const schema=JSON.parse(readFileSync(new URL('./fixtures/dreamina-schema.json',import.meta.url)));
-function setup({approve=async()=>true,run,fetcher,service={id:'other',title:'测试服务',type:'CLI',target:'/fixed/cli'},isCurrent=()=>true}={}){
+function setup({approve=async()=>true,run,fetcher,readBinary=()=>Buffer.from('fixed'),service={id:'other',title:'测试服务',type:'CLI',target:'/fixed/cli'},isCurrent=()=>true}={}){
  const calls=[],approvals=[],dataDir=mkdtempSync('/tmp/cpclaw-runtime-');
- const runtime=createServiceRuntime({dataDir,binaryPath:x=>x,readBinary:()=>Buffer.from('fixed'),isCurrent,approve:async p=>{approvals.push(p);return approve(p);},run:async(file,args,options)=>{calls.push({file,args,options});return run?run(file,args,options):{stdout:'{"ok":true,"value":"real"}'};},fetcher});
+ const runtime=createServiceRuntime({dataDir,binaryPath:x=>x,readBinary,isCurrent,approve:async p=>{approvals.push(p);return approve(p);},run:async(file,args,options)=>{calls.push({file,args,options});return run?run(file,args,options):{stdout:'{"ok":true,"value":"real"}'};},fetcher});
  return {runtime,calls,approvals,context:{actorId:'actor-a',chatId:'chat-a',service},dataDir};
 }
 const signal=()=>new AbortController().signal;
@@ -42,4 +42,62 @@ test('MCP discovers real tools, sends initialized notification, then calls selec
 test('MCP unknown tools are never called',async()=>{const f=setup({service:{id:'saas',type:'MCP',title:'SaaS',target:'https://saas.example/mcp'},fetcher:()=>{throw Error('must not call');}});await assert.rejects(()=>f.runtime.execute(f.context,{action:'call',tool:'invented',arguments:{}},signal()),/先发现/);});
 test('service results redact secrets and signed URLs while retaining official canvas identity URLs',()=>{
  const r=sanitizeServiceResult({creditConfirmationToken:'private',access_token:'private',url:'https://media.example/image?signature=private',webUrl:'https://jimeng.jianying.com/canvas?draft_id=public',nested:{password:'private'}});assert(!JSON.stringify(r).includes('private'));assert.match(r.webUrl,/draft_id=public/);
+});
+test('one task approval covers different terminal commands, then a new task asks again',async()=>{
+ const f=setup({approve:async()=>({mode:'task',creditCeiling:0})});f.context.taskId='task-1';
+ for(const args of [['list'],['write','draft'],['status'],['download']])await f.runtime.execute(f.context,{action:'call',args},signal());
+ assert.equal(f.approvals.length,1);assert.equal(f.calls.length,4);
+ await f.runtime.execute({...f.context,taskId:'task-2'},{action:'call',args:['list']},signal());assert.equal(f.approvals.length,2);
+});
+test('Auto covers subsequent tasks; once always asks again',async()=>{
+ for(const mode of ['auto','once']){
+  const f=setup({approve:async()=>({mode,creditCeiling:0})});
+  for(const taskId of ['task-1','task-1','task-2'])await f.runtime.execute({...f.context,taskId},{action:'call',args:['list']},signal());
+  assert.equal(f.approvals.length,mode==='auto'?1:3);
+ }
+});
+test('Auto is isolated by actor, chat, service target and binary fingerprint',async()=>{
+ let binary='original';const f=setup({readBinary:()=>Buffer.from(binary),approve:async()=>({mode:'auto',creditCeiling:0})});
+ const call=context=>f.runtime.execute(context,{action:'call',args:['list']},signal());
+ await call(f.context);await call(f.context);assert.equal(f.approvals.length,1);
+ await call({...f.context,actorId:'actor-b'});await call({...f.context,chatId:'chat-b'});
+ await call({...f.context,service:{...f.context.service,target:'/changed/cli'}});
+ binary='updated';await call(f.context);assert.equal(f.approvals.length,5);
+});
+test('revoke clears grants and invalidates an outstanding approval',async()=>{
+ const f=setup({approve:async()=>({mode:'auto',creditCeiling:0})});
+ const call=()=>f.runtime.execute(f.context,{action:'call',args:['list']},signal());
+ await call();f.runtime.revoke();assert.deepEqual(f.runtime.status(f.context).grants,[]);await call();assert.equal(f.approvals.length,2);
+ const g=setup({approve:async()=>{g.runtime.revoke();return {mode:'auto',creditCeiling:0};}});
+ await assert.rejects(()=>g.runtime.execute(g.context,{action:'discover'},signal()),/撤销/);assert.equal(g.calls.length,0);
+});
+test('task credit ceiling covers discovery, terminal commands and multiple generations cumulatively',async()=>{
+ const f=jimeng({approve:async()=>({mode:'task',creditCeiling:16})});f.context.taskId='task-1';
+ await f.runtime.execute(f.context,{action:'discover'},signal());
+ await f.runtime.execute(f.context,{action:'call',args:['model','list']},signal());
+ for(const node of ['node_first','node_second'])await f.runtime.execute(f.context,{...request,args:[...request.args.slice(0,-1),node]},signal());
+ assert.equal(f.approvals.length,1);assert.equal(f.runtime.status(f.context).grants[0].reservedCredits,16);
+ // Refusing to increase the total ceiling must not submit the third node.
+ f.runtime.clear();assert.deepEqual(f.runtime.status(f.context).grants,[]);
+});
+test('exhausted budget asks to increase the cumulative cap; denial never submits',async()=>{
+ let n=0;const f=jimeng({approve:async()=>++n===1?{mode:'auto',creditCeiling:8}:false});f.context.taskId='task-1';
+ await f.runtime.execute(f.context,{action:'discover'},signal());await f.runtime.execute(f.context,request,signal());
+ await assert.rejects(()=>f.runtime.execute({...f.context,taskId:'task-2'},{...request,args:[...request.args.slice(0,-1),'node_second']},signal()),e=>e.code==='DENIED');
+ assert.equal(f.approvals.length,2);assert.equal(f.approvals[1].budgetExceeded,true);assert.equal(f.approvals[1].reservedCredits,8);
+ assert.equal(f.calls.filter(c=>c.args[3]==='node'&&c.args[4]==='run').length,1);
+});
+test('invalid or insufficient credit grant does not run a command',async()=>{
+ const f=setup({approve:async()=>({mode:'auto',creditCeiling:-1})});
+ await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover'},signal()),e=>e.code==='BUDGET_EXCEEDED');assert.equal(f.calls.length,0);
+});
+test('MCP task approval covers discovery and subsequent tool calls',async()=>{
+ const f=setup({service:{id:'saas',title:'工单系统',type:'MCP',target:'https://saas.example/mcp'},approve:async()=>({mode:'task',creditCeiling:0}),fetcher:async(_url,options)=>{
+  const body=JSON.parse(options.body);if(body.method==='notifications/initialized')return new Response(null,{status:202});
+  const result=body.method==='initialize'?{protocolVersion:'2024-11-05',serverInfo:{name:'fixture'}}:body.method==='tools/list'?{tools:[{name:'tickets_write'}]}:{content:[]};
+  return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result}),{headers:{'content-type':'application/json'}});
+ }});f.context.taskId='task-1';
+ await f.runtime.execute(f.context,{action:'discover'},signal());
+ await f.runtime.execute(f.context,{action:'call',tool:'tickets_write',arguments:{body:'first'}},signal());
+ await f.runtime.execute(f.context,{action:'call',tool:'tickets_write',arguments:{body:'second'}},signal());assert.equal(f.approvals.length,1);
 });

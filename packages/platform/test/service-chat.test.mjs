@@ -9,9 +9,10 @@ test('natural conversation routes actual SaaS work without a mode switch; ordina
  const upstream=createServer(async(req,res)=>{
   let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);modelRequests.push(body);
   const prompt=body.messages.at(-1).content;
-  const choice=prompt.includes('你好')?null:prompt.includes('写文档')?{name:'deliver_document',args:{filename:'结果说明.md',content:'# 测试文档\n明确要求撰写文档。',sourceId:''}}:{name:'request_service',args:{serviceId:selection?'':target,purpose:'查询 SaaS 待办工单'}};
+  const skillRequest=!body.tools;
+  const choice=skillRequest?null:prompt.includes('你好')?null:prompt.includes('写文档')?{name:'deliver_document',args:{filename:'结果说明.md',content:'# 测试文档\n明确要求撰写文档。',sourceId:''}}:{name:'request_service',args:{serviceId:selection?'':target,purpose:'查询 SaaS 待办工单'}};
   res.writeHead(200,{'content-type':'text/event-stream'});
-  res.end('data: '+JSON.stringify({choices:[{delta:choice?{tool_calls:[{index:0,id:'tool-1',type:'function',function:{name:choice.name,arguments:JSON.stringify(choice.args)}}]}:{content:'你好，我可以帮你操作应用。'},finish_reason:choice?'tool_calls':'stop'}],usage:{prompt_tokens:1,completion_tokens:1}})+'\n\ndata: [DONE]\n\n');
+  res.end('data: '+JSON.stringify({choices:[{delta:choice?{tool_calls:[{index:0,id:'tool-1',type:'function',function:{name:choice.name,arguments:JSON.stringify(choice.args)}}]}:{content:skillRequest?'# 可复用工作流\n## 输入参数\n任务目标。\n## 步骤\n发现能力并授权后查询。\n## 验收\n核对真实回执。':'你好，我可以帮你操作应用。'},finish_reason:choice?'tool_calls':'stop'}],usage:{prompt_tokens:1,completion_tokens:1}})+'\n\ndata: [DONE]\n\n');
  });
  await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
  const dataDir=mkdtempSync('/tmp/cpclaw-mode-platform-'),desktop=mkdtempSync('/tmp/cpclaw-mode-chat-');
@@ -32,10 +33,20 @@ test('natural conversation routes actual SaaS work without a mode switch; ordina
   assert.equal((await call('chat.configure',{chatId,mode:'chat',service:'missing'})).ok,false);
   const result=await call('chat.send',{chatId,requestId:'saas-1',text:'去工单系统查询待办工单'});assert.equal(result.state,'done');assert.equal(local,1);assert.equal(choices,0);
   const h=await call('chat.history',{chatId});assert.equal(h.execution.service,target);assert.equal(h.artifacts.length,0);assert.equal(h.serviceSteps.length,1);assert.match(h.messages.at(-1).content,/已查询/);assert(events.some(e=>e.type==='service'));assert(!events.some(e=>e.artifact));assert(!modelRequests[0].messages[0].content.includes('需要选择模式'));
+  assert.equal(h.messages.at(-1).hasServiceSteps,1);
+  const messageId=h.messages.at(-1).id;
+  const process=await call('document.create',{chatId,messageId,kind:'process'});assert(process.ok);assert.equal(process.artifact.name,'创作过程.md');
+  const processDoc=await call('document.read',{id:process.artifact.id});assert.match(processDoc.artifact.body,/tickets_list/);assert.match(processDoc.artifact.body,/待办工单/);
+  const distilled=await call('chat.distill-skill',{chatId,messageId});assert(distilled.ok,JSON.stringify(distilled));
+  const snapshot=await call('market.call',{action:'list'}),skill=snapshot.items.find(s=>s.id===distilled.skillId);assert.equal(skill.status,'draft');assert.equal(skill.source,'ai');assert.match(skill.body,/disable-model-invocation: true/);assert.match(skill.body,/version: "1.0.0"/);assert(!snapshot.installs.some(i=>i.id===skill.id));
+  const callsBefore=modelRequests.length,reused=await call('chat.distill-skill',{chatId,messageId});assert.equal(reused.skillId,skill.id);assert.equal(modelRequests.length,callsBefore);
+  assert.equal((await chat.dispatch('chat.distill-skill','employee-b',{chatId,messageId})).ok,false);
   assert.equal((await call('chat.history',{chatId:other.chatId})).execution.service,'');
-  await call('chat.send',{chatId,requestId:'chat-2',text:'你好'});assert.equal(local,1,'普通对话不能因为已绑定服务就强制执行');
-  const doc=await call('chat.send',{chatId,requestId:'doc-3',text:'请写文档'});assert.equal(doc.state,'done');assert(doc.artifact);assert.equal(local,1);
-  selection=true;await call('chat.send',{chatId:other.chatId,requestId:'choose-4',text:'查询待办工单'});assert.equal(choices,1);assert.equal(local,2);
+  await call('chat.send',{chatId:other.chatId,requestId:'same-goal-skill',text:'去工单系统查询待办工单'});const sameGoal=await call('chat.history',{chatId:other.chatId});const secondSkill=await call('chat.distill-skill',{chatId:other.chatId,messageId:sameGoal.messages.at(-1).id});assert(secondSkill.ok,JSON.stringify(secondSkill));const after=await call('market.call',{action:'list'});assert.notEqual(after.items.find(s=>s.id===secondSkill.skillId).title,skill.title);
+
+  await call('chat.send',{chatId,requestId:'chat-2',text:'你好'});assert.equal(local,2,'普通对话不能因为已绑定服务就强制执行');
+  const doc=await call('chat.send',{chatId,requestId:'doc-3',text:'请写文档'});assert.equal(doc.state,'done');assert(doc.artifact);assert.equal(local,2);
+  selection=true;await call('chat.send',{chatId:other.chatId,requestId:'choose-4',text:'查询待办工单'});assert.equal(choices,1);assert.equal(local,3);
  }finally{chat.stop();await server.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
 });
 test('Harness gateway forwards service tool results, rejects arbitrary tools and unauthenticated requests',async()=>{

@@ -45,6 +45,7 @@ function refreshElapsedLabels(){
 }
 setInterval(refreshElapsedLabels,1000);
 function chatDisplayText(message){
+  if(message.hasServiceSteps)return message.content;
   const artifact=chatArtifacts.find(a=>a.message===message.id);
   if(artifact&&message.content.length>400)return `已完成《${artifact.name}》。完整内容见右侧文档预览。`;
   return message.content;
@@ -97,8 +98,18 @@ function renderChat() {
       if(message.artifactError){const warning=document.createElement("p");warning.textContent=`文档未保存：${message.artifactError}`;article.append(warning);}
       if (message.content) {
         const copy = document.createElement("button"); copy.className = "copy-message"; copy.textContent = "复制";
-        if(message.state==='done'&&!chatArtifacts.some(a=>a.message===message.id))article.append(documentButton('保存为 .md',async()=>{const actor=chatAccount,chatId=currentChatId;const result=await chatCall('document.create',{chatId,messageId:message.id});if(actor!==chatAccount||chatId!==currentChatId)return;if(!result.ok)throw Error(result.message);addArtifact(result.artifact);renderChat();await showDocument(result.artifact.id);}));
+        if(message.state==='done'&&!chatArtifacts.some(a=>a.message===message.id))article.append(documentButton(message.hasServiceSteps?'保存创作过程.md':'保存为 .md',async()=>{const actor=chatAccount,chatId=currentChatId;const result=await chatCall('document.create',{chatId,messageId:message.id,...(message.hasServiceSteps?{kind:'process'}:{})});if(actor!==chatAccount||chatId!==currentChatId)return;if(!result.ok)throw Error(result.message);addArtifact(result.artifact);renderChat();await showDocument(result.artifact.id);}));
         copy.addEventListener("click", async () => { try { await navigator.clipboard.writeText(chatDisplayText(message)); copy.textContent = "已复制"; } catch { setStatus("复制失败，请手动选择文本。"); } }); article.append(copy);
+        if(message.state==='done'){
+          const distill=documentButton('提炼成Skill',async()=>{
+            const actor=chatAccount,chatId=currentChatId;setStatus('正在提炼 Skill 草稿…');
+            const result=await chatCall('chat.distill-skill',{chatId,messageId:message.id});
+            if(actor!==chatAccount||chatId!==currentChatId)return;
+            if(!result.ok)throw Error(result.message);
+            await window.openSkillDraft(result.skillId);
+            setStatus(result.mode==='mock'?'已生成 Mock Skill 草稿，请编辑后保存':'Skill 草稿已保存，审阅后可个人使用或提交审核。');
+          });distill.className='distill-skill';distill.disabled=Boolean(runningChatId);article.append(distill);
+        }
       }
     }
     list.append(article);
@@ -189,6 +200,7 @@ window.cpclaw.onChatEvent(event => {
     if(event.startedAt)message.startedAt=event.startedAt;
     if(event.finishedAt)message.finishedAt=event.finishedAt;
     if(event.type==='progress'){message.activities??=[];const step=message.activities.find(s=>s.step===event.step);if(step)Object.assign(step,{label:event.label,state:event.stepState});else message.activities.push({step:event.step,label:event.label,state:event.stepState});}
+    if(event.type==='service'&&event.record)message.hasServiceSteps=true;
     if(event.type==='knowledge'){message.knowledgeSources=event.sources;}
     if(event.type==='retrieval'){message.sources=event.sources;message.retrievalStatus=event.retrievalStatus;}
     if (event.type === "delta") message.content = event.content;

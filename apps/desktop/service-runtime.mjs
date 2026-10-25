@@ -35,12 +35,37 @@ function commandFacts(schema) {
 export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () => {}, run = runFile, fetcher = fetch, binaryPath = realpathSync, readBinary = readFileSync } = {}) {
   const sessions = new Map();
   const attempted = new Map();
+  const grants = new Map();
+  let revision = 0;
+  const scopeKey = (context, identity) => JSON.stringify([context.actorId, context.chatId, context.service.id, context.service.type, context.service.target, identity]);
+  function status(context) {
+    return { grants: [...grants.values()].filter(g => g.actorId === context.actorId && g.chatId === context.chatId).map(({service, mode, creditCeiling, reservedCredits}) => ({service, mode, creditCeiling, reservedCredits})) };
+  }
   function check(context, signal) { signal.throwIfAborted(); if (!isCurrent(context)) throw Error('会话或账号已变化，已停止后续操作'); }
-  async function consent(context, signal, details) {
+  async function consent(context, signal, details, identity, cost = 0) {
     check(context,signal);
-    const accepted = await approve({ ...details, signal });
+    const startRevision = revision, key = scopeKey(context, identity);
+    const existing = grants.get(key);
+    const grant = existing && (existing.mode === 'auto' || existing.taskId === context.taskId) ? existing : null;
+    if (existing && !grant) grants.delete(key);
+    if (grant && cost <= grant.creditCeiling - grant.reservedCredits) {
+      grant.reservedCredits += cost;
+      notify({type:'permission', ...status(context)});
+      return;
+    }
+    const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask: Boolean(context.taskId), canAuthorizeAuto: Boolean(context.actorId && context.chatId), creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
     check(context,signal);
-    if (!accepted) throw Object.assign(Error('用户拒绝授权，未执行该操作。'), { code:'DENIED' });
+    if (revision !== startRevision) throw Error('授权已撤销，已停止后续操作');
+    if (accepted === true) return; // 兼容单次授权调用方。
+    if (!accepted || !['once','task','auto'].includes(accepted.mode)) throw Object.assign(Error('用户拒绝授权，未执行该操作。'), { code:'DENIED' });
+    const reservedCredits = grant?.reservedCredits ?? 0;
+    const creditCeiling = accepted.creditCeiling ?? cost;
+    if (!Number.isSafeInteger(creditCeiling) || creditCeiling < (accepted.mode === 'once' ? cost : reservedCredits + cost)) throw Object.assign(Error('积分上限不足，未执行该操作。'), {code:'BUDGET_EXCEEDED'});
+    if (accepted.mode !== 'once') {
+      if (!context.actorId || !context.chatId || (accepted.mode === 'task' && !context.taskId)) throw Error('缺少任务或对话，无法保存授权');
+      grants.set(key, {actorId:context.actorId, chatId:context.chatId, service:context.service.title, taskId:context.taskId, mode:accepted.mode, creditCeiling, reservedCredits:reservedCredits + cost});
+      notify({type:'permission', ...status(context)});
+    }
   }
   async function execute(context, request, signal) {
     const { service } = context;
@@ -51,6 +76,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if (!isAbsolute(service.target) || /[\r\n\0]/.test(service.target)) throw Error('CLI 需要已配置程序的绝对路径');
     const executable = binaryPath(service.target), cwd = homedir();
     const fingerprint = createHash('sha256').update(readBinary(executable)).digest('hex');
+    const identity = JSON.stringify([executable, fingerprint]);
     const assertBinary = () => { check(context,signal); if (fingerprint !== createHash('sha256').update(readBinary(executable)).digest('hex')) throw Error('CLI 程序已变化，请重新授权'); };
     const builtin = service.id === 'dreamina' && service.builtin === true;
     async function call(args, timeout=30_000) {
@@ -66,12 +92,12 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       try { return JSON.parse(stdout); } catch { return {ok:true,output:stdout.slice(0,48000)}; }
     }
     async function authorized(args, purpose, before=()=>{}) {
-      await consent(context,signal,{ title:'本机命令执行授权', message:`允许 ${service.title} 执行此操作吗？`, detail:`用途：${purpose}\n执行位置：当前电脑\n工作目录：${cwd}\n程序：${executable}\n参数：${JSON.stringify(builtin?['--non-interactive','--format','json',...args]:args)}\n\n授权方式：仅本次操作。关闭或 Escape 视为拒绝。` });
+      await consent(context,signal,{ title:'工具执行授权', message:`允许 ${service.title} 完成当前任务吗？`, detail:`用途：${purpose}\n执行位置：当前电脑\n工作目录：${cwd}\n程序：${executable}\n当前指令参数：${JSON.stringify(builtin?['--non-interactive','--format','json',...args]:args)}\n\n任务或 Auto 授权覆盖此程序的后续指令（包括读取和写入）；实际行为由该程序决定。` }, identity);
       before();return call(args);
     }
     if (request.action === 'discover') {
       if (!builtin) return sanitizeServiceResult(await authorized(['--help'],'读取此服务支持的命令与参数'));
-      await consent(context,signal,{title:'本机命令执行授权',message:'允许读取即梦 CLI 的真实能力与登录状态吗？',detail:`程序：${executable}\n工作目录：${cwd}\n参数前缀：--non-interactive --format json\n依次执行：version、schema、auth status、auth account、canvas current\n只读取状态，不提交生成任务。授权方式：仅本次发现。`});
+      await consent(context,signal,{title:'工具执行授权',message:'授权即梦画布完成当前任务',detail:`程序：${executable}\n工作目录：${cwd}\n参数前缀：--non-interactive --format json\n首先读取：version、schema、auth status、auth account、canvas current\n任务或 Auto 授权还覆盖后续草稿保存、报价、生成、状态查询与下载；消耗积分的生成受累计上限约束。`}, identity);
       const version=await call(['version']), schema=await call(['schema']), auth=await call(['auth','status']);
       const commands=commandFacts(schema.data??{});
       sessions.set(JSON.stringify([context.actorId,context.chatId,service.id]),{commands});
@@ -111,8 +137,8 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(path==='node run') {
       const nodeIds=ids('--node-id');
       if(!nodeIds.length||new Set(nodeIds).size!==nodeIds.length)throw Error('请提供不重复的节点 ID');
-      const identity=JSON.stringify([context.actorId,context.chatId,projectId,nodeIds]);
-      const prior=attempted.get(identity)??readAttempt(identity);
+      const jobIdentity=JSON.stringify([context.actorId,context.chatId,projectId,nodeIds]);
+      const prior=attempted.get(jobIdentity)??readAttempt(jobIdentity);
       if(prior) return {ok:false,requiredAction:'resume',message:'这些节点已有提交记录。请用原 submitId 查询 operation status/wait；不自动重跑。',items:prior.items};
       const pairs=nodeIds.flatMap(id=>['--node-id',id]);
       const scope=['--project-id',projectId,...pairs];
@@ -120,13 +146,13 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       const q=quote.data;
       if(!quote.ok||!Number.isSafeInteger(q?.totalMaxCredits)||q.totalMaxCredits<0||q.confirmable===false||!q.items?.length||q.items.some(i=>i.error||!Number.isSafeInteger(i.maxCredits)))return sanitizeServiceResult({ok:false,quote,message:'报价不完整，未提交生成。'});
       const amount=q.totalMaxCredits;
-      await consent(context,signal,{title:'生成积分授权',message:`允许本次生成，积分上限 ${amount} 吗？`,detail:`服务：${service.title}\n画布：${projectId}\n节点：${nodeIds.join('、')}\n逐项报价：${JSON.stringify(q.items)}\n总上限：${amount} 积分\n程序：${executable}\n将依次执行：node confirm ${JSON.stringify(scope)} --credit-ceiling ${amount}；node run 同一画布和节点（由宿主生成稳定提交编号）。\n授权仅覆盖本次生成；最新报价超过上限时停止。关闭或 Escape 不会提交。`});
+      await consent(context,signal,{title:'生成积分授权',message:`本次生成报价上限 ${amount} 积分`,detail:`服务：${service.title}\n画布：${projectId}\n节点：${nodeIds.join('、')}\n逐项报价：${JSON.stringify(q.items)}\n总上限：${amount} 积分\n程序：${executable}\n将依次执行：node confirm ${JSON.stringify(scope)} --credit-ceiling ${amount}；node run 同一画布和节点（由宿主生成稳定提交编号）。\n积分按每次报价上限累计预留；提交结果不确定时仍占用额度，不自动重跑。`}, identity, amount);
       const confirmed=await call(['node','confirm',...scope,'--credit-ceiling',String(amount)]);
       const token=confirmed.data?.creditConfirmationToken;
       if(!confirmed.ok||typeof token!=='string'||!token)return sanitizeServiceResult({ok:false,confirmation:confirmed,message:'积分批准未成功，未提交生成。'});
       const submitIds=nodeIds.map(()=>randomUUID());
       const record={projectId,items:nodeIds.map((nodeId,i)=>({nodeId,submitId:submitIds[i]}))};
-      attempted.set(identity,record);writeAttempt(identity,record);
+      attempted.set(jobIdentity,record);writeAttempt(jobIdentity,record);
       actual=['node','run',...scope,...submitIds.flatMap(id=>['--submit-id',id]),'--credit-token',token];
       // token 始终留在本机内存，不进入回执、模型或持久状态。
       let result;try{result=await call(actual);}catch(error){error.recovery=record;throw error;}
@@ -156,7 +182,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(url.username||url.password||url.search||url.hash||!['https:','http:'].includes(url.protocol))throw Error('服务地址无效');
     const key=JSON.stringify([context.actorId,context.chatId,service.id,service.target]);
     let session=sessions.get(key);
-    await consent(context,signal,{title:'服务调用授权',message:`允许调用 ${service.title} 吗？`,detail:`服务地址：${url.href}\n操作：${request.action==='discover'?'初始化并读取工具目录':request.tool}\n参数：${JSON.stringify(request.arguments??{})}\n数据将发送给该服务，回执会交给 CPclaw 的模型服务以完成当前任务。授权方式：仅本次操作。`});
+    await consent(context,signal,{title:'工具执行授权',message:`允许 ${service.title} 完成当前任务吗？`,detail:`服务地址：${url.href}\n当前操作：${request.action==='discover'?'初始化并读取工具目录':request.tool}\n参数：${JSON.stringify(request.arguments??{})}\n任务或 Auto 授权覆盖此服务的后续工具调用（包括读取和写入）。数据将发送给该服务，回执会交给 CPclaw 的模型服务以完成当前任务。服务自身的计费不受即梦积分上限约束。`}, url.href);
     async function rpc(method,params,notification=false) {
       check(context,signal);
       const response=await fetcher(url,{method:'POST',redirect:'error',headers:{'content-type':'application/json',accept:'application/json, text/event-stream',...(session?.id?{'Mcp-Session-Id':session.id}:{}),...(session?.version?{'MCP-Protocol-Version':session.version}:{})},body:JSON.stringify({jsonrpc:'2.0',...(notification?{}:{id:randomUUID()}),method,params}),signal:AbortSignal.any([signal,AbortSignal.timeout(60_000)])});
@@ -181,5 +207,5 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(!session?.tools?.some(t=>t.name===request.tool)||!request.arguments||typeof request.arguments!=='object'||Array.isArray(request.arguments))throw Error('请先发现此服务的真实工具，并提交对象参数');
     const result=await rpc('tools/call',{name:request.tool,arguments:request.arguments});return sanitizeServiceResult({ok:result.isError!==true,...result});
   }
-  return {execute,clear(){sessions.clear();}};
+  return {execute, status, revoke(){revision++;grants.clear();}, clear(){revision++;grants.clear();sessions.clear();}};
 }

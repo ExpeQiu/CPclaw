@@ -12,10 +12,28 @@ const home = 'https://jimeng.jianying.com/';
 export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = () => null, approvalDialog = dialog.showMessageBox, service = createExtensionService() }) {
   let context = { actorId: null, chatId: '' };
   const effectiveContext = () => ({ actorId: getActor(), chatId: context.actorId === getActor() ? context.chatId : '' });
-  let view, connectorAuthorization, executionPending = false, serviceController, selectionPending;
+  let view, connectorAuthorization, executionPending = false, serviceController, selectionPending, approvalPending;
+  const permissionStatus = () => ({...authorization.status(), ...runtime.status(effectiveContext())});
+  async function approveService({signal,...options}) {
+    hide();
+    const win = getWindow();
+    if (!win || win.isDestroyed()) return false;
+    return new Promise(resolve => {
+      const id = createHash('sha256').update(String(Date.now())+Math.random()).digest('hex');
+      const settle = value => {
+        signal.removeEventListener('abort', abort);win.removeListener('closed', abort);
+        approvalPending = undefined;send({state:'approval-closed',approvalId:id});resolve(value);
+      };
+      const abort = () => settle(false);
+      approvalPending = {id,settle};
+      signal.addEventListener('abort',abort,{once:true});win.once('closed',abort);
+      if (signal.aborted) { abort();return; }
+      send({state:'approval',approvalId:id,...options});
+    });
+  }
   const runtime=createServiceRuntime({dataDir,isCurrent:c=>c.actorId===effectiveContext().actorId&&c.chatId===effectiveContext().chatId,
-    approve:async({signal,...options})=>{hide();const r=await approvalDialog(getWindow(),{type:'question',buttons:['拒绝','授权并执行'],defaultId:0,cancelId:0,noLink:true,...options,signal});return r.response===1;},
-    notify:value=>{if(value.type==='authorization'){try{const u=new URL(value.url);if(u.protocol==='https:'&&!u.username&&!u.password&&(/(^|\.)jianying\.com$/.test(u.hostname)||/(^|\.)bytedance\.com$/.test(u.hostname)))void shell.openExternal(u.href).catch(()=>{});}catch{}}send({state:'result',...value});}});
+    approve:approveService,
+    notify:value=>{if(value.type==='permission'){send({state:'permission',...permissionStatus()});return;}if(value.type==='authorization'){try{const u=new URL(value.url);if(u.protocol==='https:'&&!u.username&&!u.password&&(/(^|\.)jianying\.com$/.test(u.hostname)||/(^|\.)bytedance\.com$/.test(u.hostname)))void shell.openExternal(u.href).catch(()=>{});}catch{}}send({state:'result',...value});}});
   async function executeService(request,signal){
     if(request.actorId!==effectiveContext().actorId||!request.chatId||request.chatId!==effectiveContext().chatId)return {ok:false,code:'CONTEXT_CHANGED',message:'请返回发起操作的对话后继续。'};
     if(executionPending)return {ok:false,code:'BUSY',message:'已有服务操作正在执行。'};
@@ -57,10 +75,16 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
   });
   function setContext(actorId, chatId = '') {
     const next = { actorId, chatId };
-    if (JSON.stringify(context) !== JSON.stringify(next)) { context = next; serviceController?.abort(); runtime.clear(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...authorization.status() }); }
+    if (JSON.stringify(context) !== JSON.stringify(next)) { context = next; serviceController?.abort(); runtime.clear(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); }
   }
   ipcMain.handle('extension.action', async (event, input) => {
     if (!trusted(event)) return { ok: false, message: '无效的应用请求。' };
+    if (input?.action === 'resolve-approval') {
+      if (!approvalPending || input.approvalId !== approvalPending.id) return {ok:false};
+      const choice=input.choice;
+      if (choice !== false && (!choice || !['once','task','auto'].includes(choice.mode) || !Number.isSafeInteger(choice.creditCeiling) || choice.creditCeiling < 0)) return {ok:false};
+      approvalPending.settle(choice === false ? false : {mode:choice.mode,creditCeiling:choice.creditCeiling});return {ok:true};
+    }
     if(input?.action==='choose-service'){
       const pending=selectionPending;
       if(!pending||input.selectionId!==pending.id||!pending.ids.includes(input.serviceId))return {ok:false};
@@ -72,12 +96,12 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     if (input?.action === 'inspect') {
       if (executionPending) return { ok: false, state: 'busy', message: '已有本机执行请求正在等待授权或执行。' };
       executionPending = true;
-      try { const result = await authorization.run(); send({ state: 'permission', ...authorization.status() }); return result; }
+      try { const result = await authorization.run(); send({ state: 'permission', ...permissionStatus() }); return result; }
       finally { executionPending = false; }
     }
     if (input?.action === 'clear-context') { setContext(getActor(), ''); return { ok: true }; }
-    if (input?.action === 'permission-status') return { ok: true, ...authorization.status() };
-    if (input?.action === 'revoke-permission') { serviceController?.abort(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...authorization.status() }); return { ok: true, message: '已撤销本次对话的只读检查授权。' }; }
+    if (input?.action === 'permission-status') return { ok: true, ...permissionStatus() };
+    if (input?.action === 'revoke-permission') { serviceController?.abort(); runtime.revoke(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); return { ok: true, message: '已撤销本次对话的工具与终端执行授权，后续操作会重新申请。' }; }
     if(input?.action==='result-image'){
       try{
         const c=effectiveContext();if(!c.actorId||!c.chatId||typeof input.path!=='string')return {ok:false};

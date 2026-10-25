@@ -1,5 +1,5 @@
 // Electron 端到端验证：真实 IPC/Node 工作进程 + 隔离 Mock 平台，不连接生产服务。
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ if (process.argv.includes('--platform-child')) {
     }
     const base = remoteBase || `http://127.0.0.1:${port}`;
     const w = new BrowserWindow({ width: 1280, height: 860, show: false, webPreferences: { preload: join(desktopDir,'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    ipcMain.handle('extension.action',()=>({ok:true,remembered:false}));
     const errors=[];
     w.webContents.on('console-message', (_e,level,message) => { if(level===3) { errors.push(message); console.error(message); } });
     worker = createWorkspaceClient(dataDir, desktopDir, { onEvent:event=>w.webContents.send('chat.event',event) });
@@ -54,6 +55,23 @@ if (process.argv.includes('--platform-child')) {
     }
     await w.loadFile(join(desktopDir,'renderer/index.html')); await login('employee-a');
 
+    // 隔离回归数据：验证消息底部保存过程与提炼草稿，不连接真实即梦。
+    await js(`byId('close-panel').click();byId('note').value='本地回归样例：整理图片创作流程';byId('chat-send').click()`);
+    await until(`chatMessages.at(-1)?.state==='done'&&!runningChatId&&!byId('chat-send').dataset.busy`);
+    const assistantId=await js('chatMessages.at(-1).id');
+    const receipt={step:1,service:{id:'dreamina',title:'即梦画布',type:'CLI'},request:{action:'call',args:['model','list','--type','image'],purpose:'读取创作模型目录（本地回归夹具）'},result:{ok:true,data:{items:[]}}};
+    const seeded=spawnSync(process.env.CPCLAW_NODE_BINARY||'node',['--input-type=module','-e',"import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(process.argv[1]);db.prepare('INSERT INTO chat_service_steps VALUES(?,?,?)').run(process.argv[2],1,process.argv[3]);db.close();",join(dataDir,'chat.sqlite'),assistantId,JSON.stringify(receipt)],{encoding:'utf8'});if(seeded.status!==0)throw Error(seeded.stderr);
+    await js('selectChat(currentChatId)');await until('chatMessages.at(-1)?.hasServiceSteps');
+    if(!await js(`[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='保存创作过程.md')&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='提炼成Skill')`))throw Error('缺少创作过程/Skill 操作');
+    const skillShots=join(root,'docs/verification/skill020');mkdirSync(skillShots,{recursive:true});
+    writeFileSync(join(skillShots,'message-actions.png'),(await w.webContents.capturePage()).toPNG());
+    await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.textContent==='保存创作过程.md').click()`);
+    await until(`chatArtifacts.some(a=>a.name==='创作过程.md')&&document.getElementById('document-preview').textContent.includes('model')`);
+    await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.textContent==='提炼成Skill').click()`);
+    await until(`!marketOverlay.hidden&&marketFrame.contentDocument?.getElementById('editor')?.hidden===false&&marketFrame.contentDocument.getElementById('body').value.includes('disable-model-invocation: true')`);
+    if(!await js(`marketFrame.contentDocument.getElementById('message').textContent.includes('尚未发布或启用')`))throw Error('草稿状态不明确');
+    writeFileSync(join(skillShots,'skill-draft.png'),(await w.webContents.capturePage()).toPNG());
+    await js('marketClose.click()');
     await js(`byId('rail-market').click()`);
     await until(`!marketOverlay.hidden && marketFrame.contentDocument?.getElementById('list')?.textContent.includes('暂无')`);
     const frame = async code => { try { return await js(`marketFrame.contentWindow.eval(${JSON.stringify(code)})`); } catch(e) { console.error("FAILED UI STEP", JSON.stringify(code)); throw e; } };
@@ -81,7 +99,7 @@ if (process.argv.includes('--platform-child')) {
     await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='用于新聊天').click()`);
     await until(`marketOverlay.hidden && byId('task-title').textContent==='前台验证技能'`);
     if(errors.length)throw Error(errors.join('\n'));
-    console.log(JSON.stringify({marketEmpty:true,iframeIPC:true,create:true,personal:true,submit:true,adminReview:true,install:true,useInChat:true,screenshots}));
+    console.log(JSON.stringify({saveCreationProcess:true,distillSkill:true,draftEditor:true,marketEmpty:true,iframeIPC:true,create:true,personal:true,submit:true,adminReview:true,install:true,useInChat:true,screenshots}));
     worker.stop();platform?.kill();app.exit(0);
   }catch(error){console.error(error);worker?.stop();platform?.kill();app.exit(1);}
   });

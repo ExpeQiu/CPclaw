@@ -1,16 +1,17 @@
 (() => {
   if (!window.cpclaw.extensionAction) return;
   const el=id=>document.getElementById(id),action=input=>window.cpclaw.extensionAction(input);
-  const panel=el('panel-extensions'),inspector=el('inspector'),slot=el('extension-native-slot'),picker=el('extension-picker');
+  const panel=el('panel-extensions'),inspector=el('inspector'),slot=el('extension-native-slot'),picker=el('extension-picker'),approval=el('service-approval');
+  let approvalRequest;
   let native=false,workspace=false,checking=false,frame,selected={id:'dreamina',title:'即梦画布',type:'CLI'},activeService=selected;
   let services=[selected], records=[],canvasUrl='',resultsGeneration=0,selectionId='';
   const feedback=text=>{el('extension-feedback').textContent=text??'';el('extension-panel-feedback').textContent=text??'';};
-  function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
+  function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&!approval.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
   function configure(){
     el('extension-detail-title').textContent=selected.title;
     el('extension-detail-title').nextElementSibling.textContent=selected.id==='dreamina'?'图片、视频、音频与画布 · dreamina-canvas CLI':`${selected.type} · 按服务实际工具执行`;
     el('extension-check').hidden=selected.id!=='dreamina';
-    el('extension-summary').textContent=selected.id==='dreamina'?'可读取 CLI 状态，创作能力由实际版本提供。':'执行任务前会发现真实命令或 MCP 工具；每次调用均需授权。';
+    el('extension-summary').textContent=selected.id==='dreamina'?'可读取 CLI 状态，创作能力由实际版本提供。支持任务统一授权与 Auto。':'执行任务前会发现真实命令或 MCP 工具，支持任务统一授权与 Auto。';
     document.querySelectorAll('.extension-service-item').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.service===selected.id)));
   }
   function select(service){selected=service;configure();}
@@ -41,7 +42,7 @@
     activeService=services.find(s=>s.id===service.id)??service;workspace=true;
     el('extension-workspace').hidden=false;el('extension-view-controls').hidden=false;
     el('service-panel-name').textContent=activeService.title;el('extension-native').hidden=activeService.id!=='dreamina';el('extension-recheck').hidden=activeService.id!=='dreamina';
-    el('extension-cli-status').textContent='在左侧描述任务，执行前会显示授权弹窗。';
+    el('extension-cli-status').textContent='在左侧描述任务，可一次授权完整操作或启用 Auto。';
     openPanel('extensions');void mode(false);
   };
   window.executionServiceName=id=>services.find(s=>s.id===id)?.title??(id==='dreamina'?'即梦画布':'');
@@ -63,8 +64,23 @@
   el('extension-native').onclick=()=>void mode(true);el('extension-cli').onclick=()=>void mode(false);
   el('extension-refresh').onclick=()=>native?void mode(true):void renderResults();
   el('extension-revoke').onclick=async()=>{const r=await action({action:'revoke-permission'});feedback(r.message);};
-  const permission=r=>{el('extension-permission').textContent=r.remembered?'本次对话已允许即梦只读检查':'命令与服务调用均需执行授权';el('extension-revoke').hidden=!r.remembered;};
+  const permission=r=>{const grants=r.grants??[];el('extension-permission').textContent=grants.length?grants.map(g=>`${g.service} · ${g.mode==='auto'?'Auto（本次对话）':'本次任务已授权'}${g.creditCeiling?` · 积分已预留 ${g.reservedCredits}/${g.creditCeiling}`:''}`).join('；'):r.remembered?'本次对话已允许即梦只读检查':'支持一次授权整个任务，或 Auto 自动执行';el('extension-revoke').hidden=!r.remembered&&!grants.length;};
   void action({action:'permission-status'}).then(permission).catch(()=>{});
+  function approvalScope(){
+    const mode=el('service-approval-mode').value;
+    el('service-approval-scope').textContent=mode==='auto'?'自动执行本次对话中该服务的后续工具与终端指令，包含读取、写入、查询和下载。':mode==='task'?'覆盖当前这次 AI 任务中该服务的全部工具与终端指令，任务内不再逐条确认。':'只执行详情中列出的当前操作，后续操作再次询问。';
+    const spent=mode==='once'?0:approvalRequest?.reservedCredits??0;
+    el('service-approval-budget').min=String(spent+(approvalRequest?.requiredCredits??0));
+  }
+  async function resolveApproval(choice){
+    if(!approvalRequest)return;
+    const id=approvalRequest.approvalId;approvalRequest=undefined;
+    approval.close();sync();await action({action:'resolve-approval',approvalId:id,choice});
+  }
+  el('service-approval-mode').onchange=approvalScope;
+  el('service-approval-form').onsubmit=e=>{e.preventDefault();if(!e.target.reportValidity())return;void resolveApproval({mode:el('service-approval-mode').value,creditCeiling:Number(el('service-approval-budget').value)});};
+  el('service-approval-deny').onclick=()=>void resolveApproval(false);
+  approval.addEventListener('cancel',e=>{e.preventDefault();void resolveApproval(false);});
   function urls(value,result=[]){if(Array.isArray(value))for(const v of value)urls(v,result);else if(value&&typeof value==='object'){for(const [k,v]of Object.entries(value)){if(k==='webUrl'&&typeof v==='string')result.push(v);else urls(v,result);}}return result;}
   function imageNode(dataUrl,path){const card=document.createElement('div');card.className='service-result';const title=document.createElement('strong');title.textContent='生成图片 · 已下载到本地';const img=document.createElement('img');img.src=dataUrl;img.alt='服务实际生成并下载的图片';const location=document.createElement('p');location.textContent=path;card.append(title,img,location);return card;}
   async function renderResults(){
@@ -87,6 +103,20 @@
   window.showServiceEvent=event=>{chatExecution={mode:'chat',service:event.service.id};renderComposer();if(event.record)records.push(event.record);window.showServiceWorkspace(event.service);void renderResults();};
   el('close-panel').addEventListener('click',sync);
   window.cpclaw.onExtensionEvent(event=>{
+    if(event.state==='approval'){
+      approvalRequest=event;
+      el('service-approval-title').textContent=event.budgetExceeded?'调整工具执行授权':event.title;
+      el('service-approval-message').textContent=event.budgetExceeded?'当前累计积分额度不足。可提高上限后继续，或拒绝停止。':event.message;
+      el('service-approval-detail').textContent=event.detail;
+      el('service-approval-mode').querySelector('[value="task"]').disabled=!event.canAuthorizeTask;
+      el('service-approval-mode').querySelector('[value="auto"]').disabled=!event.canAuthorizeAuto;
+      el('service-approval-mode').value=event.mode==='auto'&&event.canAuthorizeAuto?'auto':event.canAuthorizeTask?'task':event.canAuthorizeAuto?'auto':'once';
+      el('service-approval-budget-label').hidden=!event.creditManaged;
+      el('service-approval-budget').value=String(Math.max(event.creditCeiling??0,(event.reservedCredits??0)+(event.requiredCredits??0)));
+      el('service-approval-budget-note').textContent=event.creditManaged?`本次报价上限 ${event.requiredCredits??0} 积分，已累计预留 ${event.reservedCredits??0} 积分。可一次设定完整任务的总额度；填 0 仅允许不消耗积分的操作。`:'此授权覆盖该服务的工具与终端指令；如服务另行收费，按服务自身规则计费。';
+      approvalScope();if(!approval.open)approval.showModal();sync();return;
+    }
+    if(event.state==='approval-closed'){if(approvalRequest?.approvalId===event.approvalId){approvalRequest=undefined;approval.close();sync();}return;}
     if(event.state==='choose-service'){
       services=event.services;selectionId=event.selectionId;
       if(!picker.open)picker.showModal();
