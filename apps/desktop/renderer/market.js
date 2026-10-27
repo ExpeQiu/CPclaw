@@ -6,6 +6,7 @@ marketClose.onclick=()=>{marketOverlay.hidden=true;marketReturnFocus?.focus();};
 const marketFrame=document.createElement('iframe');marketFrame.title='技能市场';marketFrame.style.cssText='border:0;flex:1;width:100%';marketOverlay.append(marketClose,marketFrame);document.body.append(marketOverlay);
 function marketContext(){marketFrame.contentWindow?.postMessage({type:'market-context',chatId:chats.some(c=>c.id===currentChatId)?currentChatId:'',projectId:projects.some(p=>p.id===currentProjectId)?currentProjectId:''},'*');}
 window.openSkillDraft=async skillId=>{
+  window.closeKnowledgeOverlay?.();
   marketReturnFocus=document.activeElement;
   if(!marketLoaded||marketActor!==chatAccount){const r=await window.cpclaw.workspace({method:'market.page',input:{}});if(!r.ok)throw Error(r.message);marketActor=chatAccount;marketLoaded=true;await new Promise(resolve=>{marketFrame.addEventListener('load',resolve,{once:true});marketFrame.srcdoc=r.html;});}
   marketOverlay.hidden=false;marketContext();

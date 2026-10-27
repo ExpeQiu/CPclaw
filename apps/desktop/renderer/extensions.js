@@ -3,10 +3,22 @@
   const el=id=>document.getElementById(id),action=input=>window.cpclaw.extensionAction(input);
   const panel=el('panel-extensions'),inspector=el('inspector'),slot=el('extension-native-slot'),picker=el('extension-picker'),approval=el('service-approval');
   let approvalRequest;
-  let native=false,workspace=false,checking=false,frame,selected={id:'dreamina',title:'即梦画布',type:'CLI'},activeService=selected;
-  let services=[selected], records=[],canvasUrl='',pageUrl='',resultsGeneration=0,selectionId='';
+  let native=false,workspace=false,checking=false,frame;
+  let selected={id:'dreamina',title:'即梦画布',type:'CLI',kind:'cli'},activeService=selected;
+  let services=[selected], records=[],canvasUrl='',pageUrl='',resultsGeneration=0,selectionId='',activeKind='computer-use';
   const feedback=text=>{el('extension-feedback').textContent=text??'';el('extension-panel-feedback').textContent=text??'';};
   const DREAMINA_ORIGIN='https://jimeng.jianying.com';
+  const KIND_BLURB={
+    'computer-use':'直接控制网页页面；点击与输入走可访问树，登录与支付需请示。',
+    'app-driver':'选定本地应用或项目文件夹，通过代码层读写与终端驱动，右侧可见交互。',
+    cli:'绑定本机 CLI 后按自动化流程驱动，例如即梦画布。',
+  };
+  function serviceKind(service){
+    if(service?.kind)return service.kind;
+    if(service?.id==='browser-page'||service?.type==='WEB'||service?.type==='MCP')return 'computer-use';
+    if(service?.id==='local-terminal'||service?.type==='APP')return 'app-driver';
+    return 'cli';
+  }
   function pageOrigins(service){
     if(!service)return [];
     if(service.id==='dreamina')return [DREAMINA_ORIGIN];
@@ -14,26 +26,103 @@
     const push=value=>{try{const u=new URL(value);if(!['https:','http:'].includes(u.protocol)||u.username||u.password)return;if(!origins.includes(u.origin))origins.push(u.origin);}catch{}};
     if(Array.isArray(service.pageOrigins))for(const o of service.pageOrigins)push(o);
     if(typeof service.pageUrl==='string')push(service.pageUrl);
-    if(service.type==='MCP'&&typeof service.target==='string')push(service.target);
+    if((service.type==='MCP'||service.type==='WEB')&&typeof service.target==='string')push(service.target);
     return origins;
   }
   function canNative(service){return pageOrigins(service).length>0;}
+  function kindSubtitle(service){
+    const kind=serviceKind(service);
+    if(service.id==='dreamina')return 'CLI 三方 · 图片、视频、音频与画布';
+    if(service.id==='browser-page')return 'Computer Use · 结构化原生页';
+    if(service.id==='local-terminal')return '驱动应用 · 本机文件与终端';
+    if(kind==='computer-use')return service.type==='MCP'?'Computer Use · 网页 / SaaS（MCP）':'Computer Use · 网页';
+    if(kind==='app-driver')return '驱动应用 · 本地文件夹';
+    return 'CLI 三方 · 本机程序';
+  }
+  function kindSummary(service){
+    const kind=serviceKind(service);
+    if(service.id==='dreamina')return '可读取 CLI 状态，创作能力由实际版本提供。按当前对话权限执行。';
+    if(kind==='computer-use')return '可在允许源内操作页面；登录、支付或密码输入会强制请求确认。';
+    if(kind==='app-driver')return service.root?`工作目录：${service.root}\nAI 通过本机文件与终端在此目录驱动应用；请在左侧描述任务。`:'对本机文件与终端执行；可在此分类下添加应用文件夹。';
+    return '执行前会发现真实 CLI 能力，按当前对话权限执行。';
+  }
   function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&!approval.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
   function configure(){
     el('extension-detail-title').textContent=selected.title;
-    el('extension-detail-title').nextElementSibling.textContent=selected.id==='dreamina'?'图片、视频、音频与画布 · dreamina-canvas CLI':selected.id==='browser-page'?'结构化原生页操控 · 登录/支付需确认':`${selected.type} · 按服务实际工具执行`;
+    el('extension-detail-title').nextElementSibling.textContent=kindSubtitle(selected);
     el('extension-check').hidden=selected.id!=='dreamina';
-    el('extension-summary').textContent=selected.id==='dreamina'?'可读取 CLI 状态，创作能力由实际版本提供。按当前对话权限执行。':selected.id==='browser-page'?'可在允许源内操作页面；登录与支付会强制请求确认。':'执行任务前会发现真实命令或 MCP 工具，按当前对话权限执行。';
+    el('extension-remove-local').hidden=!selected.local;
+    el('extension-summary').textContent=kindSummary(selected);
     document.querySelectorAll('.extension-service-item').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.service===selected.id)));
   }
-  function select(service){selected=service;configure();}
+  function select(service){selected=service;activeKind=serviceKind(service);renderKindChrome();configure();}
+  function renderKindChrome(){
+    document.querySelectorAll('.extension-kind-tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.kind===activeKind)));
+    el('extension-kind-blurb').textContent=KIND_BLURB[activeKind]||'';
+    const actions=el('extension-kind-actions');actions.replaceChildren();
+    if(activeKind==='computer-use'){
+      const label=document.createElement('label');label.textContent='添加网页地址';
+      const input=document.createElement('input');input.type='url';input.placeholder='https://example.com';input.id='extension-add-page-url';
+      const row=document.createElement('div');row.className='button-row';
+      const add=document.createElement('button');add.type='button';add.textContent='添加网页';add.onclick=()=>void addComputerUse(input.value);
+      row.append(add);label.append(input);actions.append(label,row);
+    }else if(activeKind==='app-driver'){
+      const row=document.createElement('div');row.className='button-row';
+      const add=document.createElement('button');add.type='button';add.className='primary';add.textContent='选择应用 / 项目文件夹';add.onclick=()=>void addAppDriver();
+      row.append(add);actions.append(row);
+    }else{
+      const row=document.createElement('div');row.className='button-row';
+      const market=document.createElement('button');market.type='button';market.textContent='配置 CLI 连接器';market.onclick=()=>{picker.close();el('rail-market').click();};
+      row.append(market);actions.append(row);
+    }
+  }
+  function renderServiceList(){
+    const list=el('extension-other-services');list.replaceChildren();
+    const items=services.filter(s=>serviceKind(s)===activeKind);
+    if(!items.length){
+      const empty=document.createElement('p');empty.className='muted';empty.textContent=activeKind==='cli'?'尚未配置其他 CLI；可使用内置即梦或去技能市场添加。':activeKind==='app-driver'?'尚未添加驱动应用；请选择本地文件夹。':'可使用内置原生页，或添加网页地址。';
+      list.append(empty);
+    }
+    for(const service of items){
+      const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;
+      const strong=document.createElement('strong');strong.textContent=service.title;
+      const text=document.createElement('span');text.textContent=kindSubtitle(service);
+      button.append(strong,text);button.onclick=()=>select(service);list.append(button);
+    }
+    if(!items.some(s=>s.id===selected.id))selected=items[0]||services.find(s=>serviceKind(s)===activeKind)||services[0]||selected;
+    configure();
+  }
   async function refreshServices(){
     if(!window.cpclaw.workspace)return;
     const r=await window.cpclaw.workspace({method:'chat.services',input:{}});
     if(!r.ok)throw Error(r.message);
-    services=r.services;el('extension-other-services').replaceChildren();
-    for(const service of services.filter(s=>s.id!=='dreamina')){const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;const strong=document.createElement('strong');strong.textContent=service.title;const text=document.createElement('span');text.textContent=service.id==='browser-page'?'原生页 · Computer Use':service.type==='MCP'?'网页 / SaaS · MCP':'本机 CLI';button.append(strong,text);button.onclick=()=>select(service);el('extension-other-services').append(button);}
-    selected=services.find(s=>s.id===selected.id)??services[0];configure();
+    services=r.services.map(s=>({...s,kind:serviceKind(s)}));
+    renderKindChrome();renderServiceList();
+  }
+  async function addComputerUse(pageUrl){
+    try{
+      const r=await window.cpclaw.workspace({method:'extensions.add-computer-use',input:{pageUrl}});
+      if(!r.ok)throw Error(r.message||'添加失败');
+      await refreshServices();select(r.service);feedback('已添加网页 · '+r.service.title);
+    }catch(e){feedback(e.message);}
+  }
+  async function addAppDriver(){
+    try{
+      const pick=await action({action:'pick-directory',title:'选择要驱动的应用或项目文件夹'});
+      if(!pick.ok)throw Error(pick.message||'无法选择文件夹');
+      if(pick.cancelled)return;
+      const r=await window.cpclaw.workspace({method:'extensions.add-app-driver',input:{root:pick.path}});
+      if(!r.ok)throw Error(r.message||'添加失败');
+      activeKind='app-driver';await refreshServices();select(r.service);feedback('已添加驱动应用 · '+r.service.title);
+    }catch(e){feedback(e.message);}
+  }
+  async function removeLocal(){
+    if(!selected.local)return;
+    try{
+      const r=await window.cpclaw.workspace({method:'extensions.remove',input:{id:selected.id}});
+      if(!r.ok)throw Error(r.message||'移除失败');
+      await refreshServices();feedback('已移出本机列表');
+    }catch(e){feedback(e.message);}
   }
   async function check(){
     if(checking)return;checking=true;el('extension-check').disabled=el('extension-recheck').disabled=true;
@@ -43,28 +132,38 @@
     finally{checking=false;el('extension-check').disabled=el('extension-recheck').disabled=false;sync();}
   }
   async function mode(value){
-    native=Boolean(value&&canNative(activeService));slot.hidden=!native;
+    const preferNative=value||serviceKind(activeService)==='computer-use';
+    native=Boolean(preferNative&&canNative(activeService));slot.hidden=!native;
     el('extension-cli-panel').hidden=el('service-operation-results').hidden=native;
-    el('panel-title').textContent=`${activeService.title} · ${native?'原生页面':'自动工作流'}`;
+    const viewLabel=native?'原生页面':serviceKind(activeService)==='app-driver'?'驱动面板':'自动工作流';
+    el('panel-title').textContent=`${activeService.title} · ${viewLabel}`;
     el('extension-native').setAttribute('aria-pressed',String(native));el('extension-cli').setAttribute('aria-pressed',String(!native));
     if(native){
       const origins=pageOrigins(activeService);
       const url=pageUrl||canvasUrl||(origins[0]?`${origins[0]}/`:undefined);
       try{const r=await action({action:'open',service:activeService,origins,...(url?{url}:{})});if(!r.ok)throw Error(r.message);}catch(e){feedback(e.message);}
     }
+    if(!native&&activeService.root)el('extension-cli-status').textContent=`驱动目录：${activeService.root}`;
     sync();
   }
   window.showServiceWorkspace=service=>{
-    activeService=services.find(s=>s.id===service.id)??service;workspace=true;pageUrl=typeof activeService.pageUrl==='string'?activeService.pageUrl:'';
+    activeService=services.find(s=>s.id===service.id)??{...service,kind:serviceKind(service)};
+    workspace=true;pageUrl=typeof activeService.pageUrl==='string'?activeService.pageUrl:'';
     el('extension-workspace').hidden=false;el('extension-view-controls').hidden=false;
-    el('service-panel-name').textContent=activeService.title;el('extension-native').hidden=!canNative(activeService);el('extension-recheck').hidden=activeService.id!=='dreamina';
-    el('extension-cli-status').textContent='在左侧描述任务，将按当前对话权限执行。原生页登录与支付需确认。';
-    openPanel('extensions');void mode(false);
+    el('service-panel-name').textContent=activeService.title;
+    el('extension-native').hidden=!canNative(activeService);
+    el('extension-recheck').hidden=activeService.id!=='dreamina';
+    el('extension-cli').textContent=serviceKind(activeService)==='app-driver'?'驱动面板':'自动工作流';
+    el('extension-cli-status').textContent=serviceKind(activeService)==='app-driver'
+      ?`驱动目录：${activeService.root||'本机工作区'}。在左侧描述任务，将按对话权限执行。`
+      :'在左侧描述任务，将按当前对话权限执行。登录与支付需确认。';
+    openPanel('extensions');
+    void mode(serviceKind(activeService)==='computer-use'&&canNative(activeService));
   };
   window.executionServiceName=id=>services.find(s=>s.id===id)?.title??(id==='dreamina'?'即梦画布':'');
-  el('extension-service-dreamina').dataset.service='dreamina';
-  el('extension-service-dreamina').onclick=()=>select(services.find(s=>s.id==='dreamina')??services[0]);
+  for(const tab of document.querySelectorAll('.extension-kind-tab'))tab.onclick=()=>{activeKind=tab.dataset.kind;renderKindChrome();renderServiceList();};
   el('extension-check').onclick=el('extension-recheck').onclick=check;
+  el('extension-remove-local').onclick=()=>void removeLocal();
   el('extension-start').onclick=async()=>{
     el('extension-start').disabled=true;
     try{if(selectionId){const r=await action({action:'choose-service',selectionId,serviceId:selected.id});if(!r.ok)return;selectionId='';window.showServiceWorkspace(selected);}else if(window.chooseExecutionService){if(!await window.chooseExecutionService(selected))return;}else window.showServiceWorkspace(selected);picker.close();}
@@ -73,7 +172,7 @@
   el('extension-manage-services').onclick=()=>{picker.close();el('rail-market').click();};
   window.openExtensionPicker=async()=>{
     if(picker.open)return;await action({action:'hide'}).catch(()=>{});picker.showModal();sync();
-    try{await refreshServices();}catch(e){el('extension-summary').textContent=e.message||'服务目录读取失败，请检查平台连接。';}
+    try{await refreshServices();}catch(e){el('extension-summary').textContent=e.message||'服务目录读取失败，请检查平台连接。';renderKindChrome();}
   };
   el('extension-picker-close').onclick=()=>picker.close();picker.addEventListener('close',()=>{if(selectionId){void action({action:'cancel-selection',selectionId});selectionId='';}sync();});
   picker.addEventListener('click',e=>{if(e.target!==picker)return;const r=picker.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)picker.close();});
@@ -135,10 +234,9 @@
     }
     if(event.state==='approval-closed'){if(approvalRequest?.approvalId===event.approvalId){approvalRequest=undefined;approval.close();sync();}return;}
     if(event.state==='choose-service'){
-      services=event.services;selectionId=event.selectionId;
+      services=event.services.map(s=>({...s,kind:serviceKind(s)}));selectionId=event.selectionId;
       if(!picker.open)picker.showModal();
-      selected=services[0];configure();el('extension-other-services').replaceChildren();
-      for(const service of services.filter(s=>s.id!=='dreamina')){const b=document.createElement('button');b.type='button';b.className='extension-service-item';b.dataset.service=service.id;b.textContent=service.title+' · '+service.type;b.onclick=()=>select(service);el('extension-other-services').append(b);}
+      activeKind=serviceKind(services[0]||selected);renderKindChrome();renderServiceList();
       el('extension-summary').textContent='请选择此次任务使用的服务，随后申请操作授权。';sync();return;
     }
     if(event.state==='permission'){permission(event);return;}
@@ -150,4 +248,5 @@
   new MutationObserver(sync).observe(inspector,{attributes:true,subtree:true,attributeFilter:['hidden']});
   const overlay=document.querySelector('.market-overlay');if(overlay)new MutationObserver(sync).observe(overlay,{attributes:true,attributeFilter:['hidden']});
   window.addEventListener('resize',sync);
+  renderKindChrome();
 })();

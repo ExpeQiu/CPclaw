@@ -1,6 +1,15 @@
 const diagnosticsDialog = byId('diagnostics-dialog');
+const diagnosticsRepairBtn = byId('diagnostics-repair');
+let lastDiagnoseResult = null;
+let lastDiagnoseChatId = '';
+
 byId('diagnostics-close').onclick = () => diagnosticsDialog.close();
-window.clearChatDiagnostics = function () { diagnosticsDialog.close(); byId('diagnostics-body').replaceChildren(); };
+window.clearChatDiagnostics = function () {
+  diagnosticsDialog.close();
+  byId('diagnostics-body').replaceChildren();
+  lastDiagnoseResult = null;
+  diagnosticsRepairBtn.hidden = true;
+};
 
 function diagParagraph(body, text, className) {
   const p = document.createElement('p');
@@ -18,6 +27,82 @@ function diagSection(body, title) {
 
 function statusLabel(status) {
   return ({ error: '待处理', ok: '通过', fixed: '已修复', warn: '警告', info: '提示', skipped: '跳过' })[status] || status;
+}
+
+/** 根据诊断结果生成可执行修复计划（含引导项）。 */
+function planRepairs(result) {
+  const plans = [];
+  const codes = new Set((result?.findings || []).filter((f) => f.status === 'error').map((f) => f.code));
+  const seen = new Set();
+  for (const action of result?.repairActions || []) {
+    if (!action.runnable || action.executed) continue;
+    if (seen.has(action.code)) continue;
+    seen.add(action.code);
+    plans.push({ ...action, kind: 'server' });
+  }
+  if (codes.has('DREAMINA_AUTH_SCOPE') && !seen.has('DREAMINA_AUTH_SCOPE')) {
+    seen.add('DREAMINA_AUTH_SCOPE');
+    plans.push({
+      code: 'DREAMINA_AUTH_SCOPE',
+      label: '重新授权即梦',
+      detail: '打开即梦面板并启动官方重新授权（需确认）',
+      kind: 'dreamina',
+      needsConfirm: true,
+    });
+  }
+  if ((codes.has('HARNESS_CLEANUP') || codes.has('KERNEL_UNAVAILABLE')) && !seen.has('HARNESS_CLEANUP')) {
+    seen.add('HARNESS_CLEANUP');
+    plans.push({
+      code: 'HARNESS_CLEANUP',
+      label: '重启工作区进程',
+      detail: '刷新内核连接；不宣称清除历史残留证据',
+      kind: 'worker',
+    });
+  }
+  if ((codes.has('SERVICE_FAILED') || codes.has('HARNESS_CLEANUP')) && !seen.has('DREAMINA_AUTH_SCOPE') && !seen.has('OPEN_SERVICE_PANEL')) {
+    seen.add('OPEN_SERVICE_PANEL');
+    plans.push({
+      code: 'OPEN_SERVICE_PANEL',
+      label: '打开应用操作面板',
+      detail: '核对失败回执；授权不足时请先完成重新授权',
+      kind: 'panel',
+    });
+  }
+  if (codes.has('PLATFORM_SESSION') && !seen.has('PLATFORM_SESSION')) {
+    seen.add('PLATFORM_SESSION');
+    plans.push({
+      code: 'PLATFORM_SESSION',
+      label: '打开平台登录设置',
+      detail: '检查平台地址并重新登录',
+      kind: 'settings',
+    });
+  }
+  if (codes.has('KERNEL_UNAVAILABLE') && !seen.has('KERNEL_SETTINGS')) {
+    seen.add('KERNEL_SETTINGS');
+    plans.push({
+      code: 'KERNEL_SETTINGS',
+      label: '打开内核设置',
+      detail: '在设置中启用 deepseek-harness',
+      kind: 'settings-kernel',
+    });
+  }
+  if (codes.has('BRIDGE_UNAVAILABLE')) {
+    plans.push({
+      code: 'BRIDGE_UNAVAILABLE',
+      label: '提示重启应用',
+      detail: '桌面桥接不可用，需完全退出后重启',
+      kind: 'bridge',
+    });
+  }
+  return plans;
+}
+
+function syncRepairButton(result) {
+  const plans = planRepairs(result);
+  diagnosticsRepairBtn.hidden = !plans.length;
+  diagnosticsRepairBtn.disabled = false;
+  diagnosticsRepairBtn.textContent = plans.length ? `执行修复（${plans.length}）` : '执行修复';
+  diagnosticsRepairBtn.title = plans.map((p) => p.label).join('；') || '无可执行修复';
 }
 
 function renderDiagnoseReport(body, result) {
@@ -66,32 +151,21 @@ function renderDiagnoseReport(body, result) {
   }
   if (!result.repairs?.length) diagParagraph(body, '本次没有自动执行的本地修复。');
 
-  const runnable = (result.repairActions || []).filter((a) => a.runnable && !a.executed);
-  if (runnable.length) {
+  const plans = planRepairs(result);
+  if (plans.length) {
     diagSection(body, '可执行修复');
-    for (const action of runnable) {
-      const row = document.createElement('div');
-      row.className = 'button-row';
+    diagParagraph(body, `共 ${plans.length} 项。可点右上角「执行修复」一次性处理，或按下方单项执行。`, 'muted');
+    for (const action of plans) {
       const note = document.createElement('p');
       note.className = 'muted';
       note.textContent = `${action.label}：${action.detail}`;
       body.append(note);
+      const row = document.createElement('div');
+      row.className = 'button-row';
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = action.needsConfirm ? '确认并执行' : '执行修复';
-      button.onclick = async () => {
-        if (action.needsConfirm && !window.confirm(`确认执行：${action.label}？`)) return;
-        button.disabled = true;
-        try {
-          const fixed = await chatCall('chat.diagnoseRepair', { chatId: currentChatId, code: action.code });
-          if (!fixed.ok) throw Error(fixed.message || '修复失败');
-          diagParagraph(body, (fixed.repairs || []).map((r) => `${r.verified ? '已验证' : '未通过'} · ${r.detail}`).join('；') || '修复完成');
-        } catch (error) {
-          diagParagraph(body, error.message || '修复失败');
-        } finally {
-          button.disabled = false;
-        }
-      };
+      button.textContent = action.needsConfirm ? '确认并执行' : '执行此项';
+      button.onclick = () => void runRepairPlan([action], { single: true });
       row.append(button);
       body.append(row);
     }
@@ -125,7 +199,200 @@ function renderDiagnoseReport(body, result) {
     }[repeated.code] ?? '任务异常'} 已在此对话的 ${repeated.count} 轮任务中出现，请结合回执进一步排查。`);
   }
   if (result.prevention) diagParagraph(body, result.prevention, 'muted');
+  syncRepairButton(result);
 }
+
+async function executeOneRepair(action, log) {
+  if (action.kind === 'server' || (['SKILL_INSTALL_MISSING', 'SKILL_BINDING_STALE'].includes(action.code) && action.kind !== 'dreamina')) {
+    const fixed = await chatCall('chat.diagnoseRepair', { chatId: currentChatId, code: action.code });
+    if (!fixed.ok) throw Error(fixed.message || `${action.label}失败`);
+    const line = (fixed.repairs || []).map((r) => `${r.verified ? '已验证' : '未通过'} · ${r.detail}`).join('；') || action.label;
+    log(line);
+    return fixed;
+  }
+  if (action.kind === 'dreamina' || action.code === 'DREAMINA_AUTH_SCOPE') {
+    if (typeof window.showServiceWorkspace === 'function') {
+      window.showServiceWorkspace({ id: 'dreamina', title: '即梦画布', type: 'CLI', builtin: true });
+    }
+    const result = await window.cpclaw.extensionAction({ action: 'repair-dreamina-auth' });
+    log(result.message || (result.ok ? '即梦授权修复完成' : '即梦授权修复未完成'));
+    if (!result.ok && result.state !== 'awaiting_login') throw Error(result.message || '即梦授权修复失败');
+    return result;
+  }
+  if (action.kind === 'panel' || action.code === 'OPEN_SERVICE_PANEL') {
+    if (typeof window.showServiceWorkspace === 'function') {
+      window.showServiceWorkspace({ id: 'dreamina', title: '即梦画布', type: 'CLI', builtin: true });
+    }
+    log('已打开应用操作面板，请核对回执。');
+    return { ok: true };
+  }
+  if (action.kind === 'worker' || action.code === 'HARNESS_CLEANUP') {
+    const result = await window.cpclaw.runtimeRestartWorker();
+    if (typeof window.refreshKernelStatus === 'function') await window.refreshKernelStatus();
+    log(result.message || '已重启工作区进程');
+    return result;
+  }
+  if (action.kind === 'settings' || action.code === 'PLATFORM_SESSION') {
+    await openSettingsAfterDiagnose(chatAccount ? 'platform-url' : 'employee-id');
+    log('已打开设置：请检查平台地址并登录。');
+    return { ok: true };
+  }
+  if (action.kind === 'settings-kernel' || action.code === 'KERNEL_SETTINGS') {
+    await openSettingsAfterDiagnose('settings-report-engine');
+    log('已打开设置：请启用 deepseek-harness 并保存。');
+    return { ok: true };
+  }
+  if (action.kind === 'bridge' || action.code === 'BRIDGE_UNAVAILABLE') {
+    log('桌面桥接不可用，请完全退出后重启 CPclaw。');
+    return { ok: false };
+  }
+  throw Error(`未知修复项：${action.code}`);
+}
+
+/** 先关诊断窗再开设置；避免 showModal + window.confirm 叠层导致后续代码不执行。 */
+function openSettingsAfterDiagnose(focusId) {
+  return new Promise((resolve) => {
+    try { diagnosticsDialog.close(); } catch { /* ignore */ }
+    requestAnimationFrame(() => {
+      const open = typeof window.openPanel === 'function' ? window.openPanel : typeof openPanel === 'function' ? openPanel : null;
+      if (open) open('settings');
+      else setStatus('无法打开设置面板，请点左侧「设置与诊断」。');
+      const focusEl = focusId ? byId(focusId) : null;
+      if (focusEl) {
+        try { focusEl.focus(); } catch { /* ignore */ }
+      }
+      resolve();
+    });
+  });
+}
+
+/** 在诊断对话框内确认，不用原生 confirm（与 modal dialog 冲突）。 */
+function confirmRepairInDialog(message) {
+  const body = byId('diagnostics-body');
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'diagnose-repair-log';
+    box.setAttribute('role', 'alertdialog');
+    const text = document.createElement('p');
+    text.textContent = message;
+    const row = document.createElement('div');
+    row.className = 'button-row';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = '取消';
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'primary';
+    ok.textContent = '确定';
+    const finish = (value) => { box.remove(); resolve(value); };
+    cancel.onclick = () => finish(false);
+    ok.onclick = () => finish(true);
+    row.append(cancel, ok);
+    box.append(text, row);
+    body.prepend(box);
+    ok.focus();
+  });
+}
+
+function isSettingsOnlyPlan(plans) {
+  return plans.length > 0 && plans.every((p) => p.kind === 'settings' || p.kind === 'settings-kernel');
+}
+
+async function runRepairPlan(plans, { single = false } = {}) {
+  if (!plans.length) {
+    setStatus('当前没有可执行的修复项。');
+    return;
+  }
+
+  // 仅打开设置：无需二次确认，直接关诊断窗并聚焦登录。
+  if (isSettingsOnlyPlan(plans)) {
+    diagnosticsRepairBtn.disabled = true;
+    try {
+      for (const action of plans) {
+        await executeOneRepair(action, () => {});
+      }
+      setStatus('已打开「设置与诊断」，请检查平台地址并登录。');
+    } catch (error) {
+      setStatus(error.message || '打开设置失败');
+    } finally {
+      if (lastDiagnoseResult) syncRepairButton(lastDiagnoseResult);
+      else { diagnosticsRepairBtn.disabled = false; diagnosticsRepairBtn.textContent = '执行修复'; }
+    }
+    return;
+  }
+
+  const needsAsk = !single || plans[0].needsConfirm;
+  if (needsAsk) {
+    const labels = plans.map((p) => p.label).join('、');
+    const ok = await confirmRepairInDialog(`将依次执行：${labels}。涉及重新授权时仍会单独请求批准。是否继续？`);
+    if (!ok) return;
+  }
+
+  const body = byId('diagnostics-body');
+  const logBox = document.createElement('div');
+  logBox.className = 'diagnose-repair-log';
+  logBox.setAttribute('aria-live', 'polite');
+  const append = (text) => {
+    const line = document.createElement('div');
+    line.textContent = text;
+    logBox.append(line);
+  };
+  diagSection(body, '修复进度');
+  body.append(logBox);
+
+  diagnosticsRepairBtn.disabled = true;
+  diagnosticsRepairBtn.textContent = '修复中…';
+  let closedForUi = false;
+  try {
+    for (const action of plans) {
+      if (action.kind === 'settings' || action.kind === 'settings-kernel') closedForUi = true;
+      append(`→ ${action.label}…`);
+      try {
+        await executeOneRepair(action, append);
+      } catch (error) {
+        append(`× ${error.message || '失败'}`);
+        window.cpclaw?.log?.({
+          level: 'warn',
+          event: 'diagnose_repair_item_failed',
+          message: String(error?.message || action.code).slice(0, 200),
+          chatId: currentChatId,
+        });
+      }
+    }
+    if (!closedForUi && currentChatId) {
+      append('→ 重新运行自诊断…');
+      const again = await chatCall('chat.diagnose', { chatId: currentChatId });
+      if (again.ok) {
+        lastDiagnoseResult = again;
+        lastDiagnoseChatId = currentChatId;
+        renderDiagnoseReport(body, again);
+        const history = await chatCall('chat.history', { chatId: currentChatId });
+        if (history.ok) { chatMessages = history.messages; renderChat(); }
+        setStatus('修复流程已完成，请查看更新后的诊断结果。');
+        return;
+      }
+      append(again.message || '重新诊断失败');
+    }
+    setStatus(closedForUi ? '已打开设置，请按提示完成后再点自诊断。' : '修复流程已结束。');
+  } catch (error) {
+    append(error.message || '修复失败');
+    setStatus(error.message || '修复失败');
+  } finally {
+    if (lastDiagnoseResult) syncRepairButton(lastDiagnoseResult);
+    else {
+      diagnosticsRepairBtn.disabled = false;
+      diagnosticsRepairBtn.textContent = '执行修复';
+    }
+  }
+}
+
+diagnosticsRepairBtn.onclick = () => {
+  if (!lastDiagnoseResult || lastDiagnoseChatId !== currentChatId) {
+    setStatus('请先运行自诊断。');
+    return;
+  }
+  void runRepairPlan(planRepairs(lastDiagnoseResult));
+};
 
 byId('chat-diagnose').onclick = async () => {
   const button = byId('chat-diagnose'), body = byId('diagnostics-body');
@@ -133,8 +400,15 @@ byId('chat-diagnose').onclick = async () => {
   if (!window.cpclaw?.workspace) {
     diagnosticsDialog.showModal();
     body.replaceChildren();
+    lastDiagnoseResult = {
+      findings: [{ code: 'BRIDGE_UNAVAILABLE', status: 'error', detail: '桌面桥接不可用（window.cpclaw.workspace 缺失）。请完全退出并重启应用。' }],
+      repairs: [],
+      repairActions: [],
+    };
+    lastDiagnoseChatId = currentChatId || '';
     diagSection(body, '检查结果');
     diagParagraph(body, '待处理 · 桌面桥接不可用（window.cpclaw.workspace 缺失）。请完全退出并重启应用；勿在普通浏览器打开本地页面。');
+    syncRepairButton(lastDiagnoseResult);
     window.cpclaw?.log?.({ level: 'error', event: 'bridge_unavailable', message: '自诊断检测到桥接缺失' });
     setStatus('桌面桥接不可用，请重启应用。');
     return;
@@ -142,16 +416,19 @@ byId('chat-diagnose').onclick = async () => {
   const actor = chatAccount, chatId = currentChatId, generation = selectedChatGeneration;
   button.dataset.busy = 'true'; button.disabled = true; button.textContent = '诊断中…'; button.setAttribute('aria-busy', 'true');
   body.textContent = '正在检查账号、内核、任务链路、Skill 制品与相关日志…';
+  diagnosticsRepairBtn.hidden = true;
   diagnosticsDialog.showModal();
   const current = () => actor === chatAccount && chatId === currentChatId && generation === selectedChatGeneration;
   try {
     const result = await chatCall('chat.diagnose', { chatId });
     if (!current()) return;
     if (!result.ok) throw Error(result.message);
+    lastDiagnoseResult = result;
+    lastDiagnoseChatId = chatId;
     renderDiagnoseReport(body, result);
     const history = await chatCall('chat.history', { chatId });
     if (current() && history.ok) { chatMessages = history.messages; renderChat(); }
-    setStatus('自诊断完成，请查看检查结果。');
+    setStatus('自诊断完成，请查看检查结果。有可修复项时可点右上角「执行修复」。');
   } catch (error) {
     if (current()) { body.textContent = error.message || '诊断失败，请重试。'; setStatus(body.textContent); }
     window.cpclaw?.log?.({ level: 'error', event: 'diagnose_ui_failed', message: String(error?.message || '诊断失败').slice(0, 200) });

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const browserPageService = { id: 'browser-page', title: '原生页面', type: 'CLI', target: 'browser-page', builtin: true };
+export const browserPageService = { id: 'browser-page', title: '原生页面 · Computer Use', type: 'WEB', target: 'browser-page', builtin: true, kind: 'computer-use' };
 
 export const SENSITIVE_RE = /login|sign[\s_-]?in|oauth|\bauth\b|pay(ment)?|checkout|billing|subscribe|密码|登录|登入|支付|收银台|充值|购买|订阅/i;
 const SENSITIVE_QUERY = /token|sign|auth|code|credential/i;
@@ -40,7 +40,7 @@ export function pageOriginsForService(service) {
   };
   if (Array.isArray(service.pageOrigins)) for (const o of service.pageOrigins) push(o);
   if (typeof service.pageUrl === 'string') push(service.pageUrl);
-  if (service.type === 'MCP' && typeof service.target === 'string') push(service.target);
+  if ((service.type === 'MCP' || service.type === 'WEB') && typeof service.target === 'string') push(service.target);
   return origins;
 }
 

@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld("cpclaw", {
   runtimeStatus() {
     return ipcRenderer.invoke("runtime.status");
   },
+  runtimeRestartWorker() {
+    return ipcRenderer.invoke("runtime.restartWorker");
+  },
   settingsGet() {
     return ipcRenderer.invoke("settings.get");
   },

@@ -26,7 +26,7 @@ function renderProjectChats(){
     const group=document.createElement('details');group.className='project-group';group.dataset.project=project.id;
     group.open=query?true:projectOpen.get(chatAccount+project.id)??true;
     group.ontoggle=()=>projectOpen.set(chatAccount+project.id,group.open);
-    const summary=document.createElement('summary');const name=document.createElement('span');name.textContent=(project.id?'▱ ':'')+project.name;name.title=project.folder||'尚未归入项目的聊天';summary.append(name);
+    const summary=document.createElement('summary');const name=document.createElement('span');name.className='sidebar-text';name.textContent=project.name;name.title=project.folder||'尚未归入项目的聊天';summary.append(name);
     if(project.id){const folder=documentButton('↗',async()=>{const r=await window.cpclaw.projectAction({action:'reveal',id:project.id});if(!r.ok)throw Error(r.message);});folder.title='在文件夹中显示项目';folder.setAttribute('aria-label','显示项目文件夹：'+project.name);folder.addEventListener('click',e=>e.stopPropagation());summary.append(folder);}
     const add=documentButton('＋',()=>newProjectChat(project.id));add.title='在此项目新建聊天';add.setAttribute('aria-label','新建聊天：'+project.name);add.addEventListener('click',e=>e.stopPropagation());summary.append(add);group.append(summary);
     for(const chat of rows)group.append(projectChatRow(chat));

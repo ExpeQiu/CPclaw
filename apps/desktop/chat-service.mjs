@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const desktopDir = dirname(fileURLToPath(import.meta.url));
 import { canOfferSkillDistill } from './message-actions.mjs';
 import { publicServices, sanitizeServiceResult } from './service-runtime.mjs';
+import { addAppDriver, addComputerUseSite, listLocalExtensions, removeLocalExtension } from './local-extensions.mjs';
 import { runBoundReportLoop } from '@cpclaw/desktop-host';
 import { createKnowledgeStore, knowledgeSnippets } from './knowledge-service.mjs';
 import { searchProject, retrievalMessage } from './project-search.mjs';
@@ -163,7 +164,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       const messages = context(chat.id, userId);
 
       const serviceSnapshot=await(await post(auth.base,'/v1/market',{action:'list'},controller.signal,auth.token)).json();
-      const availableServices=publicServices(serviceSnapshot.connectors);
+      const availableServices=publicServices(serviceSnapshot.connectors,listLocalExtensions(dataDir));
       const serviceContext={services:availableServices.map(({id,title,type})=>({id,title,type})),activeId:availableServices.some(s=>s.id===execution.service)?execution.service:''};
       async function runSelectedService(serviceId) {
         if(!serviceId)serviceId=execution.service||'local-terminal';
@@ -584,7 +585,19 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       }
       if(method==='chat.services'){
         const auth=await refreshSession(new AbortController().signal);const snapshot=await(await post(auth.base,'/v1/market',{action:'list'},new AbortController().signal,auth.token)).json();sameActor(actor);
-        return {ok:true,services:publicServices(snapshot.connectors).map(({target,builtin,...s})=>s)};
+        return {ok:true,services:publicServices(snapshot.connectors,listLocalExtensions(dataDir)).map(({target,builtin,...s})=>s)};
+      }
+      if(method==='extensions.add-computer-use'){
+        const service=addComputerUseSite(dataDir,{pageUrl:input.pageUrl,title:input.title});
+        return {ok:true,service};
+      }
+      if(method==='extensions.add-app-driver'){
+        const service=addAppDriver(dataDir,{root:input.root,title:input.title});
+        return {ok:true,service};
+      }
+      if(method==='extensions.remove'){
+        removeLocalExtension(dataDir,input.id);
+        return {ok:true};
       }
       if(method==='chat.configure'){
         if(!owns(actor,input.chatId))throw Error('无权访问此聊天');
@@ -592,7 +605,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         if(!['chat','cli'].includes(input.mode)||typeof input.service!=='string')throw Error('模式或服务无效');
         if(input.service){
           const auth=await refreshSession(new AbortController().signal);const snapshot=await(await post(auth.base,'/v1/market',{action:'list'},new AbortController().signal,auth.token)).json();sameActor(actor);
-          if(!publicServices(snapshot.connectors).some(c=>c.id===input.service))throw Error('服务不可用，请重新选择');
+          if(!publicServices(snapshot.connectors,listLocalExtensions(dataDir)).some(c=>c.id===input.service))throw Error('服务不可用，请重新选择');
         }
         db.prepare('INSERT OR REPLACE INTO chat_modes VALUES(?,?,?)').run(input.chatId,input.mode,input.service);
         return {ok:true,execution:{mode:input.mode,service:input.service}};

@@ -36,6 +36,9 @@ test('市场：空目录、组织隔离、审核、撤回、持久化与真实�
   assert.equal((await fetch(base+'/v1/market',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
   assert.ok((await request('account.login',{platformUrl:base,employeeId:'employee-a',password:'fixture-employee-a'})).ok);
   const page=await request('market.page');assert.ok(page.ok);assert.match(page.html,/技能创作/);
+  assert.match(page.html,/async function load\(fn\)/);
+  assert.match(page.html,/button\(label,\(\)=>switchSection\(key\),false,false\)/);
+  assert.match(page.html,/正在加载…/);
   assert.ok((await request('market.call',{action:'list'})).ok);
   const generated=await request('market.generate',{title:'信息检查',description:'检查来源'});assert.ok(generated.ok,generated.message);assert.equal(generated.mode,'mock');
   const cli=await request('market.call',{action:'connector-save',input:{title:'Node',type:'CLI',target:process.execPath}});assert.ok(cli.ok);

@@ -80,6 +80,15 @@ ipcMain.handle("runtime.status", () => {
   return status;
 });
 
+ipcMain.handle("runtime.restartWorker", () => {
+  restartWorkspace("diagnose_repair");
+  const status = resolveKernelStatus(here);
+  desktopLog(dataDir, "cpclaw-desktop-host", "info", "workspace_restart", "诊断修复已重启工作区进程", {
+    ready: Boolean(status.ready),
+  });
+  return { ok: true, kernel: status, message: "已重启工作区进程并刷新内核状态" };
+});
+
 ipcMain.handle("ui.log", (_event, input) => {
   const level = ["debug", "info", "warn", "error"].includes(input?.level) ? input.level : "info";
   const event = typeof input?.event === "string" && /^[a-z0-9_]{1,64}$/.test(input.event) ? input.event : "ui_event";
@@ -125,7 +134,7 @@ ipcMain.handle("workspace.call", async (_event, call) => {
   }
   if (actorId === null && !["account.status", "account.login", "account.logout"].includes(call.method)) return { ok: false, code: "AUTH_REQUIRED", message: "请先在设置中登录平台" };
   if (['account.login', 'account.logout'].includes(call.method)) extensionHost.clearContext();
-  if (['chat.history', 'chat.send'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
+  if (['chat.history', 'chat.send', 'chat.diagnose', 'chat.diagnoseRepair'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
   const result = await workspaceClient.request({ method: call.method, input: call.input, actorId });
   if (call.method === 'market.probe' && result.code === 'LOCAL_EXECUTION_REQUIRED') return extensionHost.probeConnector(result.localExecution, actorId);
   if (call.method === 'chat.create' && result.ok) extensionHost.setContext(actorId, result.chatId);

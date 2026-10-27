@@ -4,9 +4,9 @@ import { createNativePageController, isSensitiveUrl, pageOriginsForService, part
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { createCommandAuthorization } from './local-command-authorization.mjs';
 import { WebContentsView, dialog, shell } from 'electron';
 import { createExtensionService } from './extension-service.mjs';
@@ -155,6 +155,56 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       try { const result = await authorization.run(); send({ state: 'permission', ...permissionStatus() }); return result; }
       finally { executionPending = false; }
     }
+    if (input?.action === 'repair-dreamina-auth') {
+      const c = effectiveContext();
+      if (!c.actorId || !c.chatId) return { ok: false, message: '请先打开对话后再修复即梦授权。' };
+      if (executionPending) return { ok: false, state: 'busy', message: '已有本机执行请求正在等待授权或执行。' };
+      const binary = join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'dreamina-canvas.exe' : 'dreamina-canvas');
+      if (!existsSync(binary)) return { ok: false, message: '未发现即梦 CLI，请先完成获准的安装。' };
+      let target;
+      try { target = realpathSync(binary); } catch { return { ok: false, message: '即梦 CLI 路径无效。' }; }
+      const service = { id: 'dreamina', title: '即梦画布', type: 'CLI', builtin: true, target };
+      const base = { actorId: c.actorId, chatId: c.chatId, service };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 180_000);
+      try {
+        const discovered = await executeService({ ...base, request: { action: 'discover' } }, controller.signal);
+        if (discovered.ok) {
+          return { ok: true, state: 'ready', message: '即梦连接与授权检查通过，无需重新授权。', repairs: [{ code: 'DREAMINA_AUTH_SCOPE', detail: '即梦授权已可用', verified: true }] };
+        }
+        const needsAuth = discovered.error?.reason === 'oauth_scope_insufficient'
+          || discovered.requiredAction === 'login'
+          || /授权不足|尚未登录|auth login/i.test(discovered.message || '');
+        if (!needsAuth) {
+          return { ok: false, state: discovered.state || 'error', message: discovered.message || '即梦检查未通过，请查看操作面板回执。', result: discovered };
+        }
+        const login = await executeService({ ...base, request: { action: 'call', args: ['auth', 'login'] } }, controller.signal);
+        if (login?.status === 'awaiting_login' || login?.ok) {
+          let waited = null;
+          for (let i = 0; i < 12; i += 1) {
+            if (controller.signal.aborted) break;
+            waited = await executeService({ ...base, request: { action: 'call', args: ['auth', 'wait'] } }, controller.signal);
+            if (waited?.ok) break;
+            await new Promise((r) => setTimeout(r, 2_000));
+          }
+          const again = await executeService({ ...base, request: { action: 'discover' } }, controller.signal);
+          const verified = Boolean(again.ok);
+          return {
+            ok: verified,
+            state: verified ? 'ready' : (waited?.ok ? 'recheck_failed' : 'awaiting_login'),
+            message: verified
+              ? '已完成重新授权，即梦连接检查通过。'
+              : (waited?.ok ? '授权流程已走完，但再次检查未通过，请在操作面板核对。' : '已打开官方授权，请在浏览器完成后再次点「执行修复」或操作面板「重新检查」。'),
+            repairs: [{ code: 'DREAMINA_AUTH_SCOPE', detail: verified ? '即梦已重新授权并校验' : '即梦重新授权未完成或未通过复检', verified }],
+          };
+        }
+        return { ok: false, message: login?.message || '未能启动重新授权。', result: login };
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : '即梦授权修复失败' };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
     if (input?.action === 'clear-context') { setContext(getActor(), ''); return { ok: true }; }
     if (input?.action === 'permission-status') return { ok: true, ...permissionStatus() };
     if (input?.action === 'revoke-permission') { const c=effectiveContext();if(c.actorId&&c.chatId)permissions.set(c,'ask'); serviceController?.abort(); runtime.revoke(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); return { ok: true, message: '已撤销本次对话的工具与终端执行授权，后续操作会重新申请。' }; }
@@ -167,6 +217,16 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       }catch{return {ok:false};}
     }
     if (input?.action === 'hide') { hide(); return { ok: true }; }
+    if (input?.action === 'pick-directory') {
+      const win = getWindow();
+      if (!win || win.isDestroyed()) return { ok: false, message: '窗口不可用' };
+      const choice = await dialog.showOpenDialog(win, {
+        title: input.title || '选择应用或项目文件夹',
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (choice.canceled || !choice.filePaths[0]) return { ok: true, cancelled: true };
+      return { ok: true, path: choice.filePaths[0] };
+    }
     const win = getWindow();
     if (input?.action === 'bounds') {
       if (!view) return { ok: true };

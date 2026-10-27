@@ -1,10 +1,22 @@
-let knowledgeLinks=[], knowledgeScope='personal', knowledgeGeneration=0;
+let knowledgeLinks=[], knowledgeScope='personal', knowledgeGeneration=0, knowledgeReturnFocus=null;
 const kbDialog=byId('knowledge-dialog'),kbBody=byId('knowledge-dialog-body');
+const knowledgeOverlay=byId('knowledge-overlay');
 function kbNode(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
 function kbButton(text,action){const b=kbNode('button',text);b.type='button';b.onclick=async()=>{b.disabled=true;byId('knowledge-dialog-feedback').textContent='';try{await action();}catch(e){byId(kbDialog.open?'knowledge-dialog-feedback':'knowledge-feedback').textContent=e.message;}finally{b.disabled=false;}};return b;}
 async function kbCall(method,input={}){const actor=chatAccount,r=await chatCall(method,input);if(actor!==chatAccount)throw Error('账号已变化');if(!r.ok)throw Error(r.message);return r;}
-function clearKnowledge(){knowledgeGeneration++;knowledgeLinks=[];kbDialog.close();kbBody.replaceChildren();for(const scope of ['enterprise','personal'])byId(`knowledge-${scope}-list`).replaceChildren();byId('knowledge-feedback').textContent='';}
+function clearKnowledge(){knowledgeGeneration++;knowledgeLinks=[];kbDialog.close();kbBody.replaceChildren();knowledgeOverlay.hidden=true;for(const scope of ['enterprise','personal'])byId(`knowledge-${scope}-list`).replaceChildren();byId('knowledge-feedback').textContent='';}
 function kbOpen(title){byId('knowledge-dialog-title').textContent=title;kbBody.replaceChildren();byId('knowledge-dialog-feedback').textContent='';if(!kbDialog.open)kbDialog.showModal();}
+function closeKnowledgeOverlay(){if(knowledgeOverlay.hidden)return;knowledgeOverlay.hidden=true;kbDialog.close();knowledgeReturnFocus?.focus();window.refreshQuickRail?.();}
+window.closeKnowledgeOverlay=closeKnowledgeOverlay;
+window.openKnowledge=async()=>{
+  if(typeof closeRailOverlay==='function')closeRailOverlay();
+  document.getElementById('extension-picker')?.close();
+  knowledgeReturnFocus=document.activeElement;
+  knowledgeOverlay.hidden=false;
+  window.refreshQuickRail?.();
+  try{await loadKnowledge();}catch(error){setStatus(error.message);byId('knowledge-feedback').textContent=error.message;}
+  byId('knowledge-overlay-close').focus();
+};
 async function loadKnowledge(){
  const generation=++knowledgeGeneration,r=await kbCall('knowledge.list',{chatId:currentChatId});if(generation!==knowledgeGeneration)return;knowledgeLinks=r.links;
  for(const scope of ['enterprise','personal']){const list=byId(`knowledge-${scope}-list`);list.replaceChildren();for(const link of r.links.filter(l=>l.scope===scope)){
@@ -38,8 +50,10 @@ async function kbView(link,documentId){
  if(r.library.editable)detail.append(kbButton('编辑文档',()=>kbEditDocument(link,doc)));kbBody.append(detail);}
 }
 function kbEditDocument(link,doc){kbOpen(doc?'编辑文档':'新建文档');const title=kbField('文档名称',doc?.title??''),body=kbField('正文（Markdown / TXT）',doc?.body??'',true);kbBody.append(kbButton('保存',async()=>{await kbCall('knowledge.remote',{action:'document-save',input:{id:link.target,documentId:doc?.id,revision:doc?.revision,title:title.value,body:body.value}});await loadKnowledge();await kbView(link);}));}
-async function kbChoose(){if(!chatAccount)throw Error('请先登录');if(!currentChatId){const created=await kbCall('chat.create',{projectId:currentProjectId});currentChatId=created.chatId;await loadChats();}const chat=currentChatId,r=await kbCall('knowledge.list',{chatId:chat});kbOpen('当前对话的知识来源');kbBody.append(kbNode('p','勾选后，用于此对话的问答及文档生成；最多 12 个。'));const boxes=[];for(const link of r.links){const label=kbNode('label'),box=kbNode('input');label.className='checkbox';box.type='checkbox';box.checked=r.selected.includes(link.id);box.value=link.id;label.append(box,document.createTextNode((link.scope==='enterprise'?'企业 · ':'个人 · ')+link.name));kbBody.append(label);boxes.push(box);}if(!boxes.length)kbBody.append(kbNode('p','请先在右侧知识库面板关联来源。'));kbBody.append(kbButton('保存选择',async()=>{if(chat!==currentChatId)throw Error('对话已切换，请重新选择');await kbCall('knowledge.choose',{chatId:chat,ids:boxes.filter(b=>b.checked).map(b=>b.value)});kbDialog.close();setStatus('知识来源已保存到当前对话');}));}
+async function kbChoose(){if(!chatAccount)throw Error('请先登录');if(!currentChatId){const created=await kbCall('chat.create',{projectId:currentProjectId});currentChatId=created.chatId;await loadChats();}const chat=currentChatId,r=await kbCall('knowledge.list',{chatId:chat});kbOpen('当前对话的知识来源');kbBody.append(kbNode('p','勾选后，用于此对话的问答及文档生成；最多 12 个。'));const boxes=[];for(const link of r.links){const label=kbNode('label'),box=kbNode('input');label.className='checkbox';box.type='checkbox';box.checked=r.selected.includes(link.id);box.value=link.id;label.append(box,document.createTextNode((link.scope==='enterprise'?'企业 · ':'个人 · ')+link.name));kbBody.append(label);boxes.push(box);}if(!boxes.length)kbBody.append(kbNode('p','请先在知识库弹窗中关联来源。'),kbButton('打开知识库',async()=>{kbDialog.close();await window.openKnowledge();}));kbBody.append(kbButton('保存选择',async()=>{if(chat!==currentChatId)throw Error('对话已切换，请重新选择');await kbCall('knowledge.choose',{chatId:chat,ids:boxes.filter(b=>b.checked).map(b=>b.value)});kbDialog.close();setStatus('知识来源已保存到当前对话');}));}
 function renderKnowledgeCitations(sources){const details=kbNode('details');details.className='project-citations';details.append(kbNode('summary',`知识库参考资料 · ${sources.length} 份`));for(const source of sources){details.append(kbButton(`${source.scope==='enterprise'?'企业':'个人'} · ${source.libraryName} / ${source.title} · L${source.lineStart}–${source.lineEnd}`,async()=>{const r=await kbCall('knowledge.list'),link=r.links.find(l=>l.id===source.linkId);if(!link)throw Error('知识库已解除关联，请重新关联后查看');await kbView(link,source.id);}));}return details;}
 byId('knowledge-dialog-close').onclick=()=>kbDialog.close();
+byId('knowledge-overlay-close').onclick=()=>closeKnowledgeOverlay();
 byId('knowledge-enterprise').onclick=()=>kbAssociate('enterprise');byId('knowledge-personal').onclick=()=>kbAssociate('personal');
 byId('knowledge-sources').onclick=()=>kbChoose().catch(e=>setStatus(e.message));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!knowledgeOverlay.hidden&&!kbDialog.open)closeKnowledgeOverlay();});

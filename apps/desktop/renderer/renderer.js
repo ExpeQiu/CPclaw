@@ -173,16 +173,19 @@ function onAction(id, action) {
 function setStatus(message) { document.getElementById("status").textContent = message; }
 
 function openPanel(name) {
-  if(name === "sources" && typeof loadKnowledge === "function")void loadKnowledge().catch(error=>setStatus(error.message));
+  if(name === "sources"){void window.openKnowledge?.();return;}
+  window.closeKnowledgeOverlay?.();
   if(name === "settings" && typeof loadDesktopSettings === "function")void loadDesktopSettings();
   if(name==="documents" && typeof documentStructureTab!=="undefined" && documentStructureTab==="folders")void renderProjectFolder();
   if(name!=="documents" && typeof dismissDocumentWorkspace==="function")dismissDocumentWorkspace();
   document.getElementById("inspector").hidden = false;
-  for (const panel of ["settings", "sources", "review", "documents", "extensions"]) {
-    document.getElementById(`panel-${panel}`).hidden = panel !== name;
+  for (const panel of ["settings", "review", "documents", "extensions"]) {
+    const panelNode = document.getElementById(`panel-${panel}`);
+    if(panelNode) panelNode.hidden = panel !== name;
   }
-  document.getElementById("panel-title").textContent = { extensions: "即梦 · 自动工作流", settings: "设置与诊断", sources: "知识库", review: "审阅成果", documents: "文档与预览" }[name];
+  document.getElementById("panel-title").textContent = { extensions: "即梦 · 自动工作流", settings: "设置与诊断", review: "审阅成果", documents: "文档与预览" }[name];
 }
+window.openPanel = openPanel;
 
 function renderTasks() {
   const list = document.getElementById("tasks");

@@ -165,6 +165,19 @@ function renderChat() {
       if(message.artifactError){const warning=document.createElement("p");warning.textContent=`文档未保存：${message.artifactError}`;article.append(warning);}
       if (message.content) {
         const actions=document.createElement('div');actions.className='message-actions';
+        if(message.state==='done'&&canOfferSkillDistill(chatMessages,message)){
+          const distill=messageIconButton('提炼成Skill','✦',async()=>{
+            const actor=chatAccount,chatId=currentChatId;setStatus('正在提炼 Skill 草稿…');
+            const result=await chatCall('chat.distill-skill',{chatId,messageId:message.id});
+            if(actor!==chatAccount||chatId!==currentChatId)return;
+            if(!result.ok)throw Error(result.message);
+            await window.openSkillDraft(result.skillId);
+            setStatus(result.mode==='mock'?'已生成 Mock Skill 草稿，请编辑后保存':'Skill 草稿已保存，审阅后可个人使用或提交审核。');
+          });
+          distill.classList.add('distill-skill');
+          distill.disabled=Boolean(runningChatId);
+          actions.append(distill);
+        }
         if(message.state==='done'&&!chatArtifacts.some(a=>a.message===message.id)){
           const save=documentButton(message.hasServiceSteps?'保存创作过程.md':'保存为 .md',async()=>{
             const actor=chatAccount,chatId=currentChatId;
@@ -192,19 +205,6 @@ function renderChat() {
           });
           like.classList.toggle('is-liked',Boolean(message.liked));
           actions.append(like);
-          if(canOfferSkillDistill(chatMessages,message)){
-            const distill=messageIconButton('提炼成Skill','✦',async()=>{
-              const actor=chatAccount,chatId=currentChatId;setStatus('正在提炼 Skill 草稿…');
-              const result=await chatCall('chat.distill-skill',{chatId,messageId:message.id});
-              if(actor!==chatAccount||chatId!==currentChatId)return;
-              if(!result.ok)throw Error(result.message);
-              await window.openSkillDraft(result.skillId);
-              setStatus(result.mode==='mock'?'已生成 Mock Skill 草稿，请编辑后保存':'Skill 草稿已保存，审阅后可个人使用或提交审核。');
-            });
-            distill.classList.add('distill-skill');
-            distill.disabled=Boolean(runningChatId);
-            actions.append(distill);
-          }
         }
         article.append(actions);
       }

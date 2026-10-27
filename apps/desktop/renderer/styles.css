@@ -108,26 +108,30 @@ hr {
   display:flex;
   align-items:center;
   gap:8px;
-  padding:0 8px;
-  margin:12px 0 20px}
+  padding:6px 8px;
+  margin:8px 0 4px}
 .search input {
   border:0;
   background:transparent;
   margin:0;
-  padding:7px 0;
-  font-size:12px}
-.search span {
-  font-size:23px}
+  padding:0;
+  font-size:12px;
+  text-align:left;
+  flex:1;
+  min-width:0}
 .section-label {
-  font-size:10px;
-  letter-spacing:1px;
+  font-size:11px;
+  letter-spacing:.4px;
   color:#858a80;
   display:flex;
   align-items:center;
-  justify-content:space-between;
-  padding:8px}
-.section-label span {
-  letter-spacing:0}
+  gap:8px;
+  padding:6px 8px}
+.section-label .sidebar-text {
+  letter-spacing:.4px;
+  flex:1;
+  min-width:0;
+  text-align:left}
 .workspace-name {
   padding:12px 8px;
   font-size:12px}
@@ -135,11 +139,13 @@ hr {
   margin-left:7px;
   font-weight:550}
 .recent-label {
-  margin-top:15px}
+  margin-top:4px}
 .recent-label button {
   border:0;
   background:transparent;
-  padding:0 3px}
+  padding:0 3px;
+  margin-left:auto;
+  flex-shrink:0}
 #tasks {
   overflow:auto;
   flex:1;
@@ -511,12 +517,17 @@ header {
 .settings-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.5}
 #settings-kernel-status.settings-ok,.settings-ok{color:#2f8a4e}
 #settings-kernel-status.settings-fail,.settings-fail{color:#c23b2e}
+#diagnostics-dialog .diagnostics-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px}
+#diagnostics-dialog .diagnostics-heading h2{margin:0;flex:1;min-width:0}
+#diagnostics-dialog .diagnostics-heading-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+#diagnostics-dialog .diagnostics-heading-actions button{font-size:12px;padding:7px 12px}
 #diagnostics-dialog h3{font-size:13px;margin:16px 0 8px}
 #diagnostics-dialog .diagnose-timeline{margin:0;padding-left:1.2em;font-size:12px;line-height:1.7}
 #diagnostics-dialog .diagnose-timeline li[data-status=error]{color:#c23b2e}
 #diagnostics-dialog .diagnose-timeline li[data-status=ok]{color:#2f8a4e}
 #diagnostics-dialog .diagnose-timeline li[data-status=warn]{color:#9a6b1f}
 #diagnostics-dialog .diagnose-logs{max-height:160px;overflow:auto;font-size:11px;background:#f5f7f1;padding:10px;border-radius:8px}
+#diagnostics-dialog .diagnose-repair-log{font-size:12px;line-height:1.65;margin:8px 0;padding:10px 12px;background:#f5f7f1;border-radius:8px}
 #panel-settings select{width:100%;padding:10px;border:1px solid #dfe1da;border-radius:8px;background:#fff;color:inherit;margin-top:8px}
 details {
   font-size:11px;
@@ -615,12 +626,12 @@ header {
 .message-label { font-size: 11px; font-weight: 600; color: #74836b; margin-bottom: 10px; }
 .message-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; tab-size: 2; }
 .message-meta { font-size: 10px; color: #909887; margin-top: 12px; display: inline-block; }
-.message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
+.message-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; margin-top: 8px; margin-left: 0; padding-left: 0; width: 100%; }
 .message-action, .copy-message { font-size: 10px; padding: 3px 8px; border: 0; background: transparent; color: #7c8772; border-radius: 6px; }
 .message-action:hover, .copy-message:hover, .message-icon:hover { background: #eef1ea; color: #55634d; }
 .message-icon { font-size: 13px; line-height: 1; padding: 4px 7px; border: 0; background: transparent; color: #7c8772; border-radius: 6px; min-width: 28px; }
 .message-icon.is-liked { color: #b7791f; background: #f7f0e2; }
-.message-icon.distill-skill { color: #6a7a63; }
+.message-icon.distill-skill { color: #6a7a63; order: -1; margin-left: 0; padding-left: 0; }
 #chat-retry { font-size: 12px; margin-bottom: 20px; }
 #chat-stop { color: #735c41; }
 #account-feedback { overflow-wrap: anywhere; }
@@ -686,7 +697,8 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{flex:1;wid
 .quick-rail button:hover::after,.quick-rail button:focus-visible::after{opacity:1;visibility:visible}
 .quick-rail-divider{flex:0 0 auto;height:1px;width:22px;background:#e0e5da;margin:4px 0}
 #rail-account{height:36px;min-height:36px}#rail-avatar{display:flex;align-items:center;justify-content:center;flex:none;height:25px;width:25px;min-height:25px;min-width:25px;aspect-ratio:1;border-radius:50%;background:#72917b;color:white;font-size:11px;font-weight:600}
-.market-overlay{left:calc(var(--quick-rail-width) + var(--sidebar-width) + 14px)!important}
+.market-overlay{position:fixed;inset:12px 12px 12px calc(var(--quick-rail-width) + var(--pane-sidebar-width,var(--sidebar-width)) + 14px);z-index:30;background:#f6f8f7;border:1px solid #dfe7e2;border-radius:16px;box-shadow:0 12px 50px #17233a24;display:flex;flex-direction:column;overflow:hidden}
+.market-overlay[hidden]{display:none!important}
 @media(max-width:1100px){:root{--sidebar-width:210px}.inspector:has(#panel-documents:not([hidden])){width:calc(100vw - var(--quick-rail-width) - var(--sidebar-width))}}
 @media(max-width:800px){:root{--sidebar-width:175px}.inspector:has(#panel-documents:not([hidden])){width:calc(100vw - var(--quick-rail-width) - var(--sidebar-width))}}
 .markdown-preview :not(pre)>code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:#f0f2ed;border:1px solid #e5e9df;padding:1px 4px;border-radius:4px}.markdown-preview strong{font-weight:650}
@@ -706,8 +718,22 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 /* 聊天侧栏只显示历史；所有全局入口集中在快捷栏。 */
 .history-scroll{flex:1;min-height:0;overflow:auto}
-.sidebar .recent-label{margin-top:16px}
+.sidebar .recent-label{margin-top:4px}
 .sidebar .search{flex-shrink:0}
+.sidebar .sidebar-icon,
+.sidebar .project-group>summary::before{
+  flex:0 0 16px;
+  width:16px;
+  height:16px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:13px;
+  line-height:1;
+  color:#8a9284}
+.sidebar .sidebar-text,
+.sidebar .search input{
+  text-align:left}
 
 /* 右侧面板从内容区顶部开始；聊天标题仅占聊天栏。 */
 .work-area{position:relative}
@@ -742,11 +768,11 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 .document-more{margin:0}.document-more-popover>button{margin:0}
 /* 本地项目下组织聊天，项目级操作随项目显示。 */
-.project-group{margin:8px 0;color:#5c6656}
-.project-group>summary{display:flex;align-items:center;gap:3px;cursor:pointer;list-style:none;padding:5px 3px;font-size:12px}
+.project-group{margin:2px 0;color:#5c6656}
+.project-group>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:6px 8px;font-size:12px}
 .project-group>summary::before{content:'▸';color:#929b89}.project-group[open]>summary::before{content:'▾'}
-.project-group>summary>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.project-group>summary>button{margin:0;border:0;background:transparent;padding:3px 5px}
+.project-group>summary>.sidebar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.project-group>summary>button{margin:0;border:0;background:transparent;padding:3px 5px;flex-shrink:0}
 .project-empty{padding:2px 12px 8px;font-size:11px;color:#939b8b}
 .project-chat-row{display:flex;align-items:center;position:relative}
 .project-chat-row .task-row{min-width:0;padding-right:28px}
@@ -767,8 +793,13 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 @keyframes chat-progress-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.chat-progress li[data-state=running]::before{animation:none}}
 
-/* 知识库：沿用右侧面板，长路径及正文在卡片内换行。 */
-.knowledge-section h2{line-height:1.6}.knowledge-card{border:1px solid var(--border,#ddd);border-radius:10px;padding:12px;margin-top:12px;overflow-wrap:anywhere}.knowledge-card p{margin:8px 0;font-size:12px}.knowledge-card small{display:block;overflow-wrap:anywhere}.knowledge-dialog{width:min(640px,calc(100vw - 40px));max-height:85vh;overflow:auto;border:1px solid #ddd;border-radius:14px;padding:24px}.knowledge-dialog::backdrop{background:#0005}.knowledge-dialog textarea{width:100%;box-sizing:border-box;resize:vertical}.knowledge-dialog details{margin:12px 0;overflow-wrap:anywhere}.knowledge-document{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#f5f5f2;padding:12px;max-height:45vh;overflow:auto}.knowledge-dialog button{margin:6px 6px 6px 0}.project-citations button{display:block;max-width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere}
+/* 知识库：与技能市场同款弹层；长路径及正文在卡片内换行。 */
+.knowledge-overlay{background:#f6f8f7!important}
+.knowledge-overlay>#knowledge-overlay-close{align-self:flex-end;margin:8px 18px;border:0;background:none;color:#4d6a5d;padding:8px;cursor:pointer;font-size:13px}
+.knowledge-overlay-body{flex:1;min-height:0;overflow:auto;padding:8px 28px 36px}
+.knowledge-overlay-body>h1{font-size:24px;letter-spacing:-.4px;margin:0 0 8px}
+.knowledge-overlay-body>.muted{margin:0 0 22px}
+.knowledge-section h2{line-height:1.6;font-size:16px;margin:0 0 8px}.knowledge-card{border:1px solid #dfe7e2;border-radius:10px;padding:12px;margin-top:12px;background:#fff;overflow-wrap:anywhere}.knowledge-card p{margin:8px 0;font-size:12px}.knowledge-card small{display:block;overflow-wrap:anywhere}.knowledge-dialog{width:min(640px,calc(100vw - 40px));max-height:85vh;overflow:auto;border:1px solid #ddd;border-radius:14px;padding:24px}.knowledge-dialog::backdrop{background:#0005}.knowledge-dialog textarea{width:100%;box-sizing:border-box;resize:vertical}.knowledge-dialog details{margin:12px 0;overflow-wrap:anywhere}.knowledge-document{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#f5f5f2;padding:12px;max-height:45vh;overflow:auto}.knowledge-dialog button{margin:6px 6px 6px 0}.project-citations button{display:block;max-width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere}
 
 
 /* AI 回复直接渲染 Markdown；用户原文和代码保留原始空白。 */
@@ -852,7 +883,15 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .extension-service-add{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;height:28px;padding:0;border:1px solid #d7ded0;border-radius:7px;background:#fff;color:#637258;font-size:20px;line-height:1}
 .extension-service-add:hover{background:#edf1e7;border-color:#c9d5c0;color:#415339}
 .extension-service-add:focus-visible{outline:2px solid #9eae91;outline-offset:2px}
-.extension-service-list>p{font-size:11px;margin:0 0 18px}
+.extension-service-list>p,#extension-kind-blurb{font-size:11px;margin:0 0 12px;line-height:1.45}
+.extension-kind-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 10px}
+.extension-kind-tab{padding:8px 6px;border:1px solid #d7ded0;border-radius:8px;background:#fff;color:#5d6a55;font-size:11px;line-height:1.2}
+.extension-kind-tab[aria-selected=true]{background:#e8eedf;border-color:#b9c9ad;color:#31452b;font-weight:600}
+.extension-kind-tab:hover{background:#edf1e7}
+.extension-kind-actions{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
+.extension-kind-actions label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#65735d}
+.extension-kind-actions input{padding:8px 10px;border:1px solid #d7ded0;border-radius:8px;background:#fff;color:#30312f;font-size:12px}
+.extension-kind-actions .button-row{margin:0}
 .extension-service-item{display:flex;flex-direction:column;gap:7px;width:100%;padding:13px 12px;border:1px solid transparent;border-radius:8px;text-align:left;background:transparent;overflow-wrap:anywhere}
 .extension-service-item strong{font-size:13px}.extension-service-item span{font-size:11px;color:#7a8670}
 .extension-service-item[aria-pressed=true]{background:#e8eedf;border-color:#d2ddc6;color:#405535}
@@ -879,4 +918,4 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .permission-menu{position:absolute;bottom:calc(100% + 12px);left:0;z-index:50;width:min(320px,calc(100vw - 48px));padding:8px;border:1px solid #e1e5dc;border-radius:14px;background:#fff;box-shadow:0 10px 36px #20301b26}.permission-menu p{font-size:12px;color:#788071;margin:8px 10px;line-height:1.5}.permission-menu button{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:4px;height:auto;min-height:0;text-align:left;width:100%;border:0;background:transparent;padding:10px 30px 10px 12px;position:relative;border-radius:9px;white-space:normal;line-height:1.45;color:inherit;font-size:inherit}.permission-menu button:hover{background:#f3f5ef}.permission-menu strong,.permission-menu small{display:block;max-width:100%;overflow-wrap:anywhere}.permission-menu strong{font-size:13px;font-weight:600;line-height:1.4;margin:0}.permission-menu small{font-size:12px;color:#7b8377;line-height:1.55;margin:0}.permission-menu [aria-checked="true"]:after{content:'✓';position:absolute;right:12px;top:12px;color:#657657}.permission-menu [data-permission-mode="full"] strong,.permission-menu [data-permission-mode="full"] small{color:#c44c20}.permission-menu .permission-lifetime{font-size:11px;line-height:1.5;border-top:1px solid #edf0e8;padding-top:8px;margin:8px 10px 4px}
 
 /* 技能市场在窄窗口保留快捷栏，使用完整工作区。 */
-@media(max-width:800px){.market-overlay{left:calc(var(--quick-rail-width) + 8px)!important;right:8px!important}}
+@media(max-width:800px){.market-overlay{inset:8px 8px 8px calc(var(--quick-rail-width) + 8px)}}

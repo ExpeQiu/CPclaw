@@ -1,6 +1,7 @@
 import {canAutoApprove} from './conversation-permissions.mjs';
 import {localService,executeLocalTool} from './local-tools.mjs';
 import {browserPageService,executeComputerUse,pageOriginsForService} from './computer-use.mjs';
+import {annotateService,SERVICE_KINDS,serviceKind} from './service-kinds.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,10 +10,25 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, extname, resolve } from 'node:path';
 const runFile = promisify(execFile);
 const supported = /^(version|model( list| find)?|voice list|canvas (current|ls|use|create)|node (find|show|quote|run|create (image|video|audio|text)|edit (image|video|audio|text))|operation (status|wait)|resource (get|download)|auth (status|account|login|wait))$/;
-export const dreaminaService = { id: 'dreamina', title: '即梦画布', type: 'CLI', target: join(homedir(), '.local', 'bin', process.platform==='win32'?'dreamina-canvas.exe':'dreamina-canvas'), builtin: true };
+export const dreaminaService = annotateService({ id: 'dreamina', title: '即梦画布', type: 'CLI', kind: SERVICE_KINDS.cli, target: join(homedir(), '.local', 'bin', process.platform==='win32'?'dreamina-canvas.exe':'dreamina-canvas'), builtin: true });
 export { browserPageService };
-export function publicServices(connectors = []) {
-  return [dreaminaService, localService, browserPageService, ...connectors.filter(c => c.enabled && ['CLI', 'MCP'].includes(c.type)).map(c => ({ id: c.id, title: c.title, type: c.type, target: c.target, ...(typeof c.pageUrl==='string'?{pageUrl:c.pageUrl}:{}), ...(Array.isArray(c.pageOrigins)?{pageOrigins:c.pageOrigins}:{}) }))];
+export { SERVICE_KINDS, serviceKind, annotateService };
+export function publicServices(connectors = [], localExtensions = []) {
+  const fromConnectors = connectors.filter(c => c.enabled && ['CLI', 'MCP'].includes(c.type)).map(c => annotateService({
+    id: c.id, title: c.title, type: c.type, target: c.target,
+    kind: c.type === 'MCP' ? SERVICE_KINDS.computerUse : SERVICE_KINDS.cli,
+    ...(typeof c.pageUrl==='string'?{pageUrl:c.pageUrl}:{}),
+    ...(Array.isArray(c.pageOrigins)?{pageOrigins:c.pageOrigins}:{}),
+  }));
+  const locals = (localExtensions || []).filter(s => s && s.enabled !== false).map(annotateService);
+  const localIds = new Set(locals.map(s => s.id));
+  return [
+    annotateService({ ...dreaminaService }),
+    annotateService({ ...localService, kind: SERVICE_KINDS.appDriver }),
+    annotateService({ ...browserPageService, kind: SERVICE_KINDS.computerUse }),
+    ...locals,
+    ...fromConnectors.filter(c => !localIds.has(c.id)),
+  ];
 }
 // 服务回执是数据；凭据、临时访问地址不进入模型上下文、聊天历史或日志。
 export function sanitizeServiceResult(value) {
@@ -83,14 +99,26 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     const { service } = context;
     check(context,signal);
     if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context,request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
-    if(service?.id===browserPageService.id&&service.builtin===true){
+    if(serviceKind(service)===SERVICE_KINDS.appDriver&&service.type==='APP'&&typeof service.root==='string'){
+      const root=realpathSync(service.root);
+      return sanitizeServiceResult(await executeLocalTool({
+        context:{...context,workingDirectory:root,projectRoot:root},
+        request,signal,run:run===runFile?undefined:run,
+        authorize:details=>consent(context,signal,details,JSON.stringify(['app-driver',root])),
+      }));
+    }
+    if((service?.id===browserPageService.id&&service.builtin===true)||(serviceKind(service)===SERVICE_KINDS.computerUse&&service.type==='WEB')){
       if(!computerUsePage)throw Error('原生页控制器未接入');
-      const allowedOrigins=pageOriginsForService(context.pageService||service).length
-        ? pageOriginsForService(context.pageService||service)
+      const pageService=service.type==='WEB'?service:context.pageService;
+      const allowedOrigins=pageOriginsForService(pageService||service).length
+        ? pageOriginsForService(pageService||service)
         : (computerUsePage.getOrigins?.()||[]);
       if(Array.isArray(request?.origins))for(const o of request.origins)computerUsePage.allowOrigin?.(o);
+      const computerRequest=service.type==='WEB'&&request?.action==='open'&&!request.url
+        ? {...request,url:service.pageUrl||`${pageOriginsForService(service)[0]||''}/`}
+        : request;
       return sanitizeServiceResult(await executeComputerUse({
-        page:computerUsePage,signal,request,allowedOrigins,
+        page:computerUsePage,signal,request:computerRequest,allowedOrigins,
         authorize:details=>consent(context,signal,details,JSON.stringify(['browser-page',computerUsePage.getUrl?.()||'',details.forceApproval?'sensitive':'act'])),
       }));
     }

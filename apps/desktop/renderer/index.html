@@ -5,8 +5,8 @@
 <nav class="quick-rail" aria-label="快捷入口"><div class="quick-rail-top"><button id="rail-home" data-rail="home" aria-label="工作台" data-tooltip="工作台"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg></button><button id="rail-chat" data-rail="chat" aria-label="新建聊天" data-tooltip="新建聊天（⌘ N）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13l4-4h4M16 15v6m-3-3h6"/></svg></button><button id="rail-project" aria-label="添加项目" data-tooltip="添加项目 · 选择本地文件夹"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h7l2 2h9v13H3Z M12 11v6m-3-3h6"/></svg></button><div class="quick-rail-divider"></div><button id="rail-documents" data-rail="documents" aria-label="对话文档" data-tooltip="对话文档"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg></button><button id="rail-market" data-rail="market" aria-label="技能市场" data-tooltip="技能市场"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button><button id="rail-sources" data-rail="sources" aria-label="知识库" data-tooltip="知识库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H4Zm16 0h-4a3 3 0 0 0-3 3M20 4v14h-3"/></svg></button><button id="rail-extensions" data-rail="extensions" aria-label="拓展" data-tooltip="拓展"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z"/></svg></button></div><div class="quick-rail-bottom"><button id="rail-settings" data-rail="settings" aria-label="设置与诊断" data-tooltip="设置与诊断"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1Z"/><circle cx="12" cy="12" r="3"/></svg></button><button id="rail-account" data-rail="account" aria-label="账号与登录" data-tooltip="账号与登录"><span id="rail-avatar">我</span></button></div></nav>
 <aside class="sidebar">
   <div class="brand"><span class="brand-mark">Q</span> CPclaw <span class="local">桌面版</span></div>
-  <label class="search"><span>⌕</span><input id="task-search" placeholder="搜索历史记录" aria-label="搜索历史记录"></label>
-  <div class="section-label recent-label">项目与聊天 <button id="refresh" aria-label="刷新记录">↻</button></div><div class="history-scroll"><nav id="chats" aria-label="聊天列表"></nav>
+  <label class="search"><span class="sidebar-icon" aria-hidden="true">⌕</span><input id="task-search" placeholder="搜索历史记录" aria-label="搜索历史记录"></label>
+  <div class="section-label recent-label"><span class="sidebar-icon" aria-hidden="true">☰</span><span class="sidebar-text">项目与聊天</span><button id="refresh" aria-label="刷新记录">↻</button></div><div class="history-scroll"><nav id="chats" aria-label="聊天列表"></nav>
   <details id="legacy-history" hidden><summary class="section-label">早期记录</summary><nav id="tasks" aria-label="早期记录"></nav></details>
   </div>
 </aside>
@@ -65,11 +65,6 @@
         <pre id="doctor-out">尚未运行诊断</pre>
         <details><summary>受理接口检查</summary><button id="send">发送受理请求</button></details>
       </section>
-      <section id="panel-sources" hidden>
-        <div class="knowledge-section"><h2>关联 企业知识库（wiki）</h2><p class="muted">关联本地目录或 CPclaw 平台企业知识库。</p><button id="knowledge-enterprise">＋ 关联知识库</button><div id="knowledge-enterprise-list"></div></div>
-        <hr><div class="knowledge-section"><h2>关联 个人知识库（wiki）</h2><p class="muted">关联个人目录或平台 Wiki，仅供本人使用。</p><button id="knowledge-personal">＋ 关联知识库</button><div id="knowledge-personal-list"></div></div>
-        <p id="knowledge-feedback" role="status" class="muted"></p>
-      </section>
       <section id="panel-documents" class="document-workspace" hidden>
         <div class="document-workbench">
           <div class="document-main">
@@ -90,20 +85,24 @@
       <section id="panel-review" hidden><h2>早期记录与变更</h2><label>单份报告材料<input id="material-path" placeholder="文本文件的绝对路径"></label><label>输出目录<input id="output" placeholder="本地目录的绝对路径"></label><p class="muted">生成的报告先进入待审列表，接受后写入输出目录。</p><div class="button-row"><button id="stage" class="primary">生成并暂存报告</button><button id="cancel-report">取消生成</button></div><hr><div id="changes">没有待审变更</div></section>
     </aside>
   </div>
-</main><dialog id="extension-picker" class="extension-picker" aria-labelledby="extension-picker-title"><div class="extension-picker-heading"><span>应用服务 · 选择与配置</span><button id="extension-picker-close" aria-label="关闭拓展选择">×</button></div><div id="extension-catalog">
+</main><dialog id="extension-picker" class="extension-picker" aria-labelledby="extension-picker-title"><div class="extension-picker-heading"><span>拓展 · 三类服务</span><button id="extension-picker-close" aria-label="关闭拓展选择">×</button></div><div id="extension-catalog">
   <nav class="extension-service-list" aria-label="已配置的应用服务">
-    <div class="extension-service-list-heading"><h2 id="extension-picker-title">应用服务</h2><button id="extension-manage-services" class="extension-service-add" type="button" aria-label="配置其他应用服务" title="配置其他应用服务">＋</button></div>
-    <p class="muted">本机 CLI · 网页 / SaaS（MCP）</p>
+    <div class="extension-service-list-heading"><h2 id="extension-picker-title">拓展服务</h2><button id="extension-manage-services" class="extension-service-add" type="button" aria-label="在技能市场配置 CLI 连接器" title="在技能市场配置 CLI 连接器">＋</button></div>
+    <div class="extension-kind-tabs" role="tablist" aria-label="服务类型">
+      <button type="button" class="extension-kind-tab" data-kind="computer-use" aria-selected="true">Computer Use</button>
+      <button type="button" class="extension-kind-tab" data-kind="app-driver" aria-selected="false">驱动应用</button>
+      <button type="button" class="extension-kind-tab" data-kind="cli" aria-selected="false">CLI 三方</button>
+    </div>
+    <p id="extension-kind-blurb" class="muted">直接控制网页；登录与支付需请示</p>
+    <div id="extension-kind-actions" class="extension-kind-actions"></div>
     <div id="extension-other-services"></div>
-    <button id="extension-service-dreamina" class="extension-service-item" type="button" aria-pressed="true" aria-controls="extension-service-details"><strong>即梦画布</strong><span>图片、视频、音频与画布</span></button>
   </nav>
   <section id="extension-service-details" class="extension-config-details" aria-labelledby="extension-detail-title">
     <header class="extension-detail-heading"><h2 id="extension-detail-title">即梦画布</h2><p class="muted">图片、视频、音频与画布 · dreamina-canvas CLI</p></header>
     <p id="extension-summary" role="status">尚未检查 CLI</p>
-    <div class="button-row"><button id="extension-check">检查连接</button><button id="extension-start" class="primary">选择并打开</button></div>
+    <div class="button-row"><button id="extension-check">检查连接</button><button id="extension-remove-local" type="button" hidden>移出本机列表</button><button id="extension-start" class="primary">选择并打开</button></div>
     <hr>
     <p id="extension-feedback" role="status" aria-live="polite"></p>
-
   </section>
 </div></dialog><dialog id="service-approval" class="service-approval" aria-labelledby="service-approval-title">
   <form id="service-approval-form">
@@ -117,4 +116,4 @@
     <p class="muted">授权可随时在自动工作流撤销；切换账号或对话后失效。</p>
     <div class="button-row"><button id="service-approval-deny" type="button">拒绝</button><button id="service-approval-confirm" type="submit" class="primary">授权并继续</button></div>
   </form>
-</dialog><dialog id="diagnostics-dialog" class="service-approval" aria-labelledby="diagnostics-title"><h2 id="diagnostics-title">对话自诊断</h2><div id="diagnostics-body" role="status" aria-live="polite"></div><div class="button-row"><button id="diagnostics-close">关闭</button></div></dialog><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./settings.js"></script><script src="./diagnostics.js"></script><script src="./projects.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./permissions.js"></script><script src="./composer-model.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>
+</dialog><dialog id="diagnostics-dialog" class="service-approval" aria-labelledby="diagnostics-title"><div class="diagnostics-heading"><h2 id="diagnostics-title">对话自诊断</h2><div class="diagnostics-heading-actions"><button id="diagnostics-repair" type="button" class="primary" hidden>执行修复</button><button id="diagnostics-close" type="button">关闭</button></div></div><div id="diagnostics-body" role="status" aria-live="polite"></div></dialog><section id="knowledge-overlay" class="market-overlay knowledge-overlay" hidden aria-label="知识库"><button type="button" id="knowledge-overlay-close">关闭知识库 ×</button><div class="knowledge-overlay-body"><h1>知识库</h1><p class="muted">关联本地目录或 CPclaw 平台 Wiki，供对话检索与文档生成引用。</p><div class="knowledge-section"><h2>关联 企业知识库（wiki）</h2><p class="muted">关联本地目录或 CPclaw 平台企业知识库。</p><button id="knowledge-enterprise" type="button">＋ 关联知识库</button><div id="knowledge-enterprise-list"></div></div><hr><div class="knowledge-section"><h2>关联 个人知识库（wiki）</h2><p class="muted">关联个人目录或平台 Wiki，仅供本人使用。</p><button id="knowledge-personal" type="button">＋ 关联知识库</button><div id="knowledge-personal-list"></div></div><p id="knowledge-feedback" role="status" class="muted"></p></div></section><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./settings.js"></script><script src="./diagnostics.js"></script><script src="./projects.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./permissions.js"></script><script src="./composer-model.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>
