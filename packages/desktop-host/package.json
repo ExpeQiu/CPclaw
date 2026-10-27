@@ -19,6 +19,10 @@
     "./account-session": {
       "types": "./dist/account-session.d.ts",
       "import": "./dist/account-session.js"
+    },
+    "./session-refresh": {
+      "types": "./dist/session-refresh.d.ts",
+      "import": "./dist/session-refresh.js"
     }
   },
   "scripts": {

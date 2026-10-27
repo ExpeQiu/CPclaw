@@ -40,7 +40,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(pageOriginsForService({ id: 'dreamina', builtin: true }), ['https://jimeng.jianying.com']);
     assert.equal(validatePageUrl('file:///etc/passwd', ['https://jimeng.jianying.com']).ok, false);
 
-    const service = { id: 'fixture-web', title: 'Fixture', type: 'MCP', target: `${origin}/mcp` };
+    const service = { id: 'fixture-web', title: 'Fixture', type: 'WEB', target: origin, pageUrl: `${origin}/`, pageOrigins: [origin] };
     const loaded = new Promise((resolve, reject) => {
       const check = setInterval(() => {
         const child = win.contentView.children[0];

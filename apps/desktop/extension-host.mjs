@@ -93,7 +93,7 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
           const abort=()=>settle({ok:false,code:'CANCELLED',message:'服务选择已取消'});
           combined.addEventListener('abort',abort,{once:true});
           selectionPending={id,ids:(request.services??[]).map(s=>s.id),settle};
-          send({state:'choose-service',selectionId:id,services:(request.services??[]).map(({id,title,type})=>({id,title,type}))});
+          send({state:'choose-service',selectionId:id,services:(request.services??[]).map(({id,title,type,kind,pageUrl,pageOrigins,root})=>({id,title,type,kind,pageUrl,pageOrigins,root}))});
         });
       }
       return await runtime.execute(request,request.request,combined);
@@ -241,9 +241,9 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       return { ok: true, origins, hasPage: origins.length > 0 };
     }
     if (input?.action !== 'open' && input?.action !== 'reload') return { ok: false, message: '暂不支持此应用操作。' };
-    let origins = Array.isArray(input.origins) ? input.origins.filter(o => typeof o === 'string') : viewOrigins;
-    if (input.service) origins = pageOriginsForService(input.service);
-    if (!origins.length) origins = pageOriginsForService({ id: 'dreamina', builtin: true });
+    let origins = Array.isArray(input.origins) ? input.origins.filter(o => typeof o === 'string') : [];
+    if (input.service) origins = [...new Set([...origins, ...pageOriginsForService(input.service)])];
+    if (!origins.length) origins = viewOrigins.length ? viewOrigins : pageOriginsForService({ id: 'dreamina', builtin: true });
     let target = origins[0] ? `${origins[0]}/` : DREAMINA_HOME;
     if (input.url) {
       const checked = validatePageUrl(input.url, origins);

@@ -26,7 +26,7 @@
     const push=value=>{try{const u=new URL(value);if(!['https:','http:'].includes(u.protocol)||u.username||u.password)return;if(!origins.includes(u.origin))origins.push(u.origin);}catch{}};
     if(Array.isArray(service.pageOrigins))for(const o of service.pageOrigins)push(o);
     if(typeof service.pageUrl==='string')push(service.pageUrl);
-    if((service.type==='MCP'||service.type==='WEB')&&typeof service.target==='string')push(service.target);
+    if(service.type==='WEB'&&typeof service.target==='string')push(service.target);
     return origins;
   }
   function canNative(service){return pageOrigins(service).length>0;}
@@ -48,14 +48,34 @@
   }
   function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&!approval.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
   function configure(){
+    const choosing=Boolean(selectionId);
+    const inKind=Boolean(selected)&&(choosing||serviceKind(selected)===activeKind);
+    if(!inKind){
+      el('extension-detail-title').textContent=activeKind==='app-driver'?'驱动应用':activeKind==='computer-use'?'Computer Use':'CLI 三方应用';
+      el('extension-detail-title').nextElementSibling.textContent=KIND_BLURB[activeKind]||'';
+      el('extension-check').hidden=true;
+      el('extension-remove-local').hidden=true;
+      el('extension-start').disabled=true;
+      el('extension-summary').textContent=activeKind==='cli'?'请从左侧选择一个 CLI 服务。':activeKind==='app-driver'?'请选择本地文件夹添加驱动应用，或选择左侧已有项。':'请添加网页，或选择左侧已有 Computer Use 服务。';
+      document.querySelectorAll('.extension-service-item').forEach(b=>b.setAttribute('aria-pressed','false'));
+      return;
+    }
     el('extension-detail-title').textContent=selected.title;
     el('extension-detail-title').nextElementSibling.textContent=kindSubtitle(selected);
     el('extension-check').hidden=selected.id!=='dreamina';
     el('extension-remove-local').hidden=!selected.local;
+    el('extension-start').disabled=false;
     el('extension-summary').textContent=kindSummary(selected);
     document.querySelectorAll('.extension-service-item').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.service===selected.id)));
   }
-  function select(service){selected=service;activeKind=serviceKind(service);renderKindChrome();configure();}
+  function select(service){
+    if(!service)return;
+    if(!selectionId&&serviceKind(service)!==activeKind)return;
+    selected=service;
+    if(selectionId)activeKind=serviceKind(service);
+    renderKindChrome();
+    configure();
+  }
   function renderKindChrome(){
     document.querySelectorAll('.extension-kind-tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.kind===activeKind)));
     el('extension-kind-blurb').textContent=KIND_BLURB[activeKind]||'';
@@ -78,18 +98,21 @@
   }
   function renderServiceList(){
     const list=el('extension-other-services');list.replaceChildren();
-    const items=services.filter(s=>serviceKind(s)===activeKind);
+    const choosing=Boolean(selectionId);
+    const items=choosing?services:services.filter(s=>serviceKind(s)===activeKind);
     if(!items.length){
-      const empty=document.createElement('p');empty.className='muted';empty.textContent=activeKind==='cli'?'尚未配置其他 CLI；可使用内置即梦或去技能市场添加。':activeKind==='app-driver'?'尚未添加驱动应用；请选择本地文件夹。':'可使用内置原生页，或添加网页地址。';
+      const empty=document.createElement('p');empty.className='muted';empty.textContent=activeKind==='cli'?'尚未配置 CLI；内置即梦应出现在此列表，或去技能市场添加连接器。':activeKind==='app-driver'?'尚未添加驱动应用；请选择本地文件夹。':'可使用内置原生页，或添加网页地址。';
       list.append(empty);
+      selected=null;
+    }else{
+      for(const service of items){
+        const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;
+        const strong=document.createElement('strong');strong.textContent=service.title;
+        const text=document.createElement('span');text.textContent=kindSubtitle(service);
+        button.append(strong,text);button.onclick=()=>select(service);list.append(button);
+      }
+      selected=items.some(s=>s.id===selected?.id)?items.find(s=>s.id===selected.id):items[0];
     }
-    for(const service of items){
-      const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;
-      const strong=document.createElement('strong');strong.textContent=service.title;
-      const text=document.createElement('span');text.textContent=kindSubtitle(service);
-      button.append(strong,text);button.onclick=()=>select(service);list.append(button);
-    }
-    if(!items.some(s=>s.id===selected.id))selected=items[0]||services.find(s=>serviceKind(s)===activeKind)||services[0]||selected;
     configure();
   }
   async function refreshServices(){
@@ -161,13 +184,18 @@
     void mode(serviceKind(activeService)==='computer-use'&&canNative(activeService));
   };
   window.executionServiceName=id=>services.find(s=>s.id===id)?.title??(id==='dreamina'?'即梦画布':'');
-  for(const tab of document.querySelectorAll('.extension-kind-tab'))tab.onclick=()=>{activeKind=tab.dataset.kind;renderKindChrome();renderServiceList();};
+  for(const tab of document.querySelectorAll('.extension-kind-tab'))tab.onclick=()=>{
+    activeKind=tab.dataset.kind;
+    renderKindChrome();
+    renderServiceList();
+  };
   el('extension-check').onclick=el('extension-recheck').onclick=check;
   el('extension-remove-local').onclick=()=>void removeLocal();
   el('extension-start').onclick=async()=>{
+    if(!selected||serviceKind(selected)!==activeKind){feedback('请先选择当前分类下的服务');return;}
     el('extension-start').disabled=true;
     try{if(selectionId){const r=await action({action:'choose-service',selectionId,serviceId:selected.id});if(!r.ok)return;selectionId='';window.showServiceWorkspace(selected);}else if(window.chooseExecutionService){if(!await window.chooseExecutionService(selected))return;}else window.showServiceWorkspace(selected);picker.close();}
-    finally{el('extension-start').disabled=false;sync();}
+    finally{el('extension-start').disabled=!selected||serviceKind(selected)!==activeKind;sync();}
   };
   el('extension-manage-services').onclick=()=>{picker.close();el('rail-market').click();};
   window.openExtensionPicker=async()=>{
@@ -238,6 +266,14 @@
       if(!picker.open)picker.showModal();
       activeKind=serviceKind(services[0]||selected);renderKindChrome();renderServiceList();
       el('extension-summary').textContent='请选择此次任务使用的服务，随后申请操作授权。';sync();return;
+    }
+    if(event.state==='service-list'){
+      services=(event.services??[]).map(s=>({...s,kind:serviceKind(s)}));
+      renderKindChrome();renderServiceList();sync();return;
+    }
+    if(event.state==='service-list'){
+      services=(event.services??[]).map(s=>({...s,kind:serviceKind(s)}));
+      renderKindChrome();renderServiceList();sync();return;
     }
     if(event.state==='permission'){permission(event);return;}
     if(event.state==='result'&&event.type==='authorization'){if(event.chatId!==currentChatId||event.actorId!==chatAccount)return;el('extension-cli-status').textContent='请在已打开的官方页面完成授权，然后在左侧继续。'+(event.userCode?' 验证码：'+event.userCode:'');return;}

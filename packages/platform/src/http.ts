@@ -318,7 +318,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       let serviceContext: ServiceContext | undefined;
       if(body.serviceTools!==undefined){
         const c=objectOf(body.serviceTools);
-        if(!c||!Array.isArray(c.services)||c.services.length>30||c.services.some(v=>{const s=objectOf(v);return !s||typeof s.id!=='string'||s.id.length>64||typeof s.title!=='string'||s.title.length>100||!['CLI','MCP'].includes(String(s.type));})||typeof c.activeId!=='string'||c.activeId!==''&&!c.services.some(s=>s.id===c.activeId)){sendJson(res,400,{ok:false,message:'应用服务目录无效'});return;}
+        if(!c||!Array.isArray(c.services)||c.services.length>30||c.services.some(v=>{const s=objectOf(v);return !s||typeof s.id!=='string'||s.id.length>64||typeof s.title!=='string'||s.title.length>100||!['CLI','MCP','WEB','APP'].includes(String(s.type));})||typeof c.activeId!=='string'||c.activeId!==''&&!c.services.some(s=>s.id===c.activeId)){sendJson(res,400,{ok:false,message:'应用服务目录无效'});return;}
         serviceContext={services:c.services.map(s=>({id:String(s.id),title:String(s.title),type:String(s.type)})),activeId:c.activeId};
       }
       const held = app.beginReport(token, id);

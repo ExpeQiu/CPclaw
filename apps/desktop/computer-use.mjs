@@ -40,7 +40,7 @@ export function pageOriginsForService(service) {
   };
   if (Array.isArray(service.pageOrigins)) for (const o of service.pageOrigins) push(o);
   if (typeof service.pageUrl === 'string') push(service.pageUrl);
-  if ((service.type === 'MCP' || service.type === 'WEB') && typeof service.target === 'string') push(service.target);
+  if (service.type === 'WEB' && typeof service.target === 'string') push(service.target);
   return origins;
 }
 

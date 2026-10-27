@@ -1,5 +1,7 @@
 export { readCurrentAccountSession, switchCurrentAccount, writeAccountSession } from "./account-session.js";
 export type { AccountSessionFile } from "./account-session.js";
+export { createSessionLock, createSessionRefresher, persistDesktopSession, readDesktopSession } from "./session-refresh.js";
+export type { SessionRefreshOptions, SessionRefreshResult } from "./session-refresh.js";
 export { acceptTask } from "./accept-task.js";
 export { beginCall, cancelRun, createRunControl, finishCancel, noteWrittenPath } from "./cancel.js";
 export type { RunControl } from "./cancel.js";

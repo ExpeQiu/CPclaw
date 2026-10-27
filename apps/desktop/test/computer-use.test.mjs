@@ -15,10 +15,11 @@ import {
 import {createServiceRuntime, publicServices} from '../service-runtime.mjs';
 import {mkdtempSync} from 'node:fs';
 
-test('page origins cover dreamina, MCP, and optional CLI pageUrl', () => {
+test('page origins cover dreamina, explicit web services, and optional CLI pageUrl', () => {
   assert.deepEqual(pageOriginsForService({ id: 'dreamina', builtin: true }), ['https://jimeng.jianying.com']);
-  assert.deepEqual(pageOriginsForService({ id: 'saas', type: 'MCP', target: 'https://saas.example/mcp' }), ['https://saas.example']);
+  assert.deepEqual(pageOriginsForService({ id: 'web', type: 'WEB', target: 'https://app.example' }), ['https://app.example']);
   assert.deepEqual(pageOriginsForService({ id: 'cli', type: 'CLI', target: '/bin/tool', pageUrl: 'https://app.example/home' }), ['https://app.example']);
+  assert.deepEqual(pageOriginsForService({ id: 'saas', type: 'MCP', target: 'https://saas.example/mcp' }), []);
   assert.equal(hasPageEntry({ id: 'cli', type: 'CLI', target: '/bin/tool' }), false);
   assert.equal(hasPageEntry({ id: 'dreamina', builtin: true }), true);
 });

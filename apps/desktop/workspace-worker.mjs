@@ -4,7 +4,8 @@ import { createInterface } from "node:readline";
 import { buildSyntheticReport, checkReport, parseTaskMode } from "@cpclaw/contracts";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { readCurrentAccountSession, writeAccountSession, runBoundReportLoop, exportDiagnosticPack, runDoctor } from "@cpclaw/desktop-host";
+import { readCurrentAccountSession, runBoundReportLoop, exportDiagnosticPack, runDoctor } from "@cpclaw/desktop-host";
+import { sessionRefresher } from "./session-refresh.mjs";
 import { openLocalWorkspace } from "@cpclaw/desktop-host/workspace";
 
 const dataDir = process.env.CPCLAW_DATA_DIR;
@@ -188,10 +189,10 @@ async function stageReport(actorId, input) {
         if (!response.ok) throw new Error(result.message ?? "平台请求失败");
         return result;
       };
-      const refreshed = await post("/v1/session/refresh", { refreshToken: session.session.refreshToken });
+      // 与聊天、技能市场共用同一续期单例，避免并发续期互相作废刷新令牌。
+      const refreshed = await sessionRefresher(dataDir).refresh();
+      if (!refreshed.ok) throw new Error(refreshed.message);
       if (refreshed.employeeId !== actorId) throw new Error("平台会话员工不匹配");
-      const saved = writeAccountSession(dataDir, { schemaVersion: 1, employeeId: actorId, sessionId: refreshed.sessionId, refreshToken: refreshed.refreshToken }, { makeCurrent: false });
-      if (!saved.ok) throw new Error(saved.message);
       if (process.env.CPCLAW_REPORT_ENGINE === "harness") {
         const generated = await runBoundReportLoop({
           homeParent: dataDir, platformBase: base, accessToken: refreshed.accessToken, materials: [{ fileName, paragraphs }], goal: task.goal, signal: controller.signal,

@@ -16,7 +16,10 @@
     "test:desktop:chat": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-chat.mjs",
     "test:desktop:market": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-market.mjs",
     "test:desktop:documents": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-documents.mjs",
-    "test:desktop:permissions": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-conversation-permissions.mjs"
+    "test:desktop:permissions": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-conversation-permissions.mjs",
+    "verify:session-refresh": "node scripts/verify-session-refresh.mjs",
+    "verify:market-session": "node scripts/verify-market-session.mjs",
+    "repair:desktop-session": "node scripts/repair-desktop-session.mjs"
   },
   "dependencies": {
     "@cpclaw/contracts": "workspace:*",

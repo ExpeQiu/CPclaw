@@ -23,6 +23,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { readCurrentAccountSession, writeAccountSession } from "@cpclaw/desktop-host/account-session";
+import { sessionRefresher } from "./session-refresh.mjs";
 
 const fail = (code, message) => ({ ok: false, code, message });
 
@@ -77,18 +78,21 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     }
     return response;
   }
+  /**
+   * 单飞续期：刷新令牌单次使用，并发续期会互相作废并丢失最新令牌。
+   * 技能市场首屏、聊天、知识库与报告工作区都从这里取访问令牌。
+   */
+  const refresher = sessionRefresher(dataDir);
   async function refreshSession(signal) {
     const base = platform();
     if (!base) throw new Error("请先设置平台地址并登录");
-    const session = account();
-    if (!session) throw new Error("请先登录平台");
-    const result = await (await post(base, "/v1/session/refresh", { refreshToken: session.refreshToken }, signal)).json();
-    sameActor(session.employeeId);
-    if(platform()!==base)throw Error("平台配置已变化，请重新登录");
-    if (result.employeeId !== session.employeeId) throw new Error("平台会话员工不匹配");
-    const saved = writeAccountSession(dataDir, { schemaVersion: 1, employeeId: result.employeeId, sessionId: result.sessionId, refreshToken: result.refreshToken }, { makeCurrent: false });
-    if (!saved.ok) throw new Error(saved.message);
-    return { base, token: result.accessToken, actor: session.employeeId };
+    // 刷新令牌是单次使用语义：并发续期会互相作废并丢失最新令牌。
+    // 单飞收敛后，同一时刻只有一个续期请求在途，其余调用方复用同一结果。
+    const result = await refresher.refresh();
+    if (!result.ok) throw new Error(result.message);
+    if (platform() !== base) throw new Error("平台配置已变化，请重新登录");
+    sameActor(result.employeeId);
+    return { base, token: result.accessToken, actor: result.employeeId };
   }
   function history(chatId) { return db.prepare("SELECT m.id,m.role,m.content,m.state,m.error,m.request,EXISTS(SELECT 1 FROM chat_service_steps s WHERE s.message=m.id) AS hasServiceSteps,r.sources,r.status AS retrievalStatus FROM chat_messages m LEFT JOIN chat_retrieval r ON r.assistant_message=m.id WHERE m.chat=? ORDER BY m.seq").all(chatId).map(row=>({...row,...db.prepare('SELECT started AS startedAt,finished AS finishedAt FROM chat_timing WHERE assistant_message=?').get(row.id),knowledgeSources:JSON.parse(db.prepare('SELECT sources FROM chat_knowledge WHERE message=?').get(row.id)?.sources??'[]'),sources:row.sources?JSON.parse(row.sources):[],activities:row.role==='assistant'?db.prepare('SELECT step,label,state FROM chat_activity WHERE assistant_message=? ORDER BY rowid').all(row.id):[],liked:Boolean(db.prepare('SELECT liked FROM chat_message_feedback WHERE message=?').get(row.id)?.liked)})); }
   function serviceSteps(chatId){return db.prepare('SELECT s.body FROM chat_service_steps s JOIN chat_messages m ON m.id=s.message WHERE m.chat=? ORDER BY m.seq,s.step').all(chatId).map(r=>JSON.parse(r.body));}
