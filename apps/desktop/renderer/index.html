@@ -4,7 +4,7 @@
 <body>
 <nav class="quick-rail" aria-label="快捷入口"><div class="quick-rail-top"><button id="rail-home" data-rail="home" aria-label="工作台" data-tooltip="工作台"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg></button><button id="rail-chat" data-rail="chat" aria-label="新建聊天" data-tooltip="新建聊天（⌘ N）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13l4-4h4M16 15v6m-3-3h6"/></svg></button><button id="rail-project" aria-label="添加项目" data-tooltip="添加项目 · 选择本地文件夹"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h7l2 2h9v13H3Z M12 11v6m-3-3h6"/></svg></button><div class="quick-rail-divider"></div><button id="rail-documents" data-rail="documents" aria-label="对话文档" data-tooltip="对话文档"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg></button><button id="rail-market" data-rail="market" aria-label="技能市场" data-tooltip="技能市场"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button><button id="rail-sources" data-rail="sources" aria-label="知识库" data-tooltip="知识库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H4Zm16 0h-4a3 3 0 0 0-3 3M20 4v14h-3"/></svg></button><button id="rail-extensions" data-rail="extensions" aria-label="拓展" data-tooltip="拓展"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z"/></svg></button></div><div class="quick-rail-bottom"><button id="rail-settings" data-rail="settings" aria-label="设置与诊断" data-tooltip="设置与诊断"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1Z"/><circle cx="12" cy="12" r="3"/></svg></button><button id="rail-account" data-rail="account" aria-label="账号与登录" data-tooltip="账号与登录"><span id="rail-avatar">我</span></button></div></nav>
 <aside class="sidebar">
-  <div class="brand"><span class="brand-mark">C</span> CPclaw <span class="local">桌面版</span></div>
+  <div class="brand"><span class="brand-mark">Q</span> CPclaw <span class="local">桌面版</span></div>
   <label class="search"><span>⌕</span><input id="task-search" placeholder="搜索历史记录" aria-label="搜索历史记录"></label>
   <div class="section-label recent-label">项目与聊天 <button id="refresh" aria-label="刷新记录">↻</button></div><div class="history-scroll"><nav id="chats" aria-label="聊天列表"></nav>
   <details id="legacy-history" hidden><summary class="section-label">早期记录</summary><nav id="tasks" aria-label="早期记录"></nav></details>
@@ -14,16 +14,57 @@
 
   <div class="work-area">
     <div class="thread">
-  <header><div class="breadcrumb"><span id="current-project-label">工作台</span> <span>/</span> <strong id="task-title">新任务</strong></div><div class="header-actions"><span class="badge" id="task-state">准备就绪</span><button id="documents-toggle">▤ 文档 <span id="document-count">0</span></button><button data-panel="review" id="review-toggle" hidden>▧ 审阅 <span id="change-count">0</span></button><button data-panel="settings" aria-label="设置">⚙</button></div></header>
-      <div class="conversation" id="conversation"><div id="welcome" class="welcome"><div class="hero-mark">C<span>✦</span></div><div class="eyebrow">你的本地 AI 工作伙伴</div><h1>今天，一起完成什么？</h1><p>从一份材料开始，把想法变成可审阅的成果。</p><div class="suggestions"><button data-suggest="请梳理材料中的关键观点，并标注来源。"><span>▤</span><strong>梳理材料</strong><small>提取重点，保留来源</small></button><button data-suggest="请根据材料生成一份结构清晰的报告。"><span>↗</span><strong>生成报告</strong><small>整理内容，交付成果</small></button><button data-suggest="请检查材料中的信息缺口和待确认事项。"><span>◇</span><strong>检查信息</strong><small>发现缺口，明确下一步</small></button></div></div><div id="chat-view" hidden><div id="chat-messages" aria-label="聊天消息"></div><button id="chat-retry" hidden>重试回复</button></div><div id="task-detail" hidden><div class="eyebrow">当前任务</div><h1 id="detail-title"></h1><p id="task-meta"></p><div class="activity-title">补充输入</div><div id="queue"></div></div></div>
-      <div class="composer-wrap"><div id="status" role="status" aria-live="polite">直接描述任务，CPclaw 会按需调用应用服务。</div><div class="composer"><textarea id="note" rows="3" aria-label="补充任务输入" placeholder="向 CPclaw 提问…" maxlength="8000"></textarea><div id="document-edit-context" hidden></div><div id="project-material-context" hidden><span id="project-material-name"></span><button id="remove-project-material" aria-label="移除本次材料">×</button></div><div class="composer-toolbar"><button id="mode-service" title="选择、配置或查看应用服务">应用服务</button><button id="knowledge-sources" title="选择当前对话使用的知识库">知识来源</button><button id="attach-project-material" title="按需选择项目内的文本材料">＋ 材料</button><span class="composer-hint" id="composer-hint">Enter 发送 · Shift + Enter 换行</span><button id="chat-stop" hidden>停止生成 ■</button><button id="chat-send" class="primary">发送 ↑</button><button id="enqueue" class="primary" hidden title="加入队列（⌘ Enter）">加入队列 ↑</button></div></div><div class="footer-note">成果自动保存到本地</div></div>
+  <header><div class="breadcrumb"><span id="current-project-label">工作台</span> <span>/</span> <strong id="task-title">新任务</strong></div><div class="header-actions"><span class="badge kernel-fail" id="task-state" title="正在检测内核…">当前：…</span><button id="chat-diagnose" title="检查当前对话链路并修复可恢复的问题">自诊断</button><button data-panel="review" id="review-toggle" hidden>▧ 审阅 <span id="change-count">0</span></button><button data-panel="settings" aria-label="设置">⚙</button></div></header>
+      <div class="conversation" id="conversation"><div id="welcome" class="welcome"><div class="hero-mark">Q<span>✦</span></div><div class="eyebrow">你的本地 AI 工作伙伴</div><h1>今天，一起完成什么？</h1><p>从一份材料开始，把想法变成可审阅的成果。</p><div class="suggestions"><button data-suggest="请梳理材料中的关键观点，并标注来源。"><span>▤</span><strong>梳理材料</strong><small>提取重点，保留来源</small></button><button data-suggest="请根据材料生成一份结构清晰的报告。"><span>↗</span><strong>生成报告</strong><small>整理内容，交付成果</small></button><button data-suggest="请检查材料中的信息缺口和待确认事项。"><span>◇</span><strong>检查信息</strong><small>发现缺口，明确下一步</small></button></div></div><div id="chat-view" hidden><div id="chat-messages" aria-label="聊天消息"></div><button id="chat-retry" hidden>重试回复</button></div><div id="task-detail" hidden><div class="eyebrow">当前任务</div><h1 id="detail-title"></h1><p id="task-meta"></p><div class="activity-title">补充输入</div><div id="queue"></div></div></div>
+      <div class="composer-wrap"><div id="status" role="status" aria-live="polite">直接描述任务，CPclaw 会按需调用应用服务。</div><div class="composer"><textarea id="note" rows="3" aria-label="补充任务输入" placeholder="向 CPclaw 提问…" maxlength="8000"></textarea><div id="document-edit-context" hidden></div><div id="project-material-context" hidden><span id="project-material-name"></span><button id="remove-project-material" aria-label="移除本次材料">×</button></div><div class="composer-toolbar"><div class="composer-toolbar-left"><button type="button" id="attach-project-material" class="composer-icon-btn" title="按需选择项目内的文本材料" aria-label="添加材料">＋</button><details id="conversation-permissions" class="conversation-permissions"><summary id="permission-mode-label" aria-label="对话权限模式">请求批准</summary><div class="permission-menu" role="menu" aria-label="对话权限模式"><p>如何批准此对话中的操作？</p><button type="button" role="menuitemradio" data-permission-mode="ask" aria-checked="true"><strong>请求批准</strong><small>每次执行操作前询问</small></button><button type="button" role="menuitemradio" data-permission-mode="auto" aria-checked="false"><strong>帮我批准</strong><small>自动批准项目读取和已知只读操作，其余询问</small></button><button type="button" role="menuitemradio" data-permission-mode="full" aria-checked="false"><strong>完全访问权限</strong><small>自主访问本机文件、终端和网络，不逐次询问</small></button><p class="permission-lifetime">仅当前对话；退出应用后恢复请求批准。</p></div></details><button type="button" id="mode-service" class="composer-service" title="选择、配置或查看应用服务">应用服务</button><button type="button" id="knowledge-sources" class="composer-chip" title="选择当前对话使用的知识库">知识来源</button></div><div class="composer-toolbar-right"><details id="composer-model" class="composer-model"><summary id="composer-model-label" class="composer-service" aria-label="选择模型" title="选择模型模式">模型</summary><div class="composer-model-menu permission-menu" role="menu" aria-label="选择模型"><p>当前对话与报告使用的模型</p><button type="button" role="menuitemradio" data-model-mode="real" aria-checked="true"><strong>MiniMax-M3</strong><small>走企业端网关</small></button><button type="button" role="menuitemradio" data-model-mode="mock" aria-checked="false"><strong>Mock</strong><small>演示模式，不调用真实模型</small></button></div></details><span class="composer-hint" id="composer-hint">Enter 发送 · Shift + Enter 换行</span><button type="button" id="chat-stop" class="composer-send composer-stop" hidden aria-label="停止生成" title="停止生成">■</button><button type="button" id="chat-send" class="composer-send primary" aria-label="发送" title="发送（Enter）">↑</button><button type="button" id="enqueue" class="composer-send primary" hidden aria-label="加入队列" title="加入队列（⌘ Enter）">↑</button></div></div></div><div class="footer-note">成果自动保存到本地</div></div>
     </div>
-    <aside class="inspector" id="inspector" hidden><div class="inspector-heading"><strong id="panel-title">任务设置</strong><div id="document-tabs" role="tablist" aria-label="已生成文档"></div><div id="extension-view-controls" hidden role="group" aria-label="应用显示方式"><button id="extension-native" aria-pressed="false">原生页面</button><button id="extension-cli" aria-pressed="true">操作面板</button><button id="extension-refresh">刷新</button></div><button id="close-panel" aria-label="关闭面板">×</button></div>
+    <aside class="inspector" id="inspector" hidden><div class="inspector-heading"><strong id="panel-title">任务设置</strong><div id="document-tabs" role="tablist" aria-label="已生成文档"></div><div id="extension-view-controls" hidden role="group" aria-label="应用显示方式"><button id="extension-native" aria-pressed="false">原生页面</button><button id="extension-cli" aria-pressed="true">自动工作流</button><button id="extension-refresh">刷新</button></div><button id="close-panel" aria-label="关闭面板">×</button></div>
       <section id="panel-extensions" hidden>
         <div id="extension-workspace" hidden><p id="extension-panel-feedback" role="status" aria-live="polite"></p><div id="extension-native-slot" hidden></div>    <div id="extension-cli-panel"><h3 id="service-panel-name">即梦画布</h3><p id="extension-permission" class="muted" role="status">尚未授权工具执行</p><p id="extension-cli-status">请先检查连接。</p><p class="muted">在左侧描述任务，AI 将根据服务的真实能力逐步执行；支持本次任务统一授权或 Auto，覆盖终端指令及服务工具调用。</p><div class="button-row"><button id="extension-recheck">重新检查</button><button id="extension-revoke" hidden>撤销工具授权</button></div></div>
 <div id="service-operation-results" aria-live="polite"></div></div>
       </section>
-      <section id="panel-settings"><h2>平台连接与账号</h2><p id="account-summary" tabindex="-1" class="muted">正在检查账号…</p><label>平台地址<input id="platform-url" type="url" placeholder="http://127.0.0.1:3928" autocomplete="url"></label><label>员工编号<input id="employee-id" autocomplete="username"></label><label>口令<input id="account-password" type="password" autocomplete="current-password"></label><div class="button-row"><button id="account-login" class="primary">登录 / 切换账号</button><button id="account-logout">退出登录</button></div><p id="account-feedback" role="status" class="muted"></p><hr><h2>设置与诊断</h2><p class="muted">检查运行环境，导出结果以便排查问题。</p><label class="checkbox"><input id="diag-extra" type="checkbox"> 包含同步元数据</label><div class="button-row"><button id="doctor">运行诊断</button><button id="doctor-export">导出诊断包</button></div><pre id="doctor-out">尚未运行诊断</pre><details><summary>受理接口检查</summary><button id="send">发送受理请求</button></details></section>
+      <section id="panel-settings">
+        <h2>本机基本配置</h2>
+        <p class="muted">应用与数据目录以本机为准；已保存项不会被 .env 自动盖回。</p>
+        <dl class="settings-meta">
+          <div><dt>应用版本</dt><dd id="settings-app-version">…</dd></div>
+          <div><dt>数据目录</dt><dd id="settings-data-dir" class="settings-path">…</dd></div>
+        </dl>
+        <label>报告模型模式<select id="settings-report-mode"><option value="mock">Mock（演示）</option><option value="real">Real（走企业端网关）</option></select></label>
+        <p id="settings-mode-source" class="muted"></p>
+        <div class="button-row"><button id="settings-sync-env" type="button">从 .env 同步</button></div>
+        <hr>
+        <h2>企业端连接</h2>
+        <p id="account-summary" tabindex="-1" class="muted">正在检查账号…</p>
+        <label>平台地址<input id="platform-url" type="url" placeholder="http://127.0.0.1:3928" autocomplete="url"></label>
+        <label>员工编号<input id="employee-id" autocomplete="username"></label>
+        <label>口令<input id="account-password" type="password" autocomplete="current-password"></label>
+        <div class="button-row">
+          <button id="account-login" class="primary">登录 / 切换账号</button>
+          <button id="account-logout">退出登录</button>
+          <button id="settings-probe-platform" type="button">测试连接</button>
+        </div>
+        <p id="account-feedback" role="status" class="muted"></p>
+        <p id="settings-platform-probe" role="status" class="muted"></p>
+        <hr>
+        <h2>推理内核 · deepseek-harness</h2>
+        <p id="settings-kernel-status" class="muted">正在检测内核…</p>
+        <label>内核引擎<select id="settings-report-engine"><option value="none">未启用</option><option value="harness">deepseek-harness</option></select></label>
+        <label>Harness 目录（开发检出）<input id="settings-harness-root" type="text" placeholder="/path/to/deepseek-harness" spellcheck="false"></label>
+        <div class="button-row">
+          <button id="settings-pick-harness" type="button">选择目录…</button>
+          <button id="settings-save" class="primary" type="button">保存配置</button>
+        </div>
+        <p id="settings-kernel-hint" class="muted">安装包优先使用包内内核；开发模式才使用上方检出路径。保存后工作区进程会按新配置重启。</p>
+        <p id="settings-feedback" role="status" class="muted"></p>
+        <hr>
+        <h2>诊断</h2>
+        <p class="muted">检查运行环境，导出结果以便排查问题。</p>
+        <label class="checkbox"><input id="diag-extra" type="checkbox"> 包含同步元数据</label>
+        <div class="button-row"><button id="doctor">运行诊断</button><button id="doctor-export">导出诊断包</button></div>
+        <pre id="doctor-out">尚未运行诊断</pre>
+        <details><summary>受理接口检查</summary><button id="send">发送受理请求</button></details>
+      </section>
       <section id="panel-sources" hidden>
         <div class="knowledge-section"><h2>关联 企业知识库（wiki）</h2><p class="muted">关联本地目录或 CPclaw 平台企业知识库。</p><button id="knowledge-enterprise">＋ 关联知识库</button><div id="knowledge-enterprise-list"></div></div>
         <hr><div class="knowledge-section"><h2>关联 个人知识库（wiki）</h2><p class="muted">关联个人目录或平台 Wiki，仅供本人使用。</p><button id="knowledge-personal">＋ 关联知识库</button><div id="knowledge-personal-list"></div></div>
@@ -51,9 +92,9 @@
   </div>
 </main><dialog id="extension-picker" class="extension-picker" aria-labelledby="extension-picker-title"><div class="extension-picker-heading"><span>应用服务 · 选择与配置</span><button id="extension-picker-close" aria-label="关闭拓展选择">×</button></div><div id="extension-catalog">
   <nav class="extension-service-list" aria-label="已配置的应用服务">
-    <h2 id="extension-picker-title">应用服务</h2>
+    <div class="extension-service-list-heading"><h2 id="extension-picker-title">应用服务</h2><button id="extension-manage-services" class="extension-service-add" type="button" aria-label="配置其他应用服务" title="配置其他应用服务">＋</button></div>
     <p class="muted">本机 CLI · 网页 / SaaS（MCP）</p>
-    <div id="extension-other-services"></div><button id="extension-manage-services" type="button">配置其他服务 ↗</button>
+    <div id="extension-other-services"></div>
     <button id="extension-service-dreamina" class="extension-service-item" type="button" aria-pressed="true" aria-controls="extension-service-details"><strong>即梦画布</strong><span>图片、视频、音频与画布</span></button>
   </nav>
   <section id="extension-service-details" class="extension-config-details" aria-labelledby="extension-detail-title">
@@ -68,12 +109,12 @@
   <form id="service-approval-form">
     <h2 id="service-approval-title">工具执行授权</h2>
     <p id="service-approval-message"></p>
-    <label>授权范围<select id="service-approval-mode"><option value="task">本次任务 · 一次授权完整操作</option><option value="auto">Auto · 本次对话自动执行</option><option value="once">仅当前操作</option></select></label>
+    <label>授权范围<select id="service-approval-mode"><option value="task">本次任务 · 一次授权完整操作</option><option value="auto">本次对话 · 此服务</option><option value="once">仅当前操作</option></select></label>
     <p id="service-approval-scope" class="muted"></p>
     <label id="service-approval-budget-label">累计积分上限<input id="service-approval-budget" type="number" min="0" step="1" value="0" required></label>
     <p id="service-approval-budget-note" class="muted"></p>
     <details><summary>查看当前指令与服务详情</summary><pre id="service-approval-detail"></pre></details>
-    <p class="muted">授权可随时在操作面板撤销；切换账号或对话后失效。</p>
+    <p class="muted">授权可随时在自动工作流撤销；切换账号或对话后失效。</p>
     <div class="button-row"><button id="service-approval-deny" type="button">拒绝</button><button id="service-approval-confirm" type="submit" class="primary">授权并继续</button></div>
   </form>
-</dialog><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./projects.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>
+</dialog><dialog id="diagnostics-dialog" class="service-approval" aria-labelledby="diagnostics-title"><h2 id="diagnostics-title">对话自诊断</h2><div id="diagnostics-body" role="status" aria-live="polite"></div><div class="button-row"><button id="diagnostics-close">关闭</button></div></dialog><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./settings.js"></script><script src="./diagnostics.js"></script><script src="./projects.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./permissions.js"></script><script src="./composer-model.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>

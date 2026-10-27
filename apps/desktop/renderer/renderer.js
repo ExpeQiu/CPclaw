@@ -174,13 +174,14 @@ function setStatus(message) { document.getElementById("status").textContent = me
 
 function openPanel(name) {
   if(name === "sources" && typeof loadKnowledge === "function")void loadKnowledge().catch(error=>setStatus(error.message));
+  if(name === "settings" && typeof loadDesktopSettings === "function")void loadDesktopSettings();
   if(name==="documents" && typeof documentStructureTab!=="undefined" && documentStructureTab==="folders")void renderProjectFolder();
   if(name!=="documents" && typeof dismissDocumentWorkspace==="function")dismissDocumentWorkspace();
   document.getElementById("inspector").hidden = false;
   for (const panel of ["settings", "sources", "review", "documents", "extensions"]) {
     document.getElementById(`panel-${panel}`).hidden = panel !== name;
   }
-  document.getElementById("panel-title").textContent = { extensions: "即梦 · 操作面板", settings: "设置", sources: "知识库", review: "审阅成果", documents: "文档与预览" }[name];
+  document.getElementById("panel-title").textContent = { extensions: "即梦 · 自动工作流", settings: "设置与诊断", sources: "知识库", review: "审阅成果", documents: "文档与预览" }[name];
 }
 
 function renderTasks() {
@@ -214,7 +215,7 @@ function renderCurrentTask() {
   document.getElementById("welcome").hidden = Boolean(task);
   document.getElementById("task-detail").hidden = !task;
   document.getElementById("task-title").textContent = task?.goal ?? "新任务";
-  document.getElementById("task-state").textContent = task?.runStatus ?? "准备就绪";
+  window.renderKernelBadge?.(task?.runStatus ? `任务 ${task.runStatus}` : "");
   document.getElementById("enqueue").disabled = !task;
   document.getElementById("stage").disabled = !task;
   document.getElementById("cancel-report").disabled = !task;

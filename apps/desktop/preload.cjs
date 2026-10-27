@@ -21,10 +21,31 @@ contextBridge.exposeInMainWorld("cpclaw", {
   workspace(call) {
     return ipcRenderer.invoke("workspace.call", call);
   },
+  runtimeStatus() {
+    return ipcRenderer.invoke("runtime.status");
+  },
+  settingsGet() {
+    return ipcRenderer.invoke("settings.get");
+  },
+  settingsSave(input) {
+    return ipcRenderer.invoke("settings.save", input ?? {});
+  },
+  settingsSyncEnv() {
+    return ipcRenderer.invoke("settings.syncEnv");
+  },
+  settingsProbePlatform(input) {
+    return ipcRenderer.invoke("settings.probePlatform", input ?? {});
+  },
+  settingsPickHarnessRoot() {
+    return ipcRenderer.invoke("settings.pickHarnessRoot");
+  },
   runDoctor(input) {
     return ipcRenderer.invoke("doctor.run", input ?? {});
   },
   exportDiagnostic(payload) {
     return ipcRenderer.invoke("doctor.export", payload);
+  },
+  log(input) {
+    return ipcRenderer.invoke("ui.log", input ?? {});
   },
 });

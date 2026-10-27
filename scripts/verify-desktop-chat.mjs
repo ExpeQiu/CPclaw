@@ -86,6 +86,17 @@ if (process.argv.includes('--platform-child')) {
     await js(`byId('chat-stop').click()`);await until(`!runningChatId&&chatMessages.at(-1)?.state==='cancelled'`);
     if(await js(`chatMessages.at(-1).activities?.some(s=>s.state==='running')`))throw Error('停止后步骤仍显示执行中');
     if(!await js(`!byId('chat-retry').hidden`))throw Error('停止后没有重试入口');
+    if(await js(`byId('chat-diagnose').textContent`)!=='自诊断')throw Error('顶部自诊断入口缺失');
+    await js(`byId('chat-diagnose').click()`);
+    await until(`byId('diagnostics-dialog').open&&!byId('chat-diagnose').dataset.busy`);
+    if(!await js(`byId('diagnostics-body').textContent.includes('上次回复未完成')&&byId('diagnostics-body').textContent.includes('平台连接及账号会话验证通过')`))throw Error('自诊断未展示持久化异常及连接检查');
+    writeFileSync(join(dataDir,'desktop-self-diagnosis.png'),(await w.webContents.capturePage()).toPNG());
+    w.setSize(800,720);await sleep(100);
+    if(!await js(`byId('diagnostics-dialog').getBoundingClientRect().width<=innerWidth`))throw Error('自诊断窄窗口溢出');
+    await js(`byId('diagnostics-close').click();byId('rail-documents').click()`);
+    if(!await js(`!byId('panel-documents').hidden`))throw Error('左侧文档入口失效');
+    await js(`byId('close-panel').click()`);w.setSize(1280,860);
+
     await js(`byId('chat-retry').click()`);await until(`!runningChatId&&chatMessages.at(-1)?.state==='done'&&!byId('chat-send').dataset.busy`);
     await until(`byId('task-title').textContent!=='新聊天'`);
     const expected=await js(`({id:currentChatId,text:chatMessages.at(-1).content,count:chatMessages.length,startedAt:chatMessages.at(-1).startedAt,finishedAt:chatMessages.at(-1).finishedAt})`);

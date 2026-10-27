@@ -12,3 +12,6 @@ export { parseAcceptTaskCommand, parseTaskMode } from "./task.js";
 export type { AcceptTaskCommand, AcceptTaskResult, ParseCommandResult, TaskMode, TaskReceipt } from "./task.js";
 export { readTokenUsage } from "./usage.js";
 export type { ModelCheckKind, ModelCheckRecord, TokenUsage } from "./usage.js";
+export { checkSkill, checkSkillOutput, compareSkillVersions, readSkillMetadata, skillFiles, skillInstruction, skillVersionPattern } from './market.js';
+export type { MarketItem, SkillCheck, SkillDependency, SkillExample, SkillFile, SkillInput, SkillMetadata } from './market.js';
+export { skillPackage } from './market.js';

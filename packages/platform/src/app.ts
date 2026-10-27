@@ -682,7 +682,7 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
       const actor = principal(accessToken);
       if (!actor.ok) return actor;
       const result = market(actor, action, input);
-      if (result.ok && action !== "list") audit(actor.orgId, actor.employeeId, `market_${action}`, String(input.id ?? "new"));
+      if (result.ok && !["list","catalog","detail","validate","resolve","download","notifications","legacy-list","legacy-download"].includes(action)) audit(actor.orgId, actor.employeeId, `market_${action}`, String(input.id ?? "new"));
       return result;
     },
     login(input) {

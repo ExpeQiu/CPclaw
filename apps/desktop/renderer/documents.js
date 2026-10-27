@@ -14,7 +14,7 @@ function documentButton(text, callback) {
   button.addEventListener('click',async()=>{button.disabled=true;try{await callback();}catch(error){setStatus(error.message);}finally{button.disabled=false;}});return button;
 }
 function renderDocumentList() {
-  documentElement('document-count').textContent=new Set(chatArtifacts.map(a=>a.document_id)).size;
+  documentElement('rail-documents').setAttribute('aria-label',`对话文档 · ${new Set(chatArtifacts.map(a=>a.document_id)).size} 份`);
   const list=documentElement('document-list'),tabs=documentElement('document-tabs');list.replaceChildren();tabs.replaceChildren();
   const groups=new Map(),query=documentElement('document-filter').value.toLowerCase();
   for(const artifact of chatArtifacts){if(!groups.has(artifact.document_id))groups.set(artifact.document_id,[]);groups.get(artifact.document_id).push(artifact);}
@@ -73,7 +73,7 @@ async function documentAction(action,id=activeArtifact?.id) {
   if(action==='saveAs')setStatus(result.cancelled?'已取消另存为':`已另存为：${result.path}`);
 }
 function addArtifact(artifact) {if(!chatArtifacts.some(a=>a.id===artifact.id))chatArtifacts.push(artifact);renderDocumentList();}
-documentElement('documents-toggle').onclick=()=>{openPanel('documents');renderDocumentList();};
+
 documentElement('document-open').onclick=()=>documentAction('open').catch(e=>setStatus(e.message));
 documentElement('document-save-as').onclick=()=>documentAction('saveAs').catch(e=>setStatus(e.message));
 documentElement('document-reveal').onclick=()=>documentAction('reveal').catch(e=>setStatus(e.message));

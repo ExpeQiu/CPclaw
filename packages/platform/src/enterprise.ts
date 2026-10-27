@@ -1,3 +1,4 @@
+import { createMarket } from './market.js';
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -411,6 +412,7 @@ export type EnterpriseApi = {
 };
 
 export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, audit: AuditFn): EnterpriseApi {
+  const market = createMarket(db, config.now);
   const stagingRoot = join(config.dataDir, "staging");
   mkdirSync(stagingRoot, { recursive: true });
 
@@ -812,214 +814,26 @@ export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, au
     },
 
     publishSkillRelease(actor, input) {
-      if (actor.role !== "admin") {
-        return failure("FORBIDDEN", "员工不能调用管理接口");
-      }
-      if (!idOk(input.skillId) || !idOk(input.version) || input.packageBody.includes("..")) {
-        return failure("CONFIG_INVALID", "Skill 包参数或路径不合法");
-      }
-      if (input.platforms.length < 1 || !input.platforms.includes("darwin-arm64")) {
-        return failure("CONFIG_INVALID", "平台声明不兼容本机验证环境");
-      }
-      const contentSha256 = sha256(input.packageBody);
-      withTx(db, () => {
-        db.prepare("INSERT OR IGNORE INTO skills (skill_id, org_id, title) VALUES (?, ?, ?)").run(
-          input.skillId,
-          actor.orgId,
-          input.title,
-        );
-        db.prepare(
-          `INSERT INTO skill_releases (
-            skill_id, version, org_id, content_sha256, platforms, package_body, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?)`,
-        ).run(
-          input.skillId,
-          input.version,
-          actor.orgId,
-          contentSha256,
-          JSON.stringify(input.platforms),
-          input.packageBody,
-          config.now(),
-        );
-        audit(actor.orgId, actor.employeeId, "skill_publish", `${input.skillId}@${input.version}`);
-      });
-      return {
-        ok: true,
-        release: {
-          skillId: input.skillId,
-          version: input.version,
-          contentSha256,
-          platforms: input.platforms,
-          status: "published",
-        },
-      };
+      audit(actor.orgId,actor.employeeId,'skill_publish',input.skillId);
+      return market(actor,'legacy-publish',input) as ReturnType<EnterpriseApi['publishSkillRelease']>;
     },
-
     submitSkill(actor, input) {
-      if (!idOk(input.skillId) || !idOk(input.version) || input.packageBody.includes("..")) {
-        return failure("CONFIG_INVALID", "Skill 提交参数或路径不合法");
-      }
-      const submissionId = `sub-${randomUUID().replaceAll("-", "")}`;
-      const contentSha256 = sha256(input.packageBody);
-      withTx(db, () => {
-        db.prepare(
-          `INSERT INTO skill_submissions (
-            submission_id, skill_id, version, org_id, author_id, content_sha256, platforms,
-            package_body, status, approved_revision, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
-        ).run(
-          submissionId,
-          input.skillId,
-          input.version,
-          actor.orgId,
-          actor.employeeId,
-          contentSha256,
-          JSON.stringify(input.platforms),
-          input.packageBody,
-          config.now(),
-        );
-        audit(actor.orgId, actor.employeeId, "skill_submit", submissionId);
-      });
-      return { ok: true, submissionId, status: "pending" };
+      const result=market(actor,'legacy-submit',input);if(result.ok)audit(actor.orgId,actor.employeeId,'skill_submit',String(result.submissionId??input.skillId));
+      return result as ReturnType<EnterpriseApi['submitSkill']>;
     },
-
     reviseSkillSubmission(actor, input) {
-      const row = rowOf(db.prepare("SELECT * FROM skill_submissions WHERE submission_id = ?").get(input.submissionId));
-      if (row === undefined || textOf(row, "author_id") !== actor.employeeId) {
-        return failure("NOT_FOUND", "没有这个 Skill 提交");
-      }
-      if (input.packageBody.includes("..")) {
-        return failure("CONFIG_INVALID", "Skill 包路径不合法");
-      }
-      const approvedRevision = (numberOf(row, "approved_revision") ?? 0) + 1;
-      db.prepare(
-        `UPDATE skill_submissions
-         SET package_body = ?, platforms = ?, content_sha256 = ?, status = 'pending', approved_revision = ?, review_note = NULL
-         WHERE submission_id = ?`,
-      ).run(
-        input.packageBody,
-        JSON.stringify(input.platforms),
-        sha256(input.packageBody),
-        approvedRevision,
-        input.submissionId,
-      );
-      audit(actor.orgId, actor.employeeId, "skill_revise", input.submissionId);
-      return { ok: true, submissionId: input.submissionId, status: "pending", approvedRevision };
+      const result=market(actor,'legacy-revise',input);if(result.ok)audit(actor.orgId,actor.employeeId,'skill_revise',input.submissionId);
+      return result as ReturnType<EnterpriseApi['reviseSkillSubmission']>;
     },
-
     reviewSkillSubmission(actor, input) {
-      if (actor.role !== "admin") {
-        return failure("FORBIDDEN", "员工不能调用管理接口");
-      }
-      const row = rowOf(db.prepare("SELECT * FROM skill_submissions WHERE submission_id = ?").get(input.submissionId));
-      if (row === undefined || textOf(row, "org_id") !== actor.orgId) {
-        return failure("NOT_FOUND", "没有这个 Skill 提交");
-      }
-      if (textOf(row, "status") !== "pending") {
-        return failure("CONFLICT", "提交不在待审状态");
-      }
-      if (input.decision === "reject") {
-        db.prepare("UPDATE skill_submissions SET status = 'rejected', review_note = ? WHERE submission_id = ?").run(
-          input.note ?? "拒绝",
-          input.submissionId,
-        );
-        audit(actor.orgId, actor.employeeId, "skill_reject", input.submissionId);
-        return { ok: true, status: "rejected" };
-      }
-      const skillId = textOf(row, "skill_id");
-      const version = textOf(row, "version");
-      const packageBody = textOf(row, "package_body");
-      const platforms = textOf(row, "platforms");
-      const contentSha256 = textOf(row, "content_sha256");
-      if (
-        skillId === undefined ||
-        version === undefined ||
-        packageBody === undefined ||
-        platforms === undefined ||
-        contentSha256 === undefined
-      ) {
-        return failure("CONFIG_INVALID", "提交记录无法读取");
-      }
-      withTx(db, () => {
-        db.prepare("INSERT OR IGNORE INTO skills (skill_id, org_id, title) VALUES (?, ?, ?)").run(
-          skillId,
-          actor.orgId,
-          skillId,
-        );
-        db.prepare(
-          `INSERT INTO skill_releases (
-            skill_id, version, org_id, content_sha256, platforms, package_body, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?)`,
-        ).run(skillId, version, actor.orgId, contentSha256, platforms, packageBody, config.now());
-        db.prepare("UPDATE skill_submissions SET status = 'published' WHERE submission_id = ?").run(input.submissionId);
-        audit(actor.orgId, actor.employeeId, "skill_approve", input.submissionId);
-      });
-      return { ok: true, status: "published" };
+      const result=market(actor,'legacy-review',input);if(result.ok)audit(actor.orgId,actor.employeeId,'skill_review',input.submissionId);
+      return result as ReturnType<EnterpriseApi['reviewSkillSubmission']>;
     },
-
     listAvailableSkills(actor) {
-      const rows = db
-        .prepare(
-          "SELECT skill_id, version, content_sha256, platforms, status FROM skill_releases WHERE org_id = ? AND status = 'published'",
-        )
-        .all(actor.orgId);
-      const skills: SkillReleaseView[] = [];
-      for (const item of rows) {
-        const row = rowOf(item);
-        if (row === undefined) {
-          continue;
-        }
-        const skillId = textOf(row, "skill_id");
-        const version = textOf(row, "version");
-        const contentSha256 = textOf(row, "content_sha256");
-        const platformsRaw = textOf(row, "platforms");
-        if (skillId === undefined || version === undefined || contentSha256 === undefined || platformsRaw === undefined) {
-          continue;
-        }
-        let platforms: string[] = [];
-        try {
-          const parsed: unknown = JSON.parse(platformsRaw);
-          if (Array.isArray(parsed)) {
-            platforms = parsed.filter((p): p is string => typeof p === "string");
-          }
-        } catch {
-          platforms = [];
-        }
-        skills.push({ skillId, version, contentSha256, platforms, status: "published" });
-      }
-      return { ok: true, skills };
+      return market(actor,'legacy-list',{}) as ReturnType<EnterpriseApi['listAvailableSkills']>;
     },
-
     downloadSkillRelease(actor, skillId, version) {
-      const row = rowOf(
-        db
-          .prepare(
-            "SELECT * FROM skill_releases WHERE skill_id = ? AND version = ? AND org_id = ? AND status = 'published'",
-          )
-          .get(skillId, version, actor.orgId),
-      );
-      if (row === undefined) {
-        return failure("NOT_FOUND", "没有这个已发布 Skill");
-      }
-      const contentSha256 = textOf(row, "content_sha256");
-      const packageBody = textOf(row, "package_body");
-      const platformsRaw = textOf(row, "platforms");
-      if (contentSha256 === undefined || packageBody === undefined || platformsRaw === undefined) {
-        return failure("CONFIG_INVALID", "Skill 包无法读取");
-      }
-      let platforms: string[] = [];
-      try {
-        const parsed: unknown = JSON.parse(platformsRaw);
-        if (Array.isArray(parsed)) {
-          platforms = parsed.filter((p): p is string => typeof p === "string");
-        }
-      } catch {
-        platforms = [];
-      }
-      if (!platforms.includes("darwin-arm64")) {
-        return failure("CONFIG_INVALID", "平台不兼容，拒绝安装");
-      }
-      return { ok: true, contentSha256, packageBody, platforms };
+      return market(actor,'legacy-download',{skillId,version}) as ReturnType<EnterpriseApi['downloadSkillRelease']>;
     },
 
     ingestKnowledge(actor, input) {

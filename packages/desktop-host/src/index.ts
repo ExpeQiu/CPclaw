@@ -44,3 +44,5 @@ export { installSkillPackage, readCurrentSkill } from "./skill-install.js";
 export type { InstalledSkill } from "./skill-install.js";
 
 export { runBoundReportLoop } from "./harness-report.js";
+export { readInstalledSkill } from './skill-install.js';
+export { activateInstalledSkill } from './skill-install.js';

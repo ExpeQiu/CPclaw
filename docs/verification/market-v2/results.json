@@ -1,0 +1,73 @@
+{
+  "finishedAt": "2026-10-26T13:53:49.531841+08:00",
+  "environment": "isolated temporary SQLite, synthetic materials and controlled model/service fixtures",
+  "build": "passed",
+  "workspace": {
+    "packages/contracts": {
+      "tests": 6,
+      "passed": 6,
+      "failed": 0
+    },
+    "packages/model-gateway": {
+      "tests": 9,
+      "passed": 9,
+      "failed": 0
+    },
+    "packages/harness-adapter": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    "packages/desktop-host": {
+      "tests": 32,
+      "passed": 32,
+      "failed": 0
+    },
+    "packages/platform": {
+      "tests": 42,
+      "passed": 42,
+      "failed": 0
+    },
+    "packages/verification": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0
+    }
+  },
+  "workspaceTotal": 92,
+  "desktop": {
+    "tests": 74,
+    "passed": 74,
+    "failed": 0
+  },
+  "electron": {
+    "saveCreationProcess": true,
+    "distillSkill": true,
+    "draftEditor": true,
+    "marketEmpty": true,
+    "iframeIPC": true,
+    "create": true,
+    "personal": true,
+    "submit": true,
+    "adminReview": true,
+    "install": true,
+    "useInChat": true,
+    "officialImport": true,
+    "officialPublish": true,
+    "aliasSearch": true,
+    "skillDetail": true,
+    "inputPreparation": true,
+    "chatSkillBinding": true,
+    "filterMemory": true,
+    "narrowWindow": true,
+    "escapeReturn": true
+  },
+  "projectVerify": "passed; includes the existing remote Mock identity/revocation checks",
+  "notPerformed": [
+    "remote platform deployment",
+    "replacement of installed desktop app",
+    "publishing skills into the formal catalog",
+    "real model business acceptance",
+    "real third-party application business acceptance"
+  ]
+}

@@ -176,7 +176,7 @@ if (process.argv.includes('--platform-child')) {
     if(await js(`projects.length!==0`))throw Error('账号切换泄漏项目');
     if(await js(`chatArtifacts.length!==0||byId('document-source').textContent!==''||byId('document-preview').textContent!==''`))throw Error('账号切换泄漏文档');
     await login('employee-a');await js(`selectChat('${chatId}')`);await until(`chatArtifacts.length===2`);
-    w.setSize(800,720);await js(`byId('documents-toggle').click();showDocument('${second.id}')`);await sleep(150);
+    w.setSize(800,720);await js(`byId('rail-documents').click();showDocument('${second.id}')`);await sleep(150);
     if(!await js(`byId('inspector').getBoundingClientRect().left>=219`))throw Error('窄窗口文档遮挡快捷栏');
     if(await js('document.documentElement.scrollWidth>innerWidth'))throw Error('预览窄窗口横向溢出');
     await js(`byId('document-more').querySelector('summary').click();byId('document-more').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);

@@ -1,3 +1,6 @@
+import {canAutoApprove} from './conversation-permissions.mjs';
+import {localService,executeLocalTool} from './local-tools.mjs';
+import {browserPageService,executeComputerUse,pageOriginsForService} from './computer-use.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,8 +10,9 @@ import { isAbsolute, join, extname, resolve } from 'node:path';
 const runFile = promisify(execFile);
 const supported = /^(version|model( list| find)?|voice list|canvas (current|ls|use|create)|node (find|show|quote|run|create (image|video|audio|text)|edit (image|video|audio|text))|operation (status|wait)|resource (get|download)|auth (status|account|login|wait))$/;
 export const dreaminaService = { id: 'dreamina', title: '即梦画布', type: 'CLI', target: join(homedir(), '.local', 'bin', process.platform==='win32'?'dreamina-canvas.exe':'dreamina-canvas'), builtin: true };
+export { browserPageService };
 export function publicServices(connectors = []) {
-  return [dreaminaService, ...connectors.filter(c => c.enabled && ['CLI', 'MCP'].includes(c.type)).map(c => ({ id: c.id, title: c.title, type: c.type, target: c.target }))];
+  return [dreaminaService, localService, browserPageService, ...connectors.filter(c => c.enabled && ['CLI', 'MCP'].includes(c.type)).map(c => ({ id: c.id, title: c.title, type: c.type, target: c.target, ...(typeof c.pageUrl==='string'?{pageUrl:c.pageUrl}:{}), ...(Array.isArray(c.pageOrigins)?{pageOrigins:c.pageOrigins}:{}) }))];
 }
 // 服务回执是数据；凭据、临时访问地址不进入模型上下文、聊天历史或日志。
 export function sanitizeServiceResult(value) {
@@ -32,28 +36,36 @@ function commandFacts(schema) {
   for (const c of schema.subcommands??[]) visit(c,[]);
   return result;
 }
-export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () => {}, run = runFile, fetcher = fetch, binaryPath = realpathSync, readBinary = readFileSync } = {}) {
+export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () => {}, run = runFile, fetcher = fetch, binaryPath = realpathSync, readBinary = readFileSync, getPermission = () => ({mode:'legacy',revision:0}), computerUsePage } = {}) {
   const sessions = new Map();
   const attempted = new Map();
   const grants = new Map();
+  const taskPermissions=new Map();
   let revision = 0;
   const scopeKey = (context, identity) => JSON.stringify([context.actorId, context.chatId, context.service.id, context.service.type, context.service.target, identity]);
   function status(context) {
     return { grants: [...grants.values()].filter(g => g.actorId === context.actorId && g.chatId === context.chatId).map(({service, mode, creditCeiling, reservedCredits}) => ({service, mode, creditCeiling, reservedCredits})) };
   }
-  function check(context, signal) { signal.throwIfAborted(); if (!isCurrent(context)) throw Error('会话或账号已变化，已停止后续操作'); }
+  function check(context, signal) {
+    signal.throwIfAborted(); if (!isCurrent(context)) throw Error('会话或账号已变化，已停止后续操作');
+    if(context.taskId){const key=JSON.stringify([context.actorId,context.chatId]),policy=getPermission(context),prior=taskPermissions.get(key);
+      if(prior?.taskId===context.taskId&&prior.revision!==policy.revision)throw Object.assign(Error('对话权限已改变，请重新发起任务。'),{code:'DENIED'});
+      taskPermissions.set(key,{taskId:context.taskId,revision:policy.revision});}
+  }
   async function consent(context, signal, details, identity, cost = 0) {
     check(context,signal);
+    const permission=getPermission(context);
+    if(!details.forceApproval&&canAutoApprove(permission,details.risk,cost))return;
     const startRevision = revision, key = scopeKey(context, identity);
     const existing = grants.get(key);
-    const grant = existing && (existing.mode === 'auto' || existing.taskId === context.taskId) ? existing : null;
+    const grant = permission.mode!=='ask' && existing && (existing.mode === 'auto' || existing.taskId === context.taskId) ? existing : null;
     if (existing && !grant) grants.delete(key);
     if (grant && cost <= grant.creditCeiling - grant.reservedCredits) {
       grant.reservedCredits += cost;
       notify({type:'permission', ...status(context)});
       return;
     }
-    const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask: Boolean(context.taskId), canAuthorizeAuto: Boolean(context.actorId && context.chatId), creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
+    const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask: permission.mode!=='ask' && Boolean(context.taskId), canAuthorizeAuto: permission.mode!=='ask' && Boolean(context.actorId && context.chatId), creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
     check(context,signal);
     if (revision !== startRevision) throw Error('授权已撤销，已停止后续操作');
     if (accepted === true) return; // 兼容单次授权调用方。
@@ -70,6 +82,18 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
   async function execute(context, request, signal) {
     const { service } = context;
     check(context,signal);
+    if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context,request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
+    if(service?.id===browserPageService.id&&service.builtin===true){
+      if(!computerUsePage)throw Error('原生页控制器未接入');
+      const allowedOrigins=pageOriginsForService(context.pageService||service).length
+        ? pageOriginsForService(context.pageService||service)
+        : (computerUsePage.getOrigins?.()||[]);
+      if(Array.isArray(request?.origins))for(const o of request.origins)computerUsePage.allowOrigin?.(o);
+      return sanitizeServiceResult(await executeComputerUse({
+        page:computerUsePage,signal,request,allowedOrigins,
+        authorize:details=>consent(context,signal,details,JSON.stringify(['browser-page',computerUsePage.getUrl?.()||'',details.forceApproval?'sensitive':'act'])),
+      }));
+    }
     if (!service || !['CLI','MCP'].includes(service.type)) throw Error('服务尚未提供执行接口');
     if (!request || !['discover','call'].includes(request.action)) throw Error('仅支持 discover 和 call');
     if (service.type === 'MCP') return mcp(context,request,signal);
@@ -92,18 +116,27 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       try { return JSON.parse(stdout); } catch { return {ok:true,output:stdout.slice(0,48000)}; }
     }
     async function authorized(args, purpose, before=()=>{}) {
-      await consent(context,signal,{ title:'工具执行授权', message:`允许 ${service.title} 完成当前任务吗？`, detail:`用途：${purpose}\n执行位置：当前电脑\n工作目录：${cwd}\n程序：${executable}\n当前指令参数：${JSON.stringify(builtin?['--non-interactive','--format','json',...args]:args)}\n\n任务或 Auto 授权覆盖此程序的后续指令（包括读取和写入）；实际行为由该程序决定。` }, identity);
+      const risk=builtin&&/^(version|schema|model|voice|auth (status|account)|canvas (current|ls)|node (find|show|quote)|operation (status|wait)|resource get)( |$)/.test(args.join(' '))?'read':'unknown';
+      await consent(context,signal,{ risk, title:'工具执行授权', message:`允许 ${service.title} 完成当前任务吗？`, detail:`用途：${purpose}\n执行位置：当前电脑\n工作目录：${cwd}\n程序：${executable}\n当前指令参数：${JSON.stringify(builtin?['--non-interactive','--format','json',...args]:args)}\n\n授权范围由当前对话权限和本次选择决定；实际行为由该程序决定。` }, identity);
       before();return call(args);
     }
     if (request.action === 'discover') {
       if (!builtin) return sanitizeServiceResult(await authorized(['--help'],'读取此服务支持的命令与参数'));
-      await consent(context,signal,{title:'工具执行授权',message:'授权即梦画布完成当前任务',detail:`程序：${executable}\n工作目录：${cwd}\n参数前缀：--non-interactive --format json\n首先读取：version、schema、auth status、auth account、canvas current\n任务或 Auto 授权还覆盖后续草稿保存、报价、生成、状态查询与下载；消耗积分的生成受累计上限约束。`}, identity);
+      await consent(context,signal,{risk:'read',title:'工具执行授权',message:'授权即梦画布完成当前任务',detail:`程序：${executable}\n工作目录：${cwd}\n参数前缀：--non-interactive --format json\n首先读取：version、schema、auth status、auth account、canvas current\n授权范围由当前对话权限和本次选择决定；内置生成通道按批准的积分上限执行。`}, identity);
       const version=await call(['version']), schema=await call(['schema']), auth=await call(['auth','status']);
       const commands=commandFacts(schema.data??{});
-      sessions.set(JSON.stringify([context.actorId,context.chatId,service.id]),{commands});
+      const sessionKey=JSON.stringify([context.actorId,context.chatId,service.id]);
+      const prior=sessions.get(sessionKey);
+      const session={commands,...(prior?.deviceCode?{deviceCode:prior.deviceCode}:{}),reauthorize:prior?.reauthorize??false};
+      sessions.set(sessionKey,session);
       if (!schema.ok || !auth.ok || !auth.data?.loggedIn) return sanitizeServiceResult({ok:false,version,auth,commands:commands.filter(c=>c.command[0]==='auth'),message:'请调用 auth login 启动官方授权；然后 auth wait（不传 device-code，由宿主保管），完成后重新 discover。'});
 
-      return sanitizeServiceResult({ok:true,version,auth,account:await call(['auth','account']),current:await call(['canvas','current']),commands:commands.filter(c=>supported.test(c.command.join(' ')))});
+      const account=await call(['auth','account']),current=await call(['canvas','current']);
+      const failed=[account,current].find(r=>r.ok===false);
+      session.reauthorize=[account,current].some(r=>r.error?.reason==='oauth_scope_insufficient');
+      if(failed)return sanitizeServiceResult({ok:false,version,auth,account,current,error:failed.error,requiredAction:failed.error?.requiredAction,commands:commands.filter(c=>c.command[0]==='auth'),message:session.reauthorize?'本地已登录，但服务端授权不足。请调用 auth login，宿主会单独确认并发起重新授权，再 auth wait；不要更换 profile 或反复尝试业务操作。':'服务端连接检查失败，请根据真实错误处理后重新 discover。'});
+      delete session.deviceCode;
+      return sanitizeServiceResult({ok:true,version,auth,account,current,commands:commands.filter(c=>supported.test(c.command.join(' ')))});
     }
     const args=request.args;
     if (!Array.isArray(args) || !args.length || args.length>80 || args.some(x=>typeof x!=='string'||x.length>12000||x.includes('\0'))) throw Error('命令参数必须是字符串数组');
@@ -127,6 +160,13 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(/^node (create|edit) /.test(path)) {
       if(!ids('--node-id').length)actual.push('--node-id','node_'+randomUUID().replaceAll('-',''));
       if(!ids('--update-id').length)actual.push('--update-id',randomUUID());
+    }
+    if(path==='auth login') {
+      if(discovered.deviceCode)return {ok:true,status:'awaiting_login',message:'已有官方授权待完成，请继续 auth wait，不重复登录。'};
+      if(discovered.reauthorize) {
+        await consent(context,signal,{forceApproval:true,title:'重新授权即梦账号',message:'即梦服务端已确认授权不足，需要替换当前 profile 的旧凭据并重新完成官方授权。',detail:'仅执行 auth login --force；不会提交生成任务或消耗积分。'},identity+'\0reauthorize');
+        actual=['auth','login','--force'];
+      }
     }
     if(path==='auth wait'){if(!discovered.deviceCode)throw Error('请先启动一次 auth login');actual=['auth','wait','--device-code',discovered.deviceCode,'--timeout','20s'];}
     if(path==='operation wait') { if(!ids('--timeout').length)actual.push('--timeout','30s'); }
@@ -165,6 +205,8 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     let result;
     try{result=await authorized(actual,request.purpose||entry.summary,()=>{if(isSave)writeAttempt(writeKey,recovery);});}
     catch(error){if(isSave&&readAttempt(writeKey))error.recovery=recovery;throw error;}
+    if(result.error?.reason==='oauth_scope_insufficient')discovered.reauthorize=true;
+    if(path==='auth wait'&&result.ok){delete discovered.deviceCode;discovered.reauthorize=false;}
     if(isSave)result={...result,recovery};
     if(path==='auth login'){const c=result.data?.challenge;if(c?.deviceCode){discovered.deviceCode=c.deviceCode;const url=c.verificationUriComplete||c.verificationUri;notify({type:'authorization',url,userCode:c.userCode,actorId:context.actorId,chatId:context.chatId});return {ok:result.ok,status:'awaiting_login',message:'已启动官方授权，请用户在浏览器完成后调用 auth wait；勿重复 auth login。'};}}
     if(path==='resource download'&&result.ok&&typeof result.data?.path==='string') {
@@ -182,7 +224,9 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(url.username||url.password||url.search||url.hash||!['https:','http:'].includes(url.protocol))throw Error('服务地址无效');
     const key=JSON.stringify([context.actorId,context.chatId,service.id,service.target]);
     let session=sessions.get(key);
-    await consent(context,signal,{title:'工具执行授权',message:`允许 ${service.title} 完成当前任务吗？`,detail:`服务地址：${url.href}\n当前操作：${request.action==='discover'?'初始化并读取工具目录':request.tool}\n参数：${JSON.stringify(request.arguments??{})}\n任务或 Auto 授权覆盖此服务的后续工具调用（包括读取和写入）。数据将发送给该服务，回执会交给 CPclaw 的模型服务以完成当前任务。服务自身的计费不受即梦积分上限约束。`}, url.href);
+    const tool=session?.tools?.find(t=>t.name===request.tool);
+    const risk=request.action==='discover'||tool?.annotations?.readOnlyHint===true&&tool?.annotations?.destructiveHint===false?'read':'unknown';
+    await consent(context,signal,{risk,title:'工具执行授权',message:`允许 ${service.title} 完成当前任务吗？`,detail:`服务地址：${url.href}\n当前操作：${request.action==='discover'?'初始化并读取工具目录':request.tool}\n参数：${JSON.stringify(request.arguments??{})}\n授权范围由当前对话权限和本次选择决定。数据将发送给该服务，回执会交给 CPclaw 的模型服务以完成当前任务。服务自身的计费不受即梦积分上限约束。`}, url.href);
     async function rpc(method,params,notification=false) {
       check(context,signal);
       const response=await fetcher(url,{method:'POST',redirect:'error',headers:{'content-type':'application/json',accept:'application/json, text/event-stream',...(session?.id?{'Mcp-Session-Id':session.id}:{}),...(session?.version?{'MCP-Protocol-Version':session.version}:{})},body:JSON.stringify({jsonrpc:'2.0',...(notification?{}:{id:randomUUID()}),method,params}),signal:AbortSignal.any([signal,AbortSignal.timeout(60_000)])});

@@ -4,6 +4,8 @@ export type LogService =
   | "cpclaw-dev-host"
   | "cpclaw-lifecycle"
   | "cpclaw-desktop-host"
+  | "cpclaw-desktop-worker"
+  | "cpclaw-desktop-ui"
   | "cpclaw-harness-adapter"
   | "cpclaw-model-gateway"
   | "cpclaw-platform"
@@ -37,6 +39,8 @@ function isService(value: string): value is LogService {
     value === "cpclaw-dev-host" ||
     value === "cpclaw-lifecycle" ||
     value === "cpclaw-desktop-host" ||
+    value === "cpclaw-desktop-worker" ||
+    value === "cpclaw-desktop-ui" ||
     value === "cpclaw-harness-adapter" ||
     value === "cpclaw-model-gateway" ||
     value === "cpclaw-platform" ||

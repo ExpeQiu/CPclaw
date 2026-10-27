@@ -298,7 +298,15 @@ export async function runReportLoop(input: {
     input.signal.throwIfAborted();
     if ((!input.service && (toolCalls < 1 || modelCalls < 2)) || !result.finalResponse.trim()) throw new Error("Harness 未完成工具调用和模型续答");
     await harness.close();
-    const remains = processStillMentions(patch);
+    // SDK close may resolve before the operating system reaps its child.
+    const cleanupDeadline = Date.now() + 2_000;
+    let remains = processStillMentions(patch);
+    while (remains && Date.now() < cleanupDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      input.signal.throwIfAborted();
+      remains = processStillMentions(patch);
+    }
+    input.signal.throwIfAborted();
     if (remains) throw new Error("Harness 子进程未回收");
     const finalResponse = result.finalResponse.replace(/^#(?=任务目标|材料与来源|要点|未覆盖项)/gm, "# ");
     return { finalResponse, toolCalls, modelCalls, childCommandSeenAfterClose: remains };

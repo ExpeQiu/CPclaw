@@ -10,7 +10,7 @@ function setup({approve=async()=>true,run,fetcher,readBinary=()=>Buffer.from('fi
 }
 const signal=()=>new AbortController().signal;
 test('registry includes CLI and SaaS MCP; disabled connectors excluded',()=>{
- assert.deepEqual(publicServices([{id:'x',enabled:true,type:'MCP'},{id:'off',enabled:false,type:'CLI'}]).map(s=>s.id),['dreamina','x']);
+ assert.deepEqual(publicServices([{id:'x',enabled:true,type:'MCP'},{id:'off',enabled:false,type:'CLI'}]).map(s=>s.id),['dreamina','local-terminal','browser-page','x']);
 });
 test('denial prevents any child command',async()=>{const f=setup({approve:async()=>false});await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover'},signal()),e=>e.code==='DENIED');assert.equal(f.calls.length,0);});
 test('generic CLI uses reviewed argv with shell false, supports non-media operations',async()=>{const f=setup();const result=await f.runtime.execute(f.context,{action:'call',args:['list','--query','x; $(echo injected)'],purpose:'检索 SaaS 任务'},signal());assert.equal(result.value,'real');assert.equal(f.calls[0].options.shell,false);assert.equal(f.calls[0].args[2],'x; $(echo injected)');assert.match(f.approvals[0].detail,/x; \$\(echo injected\)/);});
@@ -100,4 +100,38 @@ test('MCP task approval covers discovery and subsequent tool calls',async()=>{
  await f.runtime.execute(f.context,{action:'discover'},signal());
  await f.runtime.execute(f.context,{action:'call',tool:'tickets_write',arguments:{body:'first'}},signal());
  await f.runtime.execute(f.context,{action:'call',tool:'tickets_write',arguments:{body:'second'}},signal());assert.equal(f.approvals.length,1);
+});
+
+function scopeFailureFixture({denyRecovery=false}={}) {
+ const error={code:'service.10000',class:'auth_required',reason:'oauth_scope_insufficient',requiredAction:'login',retryable:false};
+ const notifications=[];
+ const f=setup({service:dreaminaService,approve:async p=>denyRecovery&&p.title==='重新授权即梦账号'?false:{mode:'task',creditCeiling:0},run:async(_file,args)=>{
+  const a=args.slice(3),path=a.join(' ');
+  if(a[0]==='schema')return {stdout:JSON.stringify({ok:true,data:schema})};
+  if(a[0]==='version')return {stdout:'{"ok":true,"data":{"version":"1.1.1"}}'};
+  if(path==='auth status')return {stdout:'{"ok":true,"data":{"loggedIn":true}}'};
+  if(path==='auth account'||path==='canvas current')return {stdout:JSON.stringify({ok:false,error})};
+  if(path==='auth login --force')return {stdout:JSON.stringify({ok:true,data:{challenge:{deviceCode:'PRIVATE_CHALLENGE',verificationUri:'https://jimeng.jianying.com/ai-tool/cli-auth',userCode:'PUBLIC_CODE'}}})};
+  throw Error('unexpected command '+path);
+ }});
+ f.context.taskId="scope-recovery-task";
+ return {...f,notifications};
+}
+test('scope failure overrides local login and prevents discover from claiming connected',async()=>{
+ const f=scopeFailureFixture();const result=await f.runtime.execute(f.context,{action:'discover'},signal());
+ assert.equal(result.ok,false);assert.equal(result.error.reason,'oauth_scope_insufficient');assert.equal(result.requiredAction,'login');
+});
+test('host offers reviewed reauthorization only for structured scope failure and never repeats an active challenge',async()=>{
+ const f=scopeFailureFixture();await f.runtime.execute(f.context,{action:'discover'},signal());
+ const result=await f.runtime.execute(f.context,{action:'call',args:['auth','login']},signal());
+ assert.equal(result.status,'awaiting_login');assert(!JSON.stringify(result).includes('PRIVATE_CHALLENGE'));
+ assert.equal(f.approvals.at(-1).title,'重新授权即梦账号');
+ assert(f.calls.some(c=>c.args.slice(3).join(' ')==='auth login --force'));
+ await f.runtime.execute(f.context,{action:'call',args:['auth','login']},signal());
+ assert.equal(f.calls.filter(c=>c.args.slice(3,5).join(' ')==='auth login').length,1);
+});
+test('denied reauthorization preserves credential and does not run forced login',async()=>{
+ const f=scopeFailureFixture({denyRecovery:true});await f.runtime.execute(f.context,{action:'discover'},signal());
+ await assert.rejects(()=>f.runtime.execute(f.context,{action:'call',args:['auth','login']},signal()),e=>e.code==='DENIED');
+ assert(!f.calls.some(c=>c.args.includes('--force')));
 });

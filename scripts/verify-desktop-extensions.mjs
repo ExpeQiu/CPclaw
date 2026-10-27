@@ -28,6 +28,9 @@ document.getElementById('close-panel').onclick=()=>document.getElementById('insp
  await js("document.getElementById('rail-extensions').click()");await settle();
  assert.equal(await js("document.getElementById('extension-picker').open"),true);
  assert.equal(await js("document.getElementById('inspector').hidden"),true);
+ assert.equal(await js("document.getElementById('extension-manage-services').textContent"),'＋');
+ assert.equal(await js("document.getElementById('extension-manage-services').getAttribute('aria-label')"),'配置其他应用服务');
+ assert.equal(await js("document.querySelector('.extension-service-list-heading #extension-manage-services')!==null"),true);
  const beforeSelect=await js('calls.length');
  await js("document.getElementById('extension-service-dreamina').click()");
  assert.equal(await js('calls.length'),beforeSelect);

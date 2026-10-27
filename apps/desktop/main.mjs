@@ -2,8 +2,15 @@ import { registerExtensionHost } from './extension-host.mjs';
 import { performKnowledgeAction } from './knowledge-actions.mjs';
 import { performProjectAction } from './project-actions.mjs';
 import { performDocumentAction } from "./document-actions.mjs";
+import {
+  applyDesktopSettingsToProcessEnv,
+  getDesktopSettingsView,
+  probePlatformConnection,
+  saveDesktopSettings,
+  syncDesktopSettingsFromEnv,
+} from "./desktop-settings.mjs";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
@@ -11,7 +18,8 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 // 无库模块用子路径；诊断与工作台走系统 Node 的 workspace-worker。
 import { acceptTask } from "@cpclaw/desktop-host/accept-task";
 import { readCurrentAccountSession } from "@cpclaw/desktop-host/account-session";
-import { createWorkspaceClient } from "./workspace-client.mjs";
+import { createWorkspaceClient, resolveKernelStatus } from "./workspace-client.mjs";
+import { desktopLog } from "./desktop-log.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 app.setName("CPclaw");
@@ -22,7 +30,21 @@ if (app.isPackaged) {
 }
 process.env.CPCLAW_DATA_DIR = dataDir;
 app.setPath("userData", dataDir);
+applyDesktopSettingsToProcessEnv(dataDir, here);
 if (!app.requestSingleInstanceLock()) app.exit(0);
+
+function appVersion() {
+  try {
+    return JSON.parse(readFileSync(join(here, "package.json"), "utf8")).version || app.getVersion();
+  } catch {
+    return app.getVersion();
+  }
+}
+
+function restartWorkspace(reason) {
+  process.stderr.write(`${JSON.stringify({ level: "info", event: "workspace_restart", reason })}\n`);
+  workspaceClient.stop();
+}
 
 let mainWindow = null;
 const extensionHost = registerExtensionHost({ dataDir, ipcMain, getWindow: () => mainWindow, getActor: currentActor });
@@ -47,6 +69,53 @@ function currentActor() {
 
 ipcMain.handle("tasks.accept", (_event, command) => {
   return acceptTask(dataDir, command, { runId: `run-${randomUUID()}` });
+});
+
+ipcMain.handle("runtime.status", () => {
+  const status = resolveKernelStatus(here);
+  desktopLog(dataDir, "cpclaw-desktop-host", "info", "kernel_status", status.ready ? "内核可用" : "内核不可用", {
+    ready: Boolean(status.ready),
+    source: String(status.source || "none").slice(0, 32),
+  });
+  return status;
+});
+
+ipcMain.handle("ui.log", (_event, input) => {
+  const level = ["debug", "info", "warn", "error"].includes(input?.level) ? input.level : "info";
+  const event = typeof input?.event === "string" && /^[a-z0-9_]{1,64}$/.test(input.event) ? input.event : "ui_event";
+  const message = typeof input?.message === "string" && input.message ? input.message.slice(0, 500) : "renderer event";
+  const fields = {};
+  if (typeof input?.chatId === "string" && input.chatId) fields.chatId = input.chatId.slice(0, 64);
+  desktopLog(dataDir, "cpclaw-desktop-ui", level, event, message, Object.keys(fields).length ? fields : undefined);
+  return { ok: true };
+});
+
+ipcMain.handle("settings.get", () => getDesktopSettingsView(dataDir, here, { appVersion: appVersion() }));
+
+ipcMain.handle("settings.save", (_event, input) => {
+  const result = saveDesktopSettings(dataDir, here, { ...input, appVersion: appVersion() });
+  if (result.ok) restartWorkspace("settings_saved");
+  return result;
+});
+
+ipcMain.handle("settings.syncEnv", () => {
+  const result = syncDesktopSettingsFromEnv(dataDir, here, { appVersion: appVersion() });
+  if (result.ok) restartWorkspace("settings_sync_env");
+  return result;
+});
+
+ipcMain.handle("settings.probePlatform", (_event, input) => {
+  const url = typeof input?.platformUrl === "string" ? input.platformUrl : "";
+  return probePlatformConnection(url);
+});
+
+ipcMain.handle("settings.pickHarnessRoot", async () => {
+  const choice = await dialog.showOpenDialog(mainWindow, {
+    title: "选择 deepseek-harness 目录",
+    properties: ["openDirectory"],
+  });
+  if (choice.canceled || !choice.filePaths[0]) return { ok: true, cancelled: true };
+  return { ok: true, path: choice.filePaths[0] };
 });
 
 ipcMain.handle("workspace.call", async (_event, call) => {

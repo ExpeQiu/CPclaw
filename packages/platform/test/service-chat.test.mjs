@@ -37,16 +37,24 @@ test('natural conversation routes actual SaaS work without a mode switch; ordina
   const messageId=h.messages.at(-1).id;
   const process=await call('document.create',{chatId,messageId,kind:'process'});assert(process.ok);assert.equal(process.artifact.name,'创作过程.md');
   const processDoc=await call('document.read',{id:process.artifact.id});assert.match(processDoc.artifact.body,/tickets_list/);assert.match(processDoc.artifact.body,/待办工单/);
+  assert.equal((await call('chat.distill-skill',{chatId,messageId})).ok,false,'单轮不提供提炼 Skill');
+  const liked=await call('chat.feedback',{chatId,messageId,liked:true});assert.equal(liked.liked,true);
+  assert.equal((await call('chat.history',{chatId})).messages.find(m=>m.id===messageId).liked,true);
+  await call('chat.send',{chatId,requestId:'chat-2',text:'你好'});assert.equal(local,1,'普通对话不能因为已绑定服务就强制执行');
   const distilled=await call('chat.distill-skill',{chatId,messageId});assert(distilled.ok,JSON.stringify(distilled));
   const snapshot=await call('market.call',{action:'list'}),skill=snapshot.items.find(s=>s.id===distilled.skillId);assert.equal(skill.status,'draft');assert.equal(skill.source,'ai');assert.match(skill.body,/disable-model-invocation: true/);assert.match(skill.body,/version: "1.0.0"/);assert(!snapshot.installs.some(i=>i.id===skill.id));
   const callsBefore=modelRequests.length,reused=await call('chat.distill-skill',{chatId,messageId});assert.equal(reused.skillId,skill.id);assert.equal(modelRequests.length,callsBefore);
   assert.equal((await chat.dispatch('chat.distill-skill','employee-b',{chatId,messageId})).ok,false);
   assert.equal((await call('chat.history',{chatId:other.chatId})).execution.service,'');
-  await call('chat.send',{chatId:other.chatId,requestId:'same-goal-skill',text:'去工单系统查询待办工单'});const sameGoal=await call('chat.history',{chatId:other.chatId});const secondSkill=await call('chat.distill-skill',{chatId:other.chatId,messageId:sameGoal.messages.at(-1).id});assert(secondSkill.ok,JSON.stringify(secondSkill));const after=await call('market.call',{action:'list'});assert.notEqual(after.items.find(s=>s.id===secondSkill.skillId).title,skill.title);
+  await call('chat.send',{chatId:other.chatId,requestId:'same-goal-skill',text:'去工单系统查询待办工单'});
+  await call('chat.send',{chatId:other.chatId,requestId:'same-goal-followup',text:'再确认一次待办'});
+  const sameGoal=await call('chat.history',{chatId:other.chatId});
+  const serviceMessage=sameGoal.messages.find(m=>m.role==='assistant'&&m.hasServiceSteps);
+  const secondSkill=await call('chat.distill-skill',{chatId:other.chatId,messageId:serviceMessage.id});assert(secondSkill.ok,JSON.stringify(secondSkill));const after=await call('market.call',{action:'list'});assert.notEqual(after.items.find(s=>s.id===secondSkill.skillId).title,skill.title);
 
-  await call('chat.send',{chatId,requestId:'chat-2',text:'你好'});assert.equal(local,2,'普通对话不能因为已绑定服务就强制执行');
-  const doc=await call('chat.send',{chatId,requestId:'doc-3',text:'请写文档'});assert.equal(doc.state,'done');assert(doc.artifact);assert.equal(local,2);
-  selection=true;await call('chat.send',{chatId:other.chatId,requestId:'choose-4',text:'查询待办工单'});assert.equal(choices,1);assert.equal(local,3);
+  const localBeforeDoc=local;
+  const doc=await call('chat.send',{chatId,requestId:'doc-3',text:'请写文档'});assert.equal(doc.state,'done');assert(doc.artifact);assert.equal(local,localBeforeDoc);
+  selection=true;const autonomous=await call('chat.send',{chatId:other.chatId,requestId:'choose-4',text:'查询待办工单'});assert.equal(autonomous.state,'done');assert.equal(choices,0,'沿用当前服务，不强制弹窗选择');assert.equal(local,localBeforeDoc+1);
  }finally{chat.stop();await server.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
 });
 test('Harness gateway forwards service tool results, rejects arbitrary tools and unauthenticated requests',async()=>{

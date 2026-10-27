@@ -24,7 +24,7 @@ renameSync(join(contents,'MacOS','Electron'), join(contents,'MacOS','CPclaw'));
 const resources = join(contents, 'Resources');
 const app = join(resources, 'app');
 mkdirSync(app, {recursive:true});
-for (const file of ['creation-process.mjs','service-runtime.mjs','local-command-authorization.mjs','extension-host.mjs','extension-service.mjs','main.mjs','preload.cjs','workspace-client.mjs','workspace-worker.mjs','chat-service.mjs','knowledge-service.mjs','knowledge-actions.mjs','project-service.mjs','project-search.mjs','project-actions.mjs','document-service.mjs','document-actions.mjs','renderer']) {
+for (const file of ['conversation-permissions.mjs','local-tools.mjs','chat-diagnostics.mjs','creation-process.mjs','market-service.mjs','service-runtime.mjs','local-command-authorization.mjs','extension-host.mjs','extension-service.mjs','main.mjs','preload.cjs','workspace-client.mjs','workspace-worker.mjs','chat-service.mjs','knowledge-service.mjs','knowledge-actions.mjs','project-service.mjs','project-search.mjs','project-actions.mjs','document-service.mjs','document-actions.mjs','renderer']) {
   cpSync(join(root,'apps/desktop',file),join(app,file),{recursive:true,filter:p=>!basename(p).startsWith('._')});
 }
 writeFileSync(join(app,'package.json'), JSON.stringify({name:'cpclaw',productName:'CPclaw',version,type:'module',main:'main.mjs'},null,2));
@@ -70,7 +70,7 @@ function recordReleaseFiles(directory, prefix = '') {
   }
 }
 recordReleaseFiles(app);
-writeFileSync(join(app, 'release-manifest.json'), JSON.stringify({version, buildType:'full-workspace', createdAt:new Date().toISOString(), features:['knowledge','projects','documents','markdown','elapsed-timer','extensions-picker','extensions-native-view','natural-service-requests','harness-service-tools','cli-mcp-execution','creation-process-export','skill-distillation'], files:releaseFiles}, null, 2) + '\n');
+writeFileSync(join(app, 'release-manifest.json'), JSON.stringify({version, buildType:'full-workspace', createdAt:new Date().toISOString(), features:['knowledge','projects','documents','markdown','elapsed-timer','extensions-picker','extensions-native-view','natural-service-requests','harness-service-tools','cli-mcp-execution','creation-process-export','skill-distillation','enterprise-skill-market','versioned-skill-install','skill-trials','scene-experts','conversation-permissions','local-tools','chat-diagnostics'], files:releaseFiles}, null, 2) + '\n');
 const plist = join(contents,'Info.plist');
 for (const [key,value] of Object.entries({CFBundleExecutable:'CPclaw',CFBundleName:'CPclaw',CFBundleDisplayName:'CPclaw',CFBundleIdentifier:'com.cpclaw.desktop',CFBundleShortVersionString:version,CFBundleVersion:version,NSHumanReadableCopyright:'CPclaw local build'})) {
   execFileSync('/usr/bin/plutil', ['-replace', key, '-string', value, plist]);

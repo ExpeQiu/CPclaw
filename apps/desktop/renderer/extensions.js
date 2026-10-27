@@ -4,14 +4,26 @@
   const panel=el('panel-extensions'),inspector=el('inspector'),slot=el('extension-native-slot'),picker=el('extension-picker'),approval=el('service-approval');
   let approvalRequest;
   let native=false,workspace=false,checking=false,frame,selected={id:'dreamina',title:'即梦画布',type:'CLI'},activeService=selected;
-  let services=[selected], records=[],canvasUrl='',resultsGeneration=0,selectionId='';
+  let services=[selected], records=[],canvasUrl='',pageUrl='',resultsGeneration=0,selectionId='';
   const feedback=text=>{el('extension-feedback').textContent=text??'';el('extension-panel-feedback').textContent=text??'';};
+  const DREAMINA_ORIGIN='https://jimeng.jianying.com';
+  function pageOrigins(service){
+    if(!service)return [];
+    if(service.id==='dreamina')return [DREAMINA_ORIGIN];
+    const origins=[];
+    const push=value=>{try{const u=new URL(value);if(!['https:','http:'].includes(u.protocol)||u.username||u.password)return;if(!origins.includes(u.origin))origins.push(u.origin);}catch{}};
+    if(Array.isArray(service.pageOrigins))for(const o of service.pageOrigins)push(o);
+    if(typeof service.pageUrl==='string')push(service.pageUrl);
+    if(service.type==='MCP'&&typeof service.target==='string')push(service.target);
+    return origins;
+  }
+  function canNative(service){return pageOrigins(service).length>0;}
   function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&!approval.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
   function configure(){
     el('extension-detail-title').textContent=selected.title;
-    el('extension-detail-title').nextElementSibling.textContent=selected.id==='dreamina'?'图片、视频、音频与画布 · dreamina-canvas CLI':`${selected.type} · 按服务实际工具执行`;
+    el('extension-detail-title').nextElementSibling.textContent=selected.id==='dreamina'?'图片、视频、音频与画布 · dreamina-canvas CLI':selected.id==='browser-page'?'结构化原生页操控 · 登录/支付需确认':`${selected.type} · 按服务实际工具执行`;
     el('extension-check').hidden=selected.id!=='dreamina';
-    el('extension-summary').textContent=selected.id==='dreamina'?'可读取 CLI 状态，创作能力由实际版本提供。支持任务统一授权与 Auto。':'执行任务前会发现真实命令或 MCP 工具，支持任务统一授权与 Auto。';
+    el('extension-summary').textContent=selected.id==='dreamina'?'可读取 CLI 状态，创作能力由实际版本提供。按当前对话权限执行。':selected.id==='browser-page'?'可在允许源内操作页面；登录与支付会强制请求确认。':'执行任务前会发现真实命令或 MCP 工具，按当前对话权限执行。';
     document.querySelectorAll('.extension-service-item').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.service===selected.id)));
   }
   function select(service){selected=service;configure();}
@@ -20,7 +32,7 @@
     const r=await window.cpclaw.workspace({method:'chat.services',input:{}});
     if(!r.ok)throw Error(r.message);
     services=r.services;el('extension-other-services').replaceChildren();
-    for(const service of services.filter(s=>s.id!=='dreamina')){const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;const strong=document.createElement('strong');strong.textContent=service.title;const text=document.createElement('span');text.textContent=service.type==='MCP'?'网页 / SaaS · MCP':'本机 CLI';button.append(strong,text);button.onclick=()=>select(service);el('extension-other-services').append(button);}
+    for(const service of services.filter(s=>s.id!=='dreamina')){const button=document.createElement('button');button.type='button';button.className='extension-service-item';button.dataset.service=service.id;const strong=document.createElement('strong');strong.textContent=service.title;const text=document.createElement('span');text.textContent=service.id==='browser-page'?'原生页 · Computer Use':service.type==='MCP'?'网页 / SaaS · MCP':'本机 CLI';button.append(strong,text);button.onclick=()=>select(service);el('extension-other-services').append(button);}
     selected=services.find(s=>s.id===selected.id)??services[0];configure();
   }
   async function check(){
@@ -31,18 +43,22 @@
     finally{checking=false;el('extension-check').disabled=el('extension-recheck').disabled=false;sync();}
   }
   async function mode(value){
-    native=value&&activeService.id==='dreamina';slot.hidden=!native;
+    native=Boolean(value&&canNative(activeService));slot.hidden=!native;
     el('extension-cli-panel').hidden=el('service-operation-results').hidden=native;
-    el('panel-title').textContent=`${activeService.title} · ${native?'原生页面':'操作面板'}`;
+    el('panel-title').textContent=`${activeService.title} · ${native?'原生页面':'自动工作流'}`;
     el('extension-native').setAttribute('aria-pressed',String(native));el('extension-cli').setAttribute('aria-pressed',String(!native));
-    if(native){try{const r=await action({action:'open',...(canvasUrl?{url:canvasUrl}:{})});if(!r.ok)throw Error(r.message);}catch(e){feedback(e.message);}}
+    if(native){
+      const origins=pageOrigins(activeService);
+      const url=pageUrl||canvasUrl||(origins[0]?`${origins[0]}/`:undefined);
+      try{const r=await action({action:'open',service:activeService,origins,...(url?{url}:{})});if(!r.ok)throw Error(r.message);}catch(e){feedback(e.message);}
+    }
     sync();
   }
   window.showServiceWorkspace=service=>{
-    activeService=services.find(s=>s.id===service.id)??service;workspace=true;
+    activeService=services.find(s=>s.id===service.id)??service;workspace=true;pageUrl=typeof activeService.pageUrl==='string'?activeService.pageUrl:'';
     el('extension-workspace').hidden=false;el('extension-view-controls').hidden=false;
-    el('service-panel-name').textContent=activeService.title;el('extension-native').hidden=activeService.id!=='dreamina';el('extension-recheck').hidden=activeService.id!=='dreamina';
-    el('extension-cli-status').textContent='在左侧描述任务，可一次授权完整操作或启用 Auto。';
+    el('service-panel-name').textContent=activeService.title;el('extension-native').hidden=!canNative(activeService);el('extension-recheck').hidden=activeService.id!=='dreamina';
+    el('extension-cli-status').textContent='在左侧描述任务，将按当前对话权限执行。原生页登录与支付需确认。';
     openPanel('extensions');void mode(false);
   };
   window.executionServiceName=id=>services.find(s=>s.id===id)?.title??(id==='dreamina'?'即梦画布':'');
@@ -64,7 +80,7 @@
   el('extension-native').onclick=()=>void mode(true);el('extension-cli').onclick=()=>void mode(false);
   el('extension-refresh').onclick=()=>native?void mode(true):void renderResults();
   el('extension-revoke').onclick=async()=>{const r=await action({action:'revoke-permission'});feedback(r.message);};
-  const permission=r=>{const grants=r.grants??[];el('extension-permission').textContent=grants.length?grants.map(g=>`${g.service} · ${g.mode==='auto'?'Auto（本次对话）':'本次任务已授权'}${g.creditCeiling?` · 积分已预留 ${g.reservedCredits}/${g.creditCeiling}`:''}`).join('；'):r.remembered?'本次对话已允许即梦只读检查':'支持一次授权整个任务，或 Auto 自动执行';el('extension-revoke').hidden=!r.remembered&&!grants.length;};
+  const permission=r=>{const grants=r.grants??[];const mode={ask:'请求批准 · 每次执行前询问',auto:'帮我批准 · 已知只读操作自动通过',full:'完全访问权限 · 当前对话的本机文件、终端与网络'}[r.mode]||'按当前对话权限执行';const grantText=grants.map(g=>`${g.service} · ${g.mode==='auto'?'本次对话已授权':'本次任务已授权'}${g.creditCeiling?` · 积分已预留 ${g.reservedCredits}/${g.creditCeiling}`:''}`).join('；');el('extension-permission').textContent=mode+(grantText?'；'+grantText:r.remembered?'；已允许即梦只读检查':'');el('extension-revoke').hidden=!r.remembered&&!grants.length&&(!r.mode||r.mode==='ask');};
   void action({action:'permission-status'}).then(permission).catch(()=>{});
   function approvalScope(){
     const mode=el('service-approval-mode').value;
@@ -88,7 +104,7 @@
     for(const record of records){
       const card=document.createElement('details');card.className='service-result';const title=document.createElement('summary');title.textContent=`${record.step}. ${record.service.title} · ${record.request.purpose||record.request.tool||record.request.args?.slice(0,3).join(' ')||'发现能力'} · ${record.result.ok===false?'未完成':'已返回'}`;
       const pre=document.createElement('pre');pre.textContent=JSON.stringify(record.result,null,2);card.append(title,pre);
-      for(const url of urls(record.result)){try{const u=new URL(url);if(u.origin!=='https://jimeng.jianying.com'||u.hash||[...u.searchParams.keys()].some(k=>/token|sign|auth|code|credential/i.test(k)))continue;canvasUrl=url;const button=document.createElement('button');button.textContent='打开此画布 ↗';button.onclick=e=>{e.preventDefault();canvasUrl=url;void mode(true);};card.append(button);}catch{}}
+      for(const url of urls(record.result)){try{const u=new URL(url);const allowed=pageOrigins(activeService);if((allowed.length? !allowed.includes(u.origin):u.origin!==DREAMINA_ORIGIN)||u.hash||[...u.searchParams.keys()].some(k=>/token|sign|auth|code|credential/i.test(k)))continue;canvasUrl=url;pageUrl=url;const button=document.createElement('button');button.textContent=u.origin===DREAMINA_ORIGIN?'打开此画布 ↗':'在原生页打开 ↗';button.onclick=e=>{e.preventDefault();canvasUrl=url;pageUrl=url;void mode(true);};card.append(button);}catch{}}
       root.append(card);
       const path=record.result.data?.path;
       if(record.request.args?.[0]==='resource'&&record.request.args?.[1]==='download'&&typeof path==='string'){
@@ -105,8 +121,9 @@
   window.cpclaw.onExtensionEvent(event=>{
     if(event.state==='approval'){
       approvalRequest=event;
+      const sensitive=/登录或支付|登录|支付/.test(`${event.title||''}${event.message||''}`);
       el('service-approval-title').textContent=event.budgetExceeded?'调整工具执行授权':event.title;
-      el('service-approval-message').textContent=event.budgetExceeded?'当前累计积分额度不足。可提高上限后继续，或拒绝停止。':event.message;
+      el('service-approval-message').textContent=event.budgetExceeded?'当前累计积分额度不足。可提高上限后继续，或拒绝停止。':event.message+(sensitive&&!/不会代填/.test(event.message||'')?' 宿主不会代填密码或支付凭据。':'');
       el('service-approval-detail').textContent=event.detail;
       el('service-approval-mode').querySelector('[value="task"]').disabled=!event.canAuthorizeTask;
       el('service-approval-mode').querySelector('[value="auto"]').disabled=!event.canAuthorizeAuto;

@@ -1,7 +1,28 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+
+/** 解析当前推理内核（Harness）名称与是否可用，供标题栏状态显示。 */
+export function resolveKernelStatus(desktopDir, env = process.env) {
+  const bundled = resolve(desktopDir, "../harness");
+  const bundleManifest = join(bundled, "manifest.json");
+  if (existsSync(bundleManifest)) {
+    let version = "";
+    try { version = JSON.parse(readFileSync(bundleManifest, "utf8")).version || ""; } catch { /* 清单损坏仍标可用，路径存在即可 */ }
+    return { ok: true, name: "deepseek-harness", ready: true, source: "bundle", version };
+  }
+  if (env.CPCLAW_REPORT_ENGINE === "harness") {
+    const root = env.CPCLAW_HARNESS_ROOT || resolve(desktopDir, "../../../../13 Github/deepseek-harness");
+    const ready = existsSync(join(root, "package.json"));
+    let version = "";
+    if (ready) {
+      try { version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version || ""; } catch { /* ignore */ }
+    }
+    return { ok: true, name: basename(root) || "deepseek-harness", ready, source: "checkout", version };
+  }
+  return { ok: true, name: "未配置", ready: false, source: "none", version: "" };
+}
 
 export function createWorkspaceClient(dataDir, desktopDir, { onEvent = () => {}, onService = async () => ({ok:false,message:"本机服务执行未接入"}) } = {}) {
   let child = null;

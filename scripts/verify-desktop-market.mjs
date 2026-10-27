@@ -48,35 +48,44 @@ if (process.argv.includes('--platform-child')) {
       return worker.request({...call,actorId});
     });
     const js = code => w.webContents.executeJavaScript(code);
-    async function until(code) { const limit=Date.now()+(process.env.CPCLAW_CHAT_UI_REAL_BASE?70000:8000);while(!await js(code)){if(Date.now()>limit)throw Error(`UI 条件超时: ${code}`);await sleep(15);} }
+    async function until(code) { const limit=Date.now()+(process.env.CPCLAW_CHAT_UI_REAL_BASE?70000:8000);while(!await js('('+code+') && !marketFrame.contentDocument?.body?.hasAttribute("aria-busy")')){if(Date.now()>limit)throw Error(`UI 条件超时: ${code}`);await sleep(15);} }
     async function login(id) {
       await js(`openPanel('settings');byId('platform-url').value='${base}';byId('employee-id').value='${id}';byId('account-password').value='fixture-${id}';byId('account-login').click()`);
       await until(`chatAccount==='${id}' && !byId('account-login').dataset.busy`);
     }
     await w.loadFile(join(desktopDir,'renderer/index.html')); await login('employee-a');
 
-    // 隔离回归数据：验证消息底部保存过程与提炼草稿，不连接真实即梦。
+    // 隔离回归数据：验证消息底部保存过程、点赞与多轮后提炼草稿，不连接真实即梦。
     await js(`byId('close-panel').click();byId('note').value='本地回归样例：整理图片创作流程';byId('chat-send').click()`);
     await until(`chatMessages.at(-1)?.state==='done'&&!runningChatId&&!byId('chat-send').dataset.busy`);
     const assistantId=await js('chatMessages.at(-1).id');
     const receipt={step:1,service:{id:'dreamina',title:'即梦画布',type:'CLI'},request:{action:'call',args:['model','list','--type','image'],purpose:'读取创作模型目录（本地回归夹具）'},result:{ok:true,data:{items:[]}}};
-    const seeded=spawnSync(process.env.CPCLAW_NODE_BINARY||'node',['--input-type=module','-e',"import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(process.argv[1]);db.prepare('INSERT INTO chat_service_steps VALUES(?,?,?)').run(process.argv[2],1,process.argv[3]);db.close();",join(dataDir,'chat.sqlite'),assistantId,JSON.stringify(receipt)],{encoding:'utf8'});if(seeded.status!==0)throw Error(seeded.stderr);
+    const seeded=spawnSync(process.env.CPCLAW_NODE_BINARY||'node',['--input-type=module','-e',"import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(process.argv[1]);db.prepare('INSERT INTO chat_service_steps VALUES(?,?,?)').run(process.argv[2],1,process.argv[3]);db.prepare('UPDATE chat_messages SET content=? WHERE id=?').run('已读取创作模型目录并整理可复用步骤，包含发现能力、授权与结果核对。',process.argv[2]);db.close();",join(dataDir,'chat.sqlite'),assistantId,JSON.stringify(receipt)],{encoding:'utf8'});if(seeded.status!==0)throw Error(seeded.stderr);
     await js('selectChat(currentChatId)');await until('chatMessages.at(-1)?.hasServiceSteps');
-    if(!await js(`[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='保存创作过程.md')&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='提炼成Skill')`))throw Error('缺少创作过程/Skill 操作');
-    const skillShots=join(root,'docs/verification/skill020');mkdirSync(skillShots,{recursive:true});
+    if(!await js(`[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='保存创作过程.md')&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='点赞有用')&&![...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='提炼成Skill')`))throw Error('单轮应有保存/点赞，且不应出现提炼 Skill');
+    await js(`byId('note').value='补充第二轮：继续完善流程说明';byId('chat-send').click()`);
+    await until(`chatMessages.filter(m=>m.role==='user').length>=2&&chatMessages.at(-1)?.state==='done'&&!runningChatId`);
+    await js('selectChat(currentChatId)');await until(`chatMessages.some(m=>m.id==='${assistantId}'&&m.hasServiceSteps)&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='提炼成Skill')`);
+    if(!await js(`[...byId('chat-messages').querySelectorAll('button')].some(b=>b.textContent==='保存创作过程.md')&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='提炼成Skill')&&[...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='点赞有用')`))throw Error('缺少创作过程/点赞/Skill 图标操作');
+    const skillShots=join(root,'docs/verification/market-v2/skill-draft');mkdirSync(skillShots,{recursive:true});
     writeFileSync(join(skillShots,'message-actions.png'),(await w.webContents.capturePage()).toPNG());
+    await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='点赞有用').click()`);
+    await until(`[...byId('chat-messages').querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='取消点赞')`);
     await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.textContent==='保存创作过程.md').click()`);
     await until(`chatArtifacts.some(a=>a.name==='创作过程.md')&&document.getElementById('document-preview').textContent.includes('model')`);
-    await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.textContent==='提炼成Skill').click()`);
+    await js(`[...byId('chat-messages').querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='提炼成Skill').click()`);
     await until(`!marketOverlay.hidden&&marketFrame.contentDocument?.getElementById('editor')?.hidden===false&&marketFrame.contentDocument.getElementById('body').value.includes('disable-model-invocation: true')`);
     if(!await js(`marketFrame.contentDocument.getElementById('message').textContent.includes('尚未发布或启用')`))throw Error('草稿状态不明确');
     writeFileSync(join(skillShots,'skill-draft.png'),(await w.webContents.capturePage()).toPNG());
     await js('marketClose.click()');
     await js(`byId('rail-market').click()`);
-    await until(`!marketOverlay.hidden && marketFrame.contentDocument?.getElementById('list')?.textContent.includes('暂无')`);
+    await until(`!marketOverlay.hidden && marketFrame.contentDocument?.getElementById('nav')?.children.length===4`);
+    await js(`marketFrame.contentDocument.getElementById('nav').querySelectorAll('button')[0].click()`);
+    await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('暂无')`);
     const frame = async code => { try { return await js(`marketFrame.contentWindow.eval(${JSON.stringify(code)})`); } catch(e) { console.error("FAILED UI STEP", JSON.stringify(code)); throw e; } };
     await frame(`document.getElementById('nav').querySelectorAll('button')[3].click()`);
-    await frame(`document.getElementById('manual').click();document.getElementById('title').value='前台验证技能';document.getElementById('description').value='信息检查';document.getElementById('body').value='# 检查方法：请先核对来源。';document.getElementById('editor').requestSubmit()`);
+    await until(`marketFrame.contentDocument.getElementById('heading').textContent==='技能创作'`);
+    await frame(`document.getElementById('manual').click();document.getElementById('title').value='前台验证技能';document.getElementById('description').value='信息检查';document.getElementById('body').value='# 检查方法：请先核对来源。';document.getElementById('example-input').value='合成材料';document.getElementById('example-output').value='核对结果';document.getElementById('editor').requestSubmit()`);
     await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('前台验证技能')`);
     await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='个人使用').click()`);
     await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('个人可用')`);
@@ -94,12 +103,43 @@ if (process.argv.includes('--platform-child')) {
     await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('前台验证技能')`);
     await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='安装').click()`);
     await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('用于新聊天')`);
-    const screenshots=join(root,'docs/verification/market');mkdirSync(screenshots,{recursive:true});
+    const screenshots=join(root,'docs/verification/market-v2');mkdirSync(screenshots,{recursive:true});
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     writeFileSync(join(screenshots,'desktop-market.png'),(await w.webContents.capturePage()).toPNG());
     await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='用于新聊天').click()`);
     await until(`marketOverlay.hidden && byId('task-title').textContent==='前台验证技能'`);
+    await until(`!byId('chat-skill-context').hidden&&byId('chat-skill-context').textContent.includes('前台验证技能')`);
+    await login('admin');await js(`byId('rail-market').click()`);await until(`marketFrame.contentDocument?.getElementById('nav')?.children.length===5`);
+    await frame(`document.getElementById('official-import').click()`);
+    await until(`marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===6`);
+    for(let i=0;i<6;i++){
+      await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='提交审核').click()`);
+      await until(`marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===6&&[...marketFrame.contentDocument.querySelectorAll('article button')].filter(b=>b.textContent==='提交审核').length===${5-i}`);
+    }
+    await frame(`document.getElementById('nav').querySelectorAll('button')[4].click()`);await until(`marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===6`);
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');writeFileSync(join(screenshots,'review-queue.png'),(await w.webContents.capturePage()).toPNG());
+    for(let i=0;i<6;i++){
+      await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='通过').click()`);
+      await until(`marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===${5-i}`);
+    }
+    await js('marketClose.click()');await login('employee-a');await js(`byId('rail-market').click()`);await until(`marketFrame.contentDocument?.getElementById('list')?.querySelectorAll('article').length===6`);
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');writeFileSync(join(screenshots,'official-catalog.png'),(await w.webContents.capturePage()).toPNG());
+    await frame(`document.getElementById('search').value='汇报材料';document.getElementById('search').dispatchEvent(new Event('input'))`);
+    await until(`marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===1&&marketFrame.contentDocument.getElementById('list').textContent.includes('材料报告')`);
+    await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='详情').click()`);await until(`!marketFrame.contentDocument.getElementById('details').hidden&&marketFrame.contentDocument.getElementById('details').textContent.includes('效果示例')`);
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');writeFileSync(join(screenshots,'skill-detail.png'),(await w.webContents.capturePage()).toPNG());
+    await frame(`document.getElementById('close-details').click();document.getElementById('nav').querySelectorAll('button')[2].click()`);await until(`marketFrame.contentDocument.getElementById('heading').textContent==='连接器'`);
+    await frame(`document.getElementById('nav').querySelectorAll('button')[0].click()`);await until(`marketFrame.contentDocument.getElementById('search').value==='汇报材料'&&marketFrame.contentDocument.getElementById('list').querySelectorAll('article').length===1`);
+    w.setSize(640,820);await until(`marketFrame.contentDocument.documentElement.scrollWidth<=marketFrame.contentDocument.documentElement.clientWidth`);
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');writeFileSync(join(screenshots,'market-narrow.png'),(await w.webContents.capturePage()).toPNG());w.setSize(1280,860);
+    await frame(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);await until(`marketOverlay.hidden`);await js(`byId('rail-market').click()`);await until(`!marketOverlay.hidden&&marketFrame.contentDocument.getElementById('search').value==='汇报材料'`);
+    await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='安装').click()`);await until(`marketFrame.contentDocument.getElementById('list').textContent.includes('用于新聊天')`);
+    await frame(`[...document.querySelectorAll('article button')].find(b=>b.textContent==='用于新聊天').click()`);await until(`marketFrame.contentDocument.getElementById('use-dialog').open`);
+    await frame(`document.querySelector('#use-inputs textarea').value='合成试点记录：10人参与，8人完成，失败原因待确认。';document.getElementById('use-form').requestSubmit()`);
+    await until(`marketOverlay.hidden&&byId('chat-skill-context').textContent.includes('材料报告')&&byId('note').value.includes('合成试点记录')`);
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');writeFileSync(join(screenshots,'chat-skill-binding.png'),(await w.webContents.capturePage()).toPNG());
     if(errors.length)throw Error(errors.join('\n'));
-    console.log(JSON.stringify({saveCreationProcess:true,distillSkill:true,draftEditor:true,marketEmpty:true,iframeIPC:true,create:true,personal:true,submit:true,adminReview:true,install:true,useInChat:true,screenshots}));
+    console.log(JSON.stringify({saveCreationProcess:true,distillSkill:true,draftEditor:true,marketEmpty:true,iframeIPC:true,create:true,personal:true,submit:true,adminReview:true,install:true,useInChat:true,officialImport:true,officialPublish:true,aliasSearch:true,skillDetail:true,inputPreparation:true,chatSkillBinding:true,filterMemory:true,narrowWindow:true,escapeReturn:true,screenshots}));
     worker.stop();platform?.kill();app.exit(0);
   }catch(error){console.error(error);worker?.stop();platform?.kill();app.exit(1);}
   });

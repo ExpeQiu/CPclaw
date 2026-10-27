@@ -24,6 +24,7 @@ app.whenReady().then(async()=>{
   const service={id:'terminal-test',title:'终端验证',type:'CLI',target:'/usr/bin/printf'};
   const execute=(taskId='task-1',chatId='chat-1')=>host.executeService({actorId:actor,chatId,taskId,service,request:{action:'call',args:['%s','{"ok":true,"completed":"terminal"}']}},new AbortController().signal);
   host.setContext(actor,'chat-1');
+  await js("cpclaw.extensionAction({action:'set-permission-mode',chatId:'chat-1',mode:'auto'})");
   let pending=execute();await waitApproval();
   assert.equal(await js("document.getElementById('service-approval-mode').value"),'task');
   assert.match(await js("document.getElementById('service-approval-scope').textContent"),/终端指令/);
@@ -33,7 +34,7 @@ app.whenReady().then(async()=>{
   pending=execute('task-2');await waitApproval();
   await js("document.getElementById('service-approval-mode').value='auto';document.getElementById('service-approval-mode').dispatchEvent(new Event('change'));document.getElementById('service-approval-confirm').click()");
   assert.equal((await pending).ok,true);assert.equal((await execute('task-3')).ok,true);
-  assert.match(await js("document.getElementById('extension-permission').textContent"),/Auto/);
+  assert.match(await js("document.getElementById('extension-permission').textContent"),/本次对话/);
   await js("document.getElementById('extension-revoke').click()");await settle();
   pending=execute('task-4');await waitApproval();
   await settle();writeFileSync(join(temp,'task-authorization.png'),(await win.webContents.capturePage()).toPNG());

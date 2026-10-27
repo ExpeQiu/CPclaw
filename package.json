@@ -15,7 +15,8 @@
     "test:desktop:knowledge": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-knowledge.mjs",
     "test:desktop:chat": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-chat.mjs",
     "test:desktop:market": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-market.mjs",
-    "test:desktop:documents": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-documents.mjs"
+    "test:desktop:documents": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-desktop-documents.mjs",
+    "test:desktop:permissions": "pnpm --filter @cpclaw/desktop exec electron ../../scripts/verify-conversation-permissions.mjs"
   },
   "dependencies": {
     "@cpclaw/contracts": "workspace:*",

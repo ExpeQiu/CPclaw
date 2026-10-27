@@ -1,19 +1,22 @@
+import {createConversationPermissions} from './conversation-permissions.mjs';
 import { createServiceRuntime, serviceImageData } from './service-runtime.mjs';
+import { createNativePageController, isSensitiveUrl, pageOriginsForService, partitionForOrigins, validatePageUrl } from './computer-use.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve, extname } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { createCommandAuthorization } from './local-command-authorization.mjs';
 import { WebContentsView, dialog, shell } from 'electron';
 import { createExtensionService } from './extension-service.mjs';
-const home = 'https://jimeng.jianying.com/';
+const DREAMINA_HOME = 'https://jimeng.jianying.com/';
 export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = () => null, approvalDialog = dialog.showMessageBox, service = createExtensionService() }) {
+  const permissions=createConversationPermissions();
   let context = { actorId: null, chatId: '' };
   const effectiveContext = () => ({ actorId: getActor(), chatId: context.actorId === getActor() ? context.chatId : '' });
-  let view, connectorAuthorization, executionPending = false, serviceController, selectionPending, approvalPending;
-  const permissionStatus = () => ({...authorization.status(), ...runtime.status(effectiveContext())});
+  let view, viewOrigins = [], connectorAuthorization, executionPending = false, serviceController, selectionPending, approvalPending;
+  const permissionStatus = () => ({...effectiveContext(),...authorization.status(), ...runtime.status(effectiveContext()), ...permissions.get(effectiveContext())});
   async function approveService({signal,...options}) {
     hide();
     const win = getWindow();
@@ -31,8 +34,51 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       send({state:'approval',approvalId:id,...options});
     });
   }
+  function allowedUrl(url, origins = viewOrigins) {
+    try { return origins.includes(new URL(url).origin); } catch { return false; }
+  }
+  async function ensureView(origins, _url) {
+    const win = getWindow();
+    if (!win || win.isDestroyed()) throw Error('窗口不可用');
+    const nextOrigins = origins?.length ? [...origins] : viewOrigins;
+    const partition = partitionForOrigins(nextOrigins);
+    const needNew = !view || view.webContents.isDestroyed() || view._cpclawPartition !== partition;
+    if (needNew) {
+      if (view && !view.webContents.isDestroyed()) {
+        try { win.contentView.removeChildView(view); view.webContents.close(); } catch { /* ignore */ }
+      }
+      view = new WebContentsView({ webPreferences: { partition, sandbox: true, nodeIntegration: false, contextIsolation: true } });
+      view._cpclawPartition = partition;
+      win.contentView.addChildView(view); view.setVisible(false);
+      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      view.webContents.on('will-navigate', (e, url) => {
+        if (allowedUrl(url, viewOrigins)) return;
+        e.preventDefault();
+        const sensitive = isSensitiveUrl(url);
+        send({ state: 'blocked', sensitive, url, message: sensitive
+          ? '页面尝试进入登录或支付相关地址。请在对话中确认后继续，或手动在原生页完成。'
+          : '已阻止离开当前服务允许源的跳转。' });
+      });
+      view.webContents.on('will-redirect', (e, url) => {
+        if (allowedUrl(url, viewOrigins)) return;
+        e.preventDefault();
+        send({ state: 'blocked', sensitive: isSensitiveUrl(url), url, message: '已阻止外部页面跳转。' });
+      });
+      view.webContents.on('did-finish-load', () => send({ state: 'loaded', message: '原生页面已加载；网页账号与 CLI/MCP 登录状态需分别检查。' }));
+      view.webContents.on('did-fail-load', (_e, code, _description, _url, main) => { if (main && code !== -3) send({ state: 'failed', message: '页面加载失败，可刷新或切换自动工作流。' }); });
+      win.once('closed', () => { if (view && !view.webContents.isDestroyed()) view.webContents.close(); view = undefined; });
+    }
+    viewOrigins = nextOrigins;
+    nativePage.setOrigins(viewOrigins);
+    return view;
+  }
+  const nativePage = createNativePageController({
+    getView: () => view,
+    ensureView,
+    send,
+  });
   const runtime=createServiceRuntime({dataDir,isCurrent:c=>c.actorId===effectiveContext().actorId&&c.chatId===effectiveContext().chatId,
-    approve:approveService,
+    getPermission:c=>permissions.get(c),approve:approveService,computerUsePage:nativePage,
     notify:value=>{if(value.type==='permission'){send({state:'permission',...permissionStatus()});return;}if(value.type==='authorization'){try{const u=new URL(value.url);if(u.protocol==='https:'&&!u.username&&!u.password&&(/(^|\.)jianying\.com$/.test(u.hostname)||/(^|\.)bytedance\.com$/.test(u.hostname)))void shell.openExternal(u.href).catch(()=>{});}catch{}}send({state:'result',...value});}});
   async function executeService(request,signal){
     if(request.actorId!==effectiveContext().actorId||!request.chatId||request.chatId!==effectiveContext().chatId)return {ok:false,code:'CONTEXT_CHANGED',message:'请返回发起操作的对话后继续。'};
@@ -59,6 +105,8 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
   function send(value) { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send('extension.event', value); }
   function hide() { const win = getWindow(); if (win && view) view.setVisible(false); }
   const requestApproval = async (plan, { canRemember, signal }) => {
+      const policy=permissions.get(effectiveContext());
+      if(policy.mode==='full'||policy.mode==='auto'&&plan.readOnly!==false)return 'once';
       hide();
       send({ state: 'authorization', message: '等待你授权在本机执行命令…' });
       const details = ['用途：' + plan.purpose, '执行位置：当前电脑', '工作目录：' + plan.cwd, '', '最多依次执行：', ...plan.commands.map(args => args.map(value => /[\s"']/u.test(value) ? JSON.stringify(value) : value).join(' ')), '', plan.readOnly === false ? '将运行此本机程序，实际行为由该程序决定；本次不提供自动授权。' : '这些操作只读取状态，不修改画布或提交生成任务。', '关闭窗口或按 Escape 视为拒绝。', canRemember ? '授权方式：默认仅本次执行；勾选下方选项可允许本次对话的相同只读检查。' : '授权方式：仅允许本次执行。', ...(canRemember ? [] : ['本次操作不提供对话级授权；关闭窗口或按 Escape 视为拒绝。'])].join('\n');
@@ -79,6 +127,14 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
   }
   ipcMain.handle('extension.action', async (event, input) => {
     if (!trusted(event)) return { ok: false, message: '无效的应用请求。' };
+    if(input?.action==='set-permission-mode') {
+      const c=effectiveContext();
+      if(!c.actorId||!c.chatId||input.chatId!==c.chatId)return {ok:false,message:'对话已变化，请重新选择权限模式。'};
+      try{permissions.set(c,input.mode);}catch(error){return {ok:false,message:error.message};}
+      serviceController?.abort();runtime.revoke();authorization.revoke();connectorAuthorization?.revoke();
+      approvalPending?.settle(false);
+      const status=permissionStatus();send({state:'permission',...status});return {ok:true,...status};
+    }
     if (input?.action === 'resolve-approval') {
       if (!approvalPending || input.approvalId !== approvalPending.id) return {ok:false};
       const choice=input.choice;
@@ -101,7 +157,7 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     }
     if (input?.action === 'clear-context') { setContext(getActor(), ''); return { ok: true }; }
     if (input?.action === 'permission-status') return { ok: true, ...permissionStatus() };
-    if (input?.action === 'revoke-permission') { serviceController?.abort(); runtime.revoke(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); return { ok: true, message: '已撤销本次对话的工具与终端执行授权，后续操作会重新申请。' }; }
+    if (input?.action === 'revoke-permission') { const c=effectiveContext();if(c.actorId&&c.chatId)permissions.set(c,'ask'); serviceController?.abort(); runtime.revoke(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); return { ok: true, message: '已撤销本次对话的工具与终端执行授权，后续操作会重新申请。' }; }
     if(input?.action==='result-image'){
       try{
         const c=effectiveContext();if(!c.actorId||!c.chatId||typeof input.path!=='string')return {ok:false};
@@ -120,23 +176,32 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       const width = Math.max(0, Math.min(size[0] - x, Math.round(r.width))), height = Math.max(0, Math.min(size[1] - y, Math.round(r.height)));
       view.setBounds({ x, y, width, height }); view.setVisible(width > 0 && height > 0); return { ok: true };
     }
-    if (input?.action !== 'open' && input?.action !== 'reload') return { ok: false, message: '暂不支持此应用操作。' };
-    if (!view || view.webContents.isDestroyed()) {
-      view = new WebContentsView({ webPreferences: { partition: 'persist:cpclaw-jimeng', sandbox: true, nodeIntegration: false, contextIsolation: true } });
-      win.contentView.addChildView(view); view.setVisible(false);
-      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      const allowed = url => { try { return new URL(url).origin === new URL(home).origin; } catch { return false; } };
-      view.webContents.on('will-navigate', (e, url) => { if (!allowed(url)) { e.preventDefault(); send({ state: 'blocked', message: '此页面需跳转到外部地址，当前验证版未开放该登录跳转。' }); } });
-      view.webContents.on('will-redirect', (e, url) => { if (!allowed(url)) { e.preventDefault(); send({ state: 'blocked', message: '已阻止外部页面跳转，请返回操作面板。' }); } });
-      view.webContents.on('did-finish-load', () => send({ state: 'loaded', message: '即梦页面已加载；页面账号与 CLI 登录状态需分别检查。' }));
-      view.webContents.on('did-fail-load', (_e, code, _description, _url, main) => { if (main && code !== -3) send({ state: 'failed', message: '页面加载失败，可刷新或切换操作面板。' }); });
-      win.once('closed', () => { if (view && !view.webContents.isDestroyed()) view.webContents.close(); view = undefined; });
+    if (input?.action === 'page-origins') {
+      const origins = pageOriginsForService(input.service || {});
+      return { ok: true, origins, hasPage: origins.length > 0 };
     }
-    let target=home;
-    if(input.url){try{const u=new URL(input.url);if(u.origin!==new URL(home).origin||u.username||u.password||u.hash||[...u.searchParams.keys()].some(k=>/token|sign|auth|code|credential/i.test(k)))return {ok:false,message:'画布地址无效'};target=u.href;}catch{return {ok:false};}}
-    send({ state: 'loading', message: '正在加载即梦页面…' });
-    void view.webContents.loadURL(target).catch(() => send({ state: 'failed', message: '页面加载失败，可刷新或切换操作面板。' }));
-    return { ok: true };
+    if (input?.action !== 'open' && input?.action !== 'reload') return { ok: false, message: '暂不支持此应用操作。' };
+    let origins = Array.isArray(input.origins) ? input.origins.filter(o => typeof o === 'string') : viewOrigins;
+    if (input.service) origins = pageOriginsForService(input.service);
+    if (!origins.length) origins = pageOriginsForService({ id: 'dreamina', builtin: true });
+    let target = origins[0] ? `${origins[0]}/` : DREAMINA_HOME;
+    if (input.url) {
+      const checked = validatePageUrl(input.url, origins);
+      if (checked.ok) target = checked.href;
+      else if (checked.sensitive && checked.origin) {
+        return { ok: false, sensitive: true, origin: checked.origin, message: checked.message + '；请通过对话确认登录或支付后再打开。' };
+      }
+      // 非法或越权地址回退到允许源首页，避免 file:// 等被加载。
+    }
+    try {
+      await ensureView(origins, target);
+      send({ state: 'loading', message: '正在加载原生页面…' });
+      await view.webContents.loadURL(target);
+      return { ok: true, url: target, origins: [...viewOrigins] };
+    } catch {
+      send({ state: 'failed', message: '页面加载失败，可刷新或切换自动工作流。' });
+      return { ok: false, message: '页面加载失败' };
+    }
   });
   async function probeConnector(connector, actorId) {
     if (actorId !== getActor()) return { ok: false, message: '当前账号已变化，请重新检测。' };
@@ -162,5 +227,5 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     } catch { return { ok: false, message: '连接器程序检查失败，请检查路径与安装。' }; }
     finally { connectorAuthorization = undefined; executionPending = false; }
   }
-  return { setContext, probeConnector, executeService, clearContext: () => { context = { actorId: null, chatId: '' }; serviceController?.abort(); runtime.clear(); authorization.revoke(); connectorAuthorization?.revoke(); } };
+  return { setContext, probeConnector, executeService, clearContext: () => { if(context.actorId)permissions.clearActor(context.actorId);context = { actorId: null, chatId: '' }; serviceController?.abort(); runtime.clear(); authorization.revoke(); connectorAuthorization?.revoke(); } };
 }

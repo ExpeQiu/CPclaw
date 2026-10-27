@@ -18,7 +18,7 @@ for(const button of document.querySelectorAll('[data-rail]'))button.addEventList
   if(key!=='extensions')document.getElementById('extension-picker')?.close();
   if(key==='home')document.getElementById('close-panel').click();
   else if(key==='chat')document.getElementById('close-panel').click();
-  else if(key==='documents')document.getElementById('documents-toggle').click();
+  else if(key==='documents'){openPanel('documents');renderDocumentList();}
   else if(key==='extensions' && window.openExtensionPicker)void window.openExtensionPicker();
   else if(key==='sources'||key==='settings')openPanel(key);
   else if(key==='account'){openPanel('settings');document.getElementById(chatAccount?'account-summary':'employee-id').focus();}
