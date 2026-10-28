@@ -25,8 +25,10 @@
     if(!quotaBox.hidden){
       const q=c.quota;balance.textContent=q?`可用 ${format(q.availableTokens)} tokens · 当前上限 ${format(q.limitTokens)} tokens${q.minimumRequestTokens?' · 下次请求至少预留 '+format(q.minimumRequestTokens):''}`:'暂时无法读取模型额度';
       if(c.phase==='request'&&q?.availableTokens>0&&!quotaReady(q))summary.textContent='当前可用额度不足以发起下一次模型请求，任务已暂停。';
-      const supported=c.fresh&&q?.requestPolicy?.approvalMode==='auto';label.hidden=c.phase==='ready'||c.phase==='approved';
-      policy.textContent=supported?'额度申请采用自动审批：提交后立即处理，每次可申请新增最多100万tokens。':!c.fresh?'最新额度暂未核实，请先恢复连接后重新检查。':'平台暂未提供可用的自动审批入口，请重新检查或更新平台服务。';
+      const supported=c.fresh&&q?.requestPolicy?.approvalMode==='auto';
+      // 旧平台未声明自动审批时，不展示可填申请量，避免误以为已提交。
+      label.hidden=!supported||c.phase==='ready'||c.phase==='approved';
+      policy.textContent=supported?'额度申请采用自动审批：填写数量后点「申请新额度」，批准到账会显示「新额度已到账」。每次最多新增100万tokens。':!c.fresh?'最新额度暂未核实，请先恢复连接后重新检查。':'当前连接的平台尚未开放额度自助申请。请更新平台服务，或由管理员提高额度后点「重新检查额度」。';
       if(c.phase==='ready'||c.phase==='approved'){
         title.textContent=c.phase==='approved'?'新额度已到账':'模型额度已恢复';summary.textContent=`当前可用 ${format(q.availableTokens)} tokens，可以继续处理原任务。`;impact.textContent=c.issue.safeToRetry?'此前仅有只读准备，可继续原请求。':'已有执行记录保留，将先检查原任务状态，避免重复生成。';
         primary.textContent=c.issue.safeToRetry?'继续原任务':'检查并恢复原任务';

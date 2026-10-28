@@ -467,21 +467,43 @@ function ensureSchema(db: DatabaseSync, config: PlatformConfig): { ok: true } | 
     version = 3;
     platformLog(config.dataDir, "info", "platform_schema_migrated", "平台库已升到渠道中继 schema", { version: 3 });
   }
-  if (version !== undefined && version > 3) {
+  if (version === 3) {
+    // 既有库不会重跑完整 SCHEMA；补建额度申请表。
+    db.exec(`CREATE TABLE IF NOT EXISTS quota_requests (
+  employee_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  additional_tokens INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(employee_id,request_id)
+);`);
+    db.prepare("UPDATE schema_meta SET version = 4").run();
+    version = 4;
+    platformLog(config.dataDir, "info", "platform_schema_migrated", "平台库已升到额度申请 schema", { version: 4 });
+  }
+  if (version !== undefined && version > 4) {
     platformLog(config.dataDir, "error", "platform_schema_incompatible", "平台 schema 高于本机支持，拒绝写入", {
       version,
-      supported: 3,
+      supported: 4,
     });
     return {
       ok: false,
-      message: `平台 schema ${version} 高于本机支持的 3，已保留原文件并拒绝打开`,
+      message: `平台 schema ${version} 高于本机支持的 4，已保留原文件并拒绝打开`,
     };
   }
-  if (version !== 3) {
+  if (version !== 4) {
     return { ok: false, message: "平台数据库版本无法识别，拒绝继续写入" };
   }
   ensureEnterpriseSchema(db);
   ensureChannelSchema(db);
+  db.exec(`CREATE TABLE IF NOT EXISTS quota_requests (
+  employee_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  additional_tokens INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(employee_id,request_id)
+);`);
   const countRow = rowOf(db.prepare("SELECT COUNT(*) AS count FROM employees").get());
   const count = countRow === undefined ? undefined : numberOf(countRow, "count");
   if (count === undefined) {

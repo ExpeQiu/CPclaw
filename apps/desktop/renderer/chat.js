@@ -169,10 +169,12 @@ function renderChat() {
     body.hidden=!chatDisplayText(message)&&message.state==='streaming'&&!message.hasServiceSteps&&Boolean(message.activities?.length);
     article.append(body);
     if (message.role === "assistant") {
+      const tip=document.createElement('div');tip.className='message-tip-row';
       const meta = document.createElement("div"); meta.className = "message-meta";
       meta.textContent = message.state === "streaming" ? "● 正在生成" : message.state === "done" ? "回复完成" : message.issue?.impact||message.error||"回复未完成";
-      article.append(meta);
-      if(message.issue){const action=document.createElement('button');action.className='task-issue-action';action.textContent=message.issue.actionLabel;action.onclick=()=>{if(message.issue.severity==='resolved')byId('chat-diagnose').click();else void window.showTaskIssue?.(message.issue,{messageId:message.id});};article.append(action);}
+      tip.append(meta);
+      if(message.issue){const action=document.createElement('button');action.type='button';action.className='task-issue-action';action.textContent=message.issue.actionLabel;action.onclick=()=>{if(message.issue.severity==='resolved')byId('chat-diagnose').click();else void window.showTaskIssue?.(message.issue,{messageId:message.id});};tip.append(action);}
+      article.append(tip);
       if(message.skillResult){const result=message.skillResult;const badge=document.createElement('p');badge.className='skill-result-check';badge.style.cssText='font-size:12px;color:#537363';badge.textContent=(result.mode==='mock'?'Mock · ':'')+({passed:'技能输出结构检查通过',failed:'技能输出检查未通过',unverified:'技能回复完成，未配置自动检查规则'}[result.status])+(result.missing?.length?'：'+result.missing.join('、'):'');article.append(badge);}
 
       if(message.sources?.length){const sources=document.createElement('details');sources.className='project-citations';const summary=document.createElement('summary');summary.textContent=`参考项目资料 · ${message.sources.length} 个文件`;sources.append(summary);for(const source of message.sources){const row=document.createElement('div');row.textContent=`${source.path} · L${source.lineStart}–${source.lineEnd}`;sources.append(row);}article.append(sources);}

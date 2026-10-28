@@ -625,11 +625,12 @@ header {
 .chat-message.user { background: #eef1e8; border-radius: 14px; padding: 18px 20px; margin-left: 40px; }
 .message-label { font-size: 11px; font-weight: 600; color: #74836b; margin-bottom: 10px; }
 .message-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; tab-size: 2; }
-.message-meta { font-size: 10px; color: #909887; margin-top: 12px; display: inline-block; }
+.message-tip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; line-height: 1.35; }
+.message-meta { font-size: 10px; color: #909887; margin: 0; display: inline; line-height: 1.35; }
 .message-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; margin-top: 8px; margin-left: 0; padding-left: 0; width: 100%; }
 .message-action, .copy-message { font-size: 10px; padding: 3px 8px; border: 0; background: transparent; color: #7c8772; border-radius: 6px; }
 .message-action:hover, .copy-message:hover, .message-icon:hover { background: #eef1ea; color: #55634d; }
-.message-icon { font-size: 13px; line-height: 1; padding: 4px 7px; border: 0; background: transparent; color: #7c8772; border-radius: 6px; min-width: 28px; }
+.message-icon { font-size: 11px; line-height: 1; padding: 2px 5px; border: 0; background: transparent; color: #7c8772; border-radius: 6px; min-width: 22px; }
 .message-icon.is-liked { color: #b7791f; background: #f7f0e2; }
 .message-icon.distill-skill { color: #6a7a63; order: -1; margin-left: 0; padding-left: 0; }
 #chat-retry { font-size: 12px; margin-bottom: 20px; }
@@ -785,10 +786,10 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 .project-citations{margin:8px 0;color:#7b8871;font-size:11px}.project-citations summary{cursor:pointer}.project-citations>div{padding:4px 0;overflow-wrap:anywhere}.retrieval-notice{display:block;margin:6px 0;color:#8a9381;font-size:11px}
 
-.chat-progress{list-style:none;margin:6px 0 14px;padding:0;color:#7b8773;font-size:12px;line-height:1.7}
-.chat-progress li{position:relative;padding:3px 0 3px 22px;white-space:normal}
-.chat-progress li::before{content:'✓';position:absolute;left:0;color:#7e9872}
-.chat-progress li[data-state=running]::before{content:'';width:10px;height:10px;top:8px;border:1.5px solid #cdd5c7;border-top-color:#536f48;border-radius:50%;animation:chat-progress-spin .9s linear infinite}
+.chat-progress{list-style:none;margin:6px 0 14px;padding:0;color:#7b8773;font-size:12px;line-height:1.45}
+.chat-progress li{position:relative;padding:1px 0 1px 16px;white-space:normal}
+.chat-progress li::before{content:'✓';position:absolute;left:0;top:0.15em;font-size:10px;line-height:1;color:#7e9872}
+.chat-progress li[data-state=running]::before{content:'';width:8px;height:8px;top:0.35em;border:1.5px solid #cdd5c7;border-top-color:#536f48;border-radius:50%;animation:chat-progress-spin .9s linear infinite}
 .chat-progress li[data-state=error]::before{content:'!';color:#a37545}.chat-progress li[data-state=cancelled]::before,.chat-progress li[data-state=interrupted]::before{content:'–';color:#a0a596}
 @keyframes chat-progress-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.chat-progress li[data-state=running]::before{animation:none}}
@@ -913,9 +914,12 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .service-approval{width:min(540px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;padding:24px;border:1px solid #dfe4d8;border-radius:14px;box-shadow:0 16px 60px #25351d26}
 .service-approval::backdrop{background:#1d291c55}.service-approval h2{font-size:18px;margin:0 0 14px}.service-approval p{line-height:1.65;overflow-wrap:anywhere}
 .service-approval label{display:flex;flex-direction:column;gap:8px;margin:16px 0 8px}.service-approval select,.service-approval input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #dfe4d8;border-radius:8px;background:#fff;color:inherit}
-.task-issue-dialog #task-issue-badge{font-size:12px;color:#95631c;margin:0 0 8px}.task-issue-dialog #task-issue-preserved{padding:12px;background:#f2f6ef;border-radius:8px;color:#50624c}.task-issue-dialog #task-issue-balance{font-weight:600}.task-issue-dialog #quota-request-policy,.task-issue-dialog #quota-request-feedback{font-size:12px;color:#63755c}.task-issue-dialog .button-row{flex-wrap:wrap}.task-issue-action{margin:10px 0;font-size:12px}
+.task-issue-dialog #task-issue-badge{font-size:12px;color:#95631c;margin:0 0 8px}.task-issue-dialog #task-issue-preserved{padding:12px;background:#f2f6ef;border-radius:8px;color:#50624c}.task-issue-dialog #task-issue-balance{font-weight:600}.task-issue-dialog #quota-request-policy,.task-issue-dialog #quota-request-feedback{font-size:12px;color:#63755c}.task-issue-dialog .button-row{flex-wrap:wrap}
+/* 对话内恢复入口做成紧凑文字按钮，避免默认 button 内边距撑开行距。 */
+.task-issue-action{margin:0;padding:1px 7px;font-size:11px;line-height:1.3;min-height:0;height:auto;border-radius:999px;border-color:#d7ddd1;background:#f7f8f4;color:#5f6f56;vertical-align:middle}
+.task-issue-action:hover{background:#eef1ea;color:#45553d}
 .service-approval details{font-size:12px;margin:18px 0}.service-approval summary{cursor:pointer}.service-approval pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;background:#f5f7f1;padding:12px;border-radius:8px}.service-approval .button-row{justify-content:flex-end;margin-top:20px}
-.conversation-permissions{position:relative;flex:none;margin:0}.conversation-permissions>summary{list-style:none;cursor:pointer;font-size:12px;border-radius:999px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}.conversation-permissions>summary::-webkit-details-marker{display:none}.conversation-permissions>summary::before{content:"";width:14px;height:14px;border:1.5px solid currentColor;border-radius:50%;opacity:.55;flex-shrink:0;box-sizing:border-box}.conversation-permissions>summary:hover{background:#edf0e7}.conversation-permissions[data-mode="full"]>summary{color:#c44c20;background:#fff5ec}
+.conversation-permissions{position:relative;flex:none;margin:0}.conversation-permissions>summary{list-style:none;cursor:pointer;font-size:12px;border-radius:999px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}.conversation-permissions>summary::-webkit-details-marker{display:none}.conversation-permissions>summary::before{content:"";width:10px;height:10px;border:1.5px solid currentColor;border-radius:50%;opacity:.55;flex-shrink:0;box-sizing:border-box}.conversation-permissions>summary:hover{background:#edf0e7}.conversation-permissions[data-mode="full"]>summary{color:#c44c20;background:#fff5ec}
 .permission-menu{position:absolute;bottom:calc(100% + 12px);left:0;z-index:50;width:min(320px,calc(100vw - 48px));padding:8px;border:1px solid #e1e5dc;border-radius:14px;background:#fff;box-shadow:0 10px 36px #20301b26}.permission-menu p{font-size:12px;color:#788071;margin:8px 10px;line-height:1.5}.permission-menu button{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:4px;height:auto;min-height:0;text-align:left;width:100%;border:0;background:transparent;padding:10px 30px 10px 12px;position:relative;border-radius:9px;white-space:normal;line-height:1.45;color:inherit;font-size:inherit}.permission-menu button:hover{background:#f3f5ef}.permission-menu strong,.permission-menu small{display:block;max-width:100%;overflow-wrap:anywhere}.permission-menu strong{font-size:13px;font-weight:600;line-height:1.4;margin:0}.permission-menu small{font-size:12px;color:#7b8377;line-height:1.55;margin:0}.permission-menu [aria-checked="true"]:after{content:'✓';position:absolute;right:12px;top:12px;color:#657657}.permission-menu [data-permission-mode="full"] strong,.permission-menu [data-permission-mode="full"] small{color:#c44c20}.permission-menu .permission-lifetime{font-size:11px;line-height:1.5;border-top:1px solid #edf0e8;padding-top:8px;margin:8px 10px 4px}
 
 /* 技能市场在窄窗口保留快捷栏，使用完整工作区。 */
