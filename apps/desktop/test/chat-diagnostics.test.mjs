@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { writeAccountSession } from '@cpclaw/desktop-host/account-session';
 import { createChatService } from '../chat-service.mjs';
-import { analyzeChat, analyzeKernel, analyzeSkillHealth, buildTimeline } from '../chat-diagnostics.mjs';
+import { analyzeChat, analyzeKernel, analyzeSkillHealth, buildTimeline, serviceRecoveryText, compactServiceChatText } from '../chat-diagnostics.mjs';
 import { desktopLog, readRecentLogs } from '../desktop-log.mjs';
 
 test('diagnosis repairs real stored evidence, keeps failure, blocks replay and isolates accounts', async t => {
@@ -33,7 +33,7 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     const sent=await call('chat.send',{chatId,requestId:'original',text:'检查即梦 CLI 连接'});
     assert.equal(sent.state,'error');assert.equal(serviceCalls,1);
     let history=await call('chat.history',{chatId}), message=history.messages.at(-1);
-    assert.match(message.content,/已恢复 1 条应用执行记录/);assert.match(message.error,/Harness 子进程未回收/);
+    assert.match(message.content,/已恢复 1 条应用执行记录/);assert.match(message.content,/右侧「自动工作流」/);assert.doesNotMatch(message.content,/^- 步骤 /m);assert.match(message.error,/Harness 子进程未回收/);
     // Reproduce an empty reply persisted by an older desktop build.
     db.prepare("UPDATE chat_messages SET content='' WHERE id=?").run(message.id);
     db.prepare("INSERT INTO chat_activity VALUES(?,?,?,?)").run(message.id,'stale','遗留步骤','running');
@@ -67,6 +67,19 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     assert.equal(recurring.repeated.find(r=>r.code==='HARNESS_CLEANUP').count,2);
     assert(JSON.parse(db.prepare('SELECT codes FROM chat_diagnostics WHERE message=?').get(message.id).codes).includes('EMPTY_REPLY'));
   } finally {service.stop();db.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('service recovery text stays a chat pointer; historical step lists collapse for display',()=>{
+  const steps=[{step:1,service:{title:'即梦画布'},result:{ok:true}},{step:2,service:{title:'即梦画布'},result:{ok:false}}];
+  const text=serviceRecoveryText(steps);
+  assert.match(text,/已恢复 2 条应用执行记录（1 条明确返回失败）/);
+  assert.match(text,/右侧「自动工作流」/);
+  assert.doesNotMatch(text,/^- 步骤 /m);
+  const legacy='本轮回复未完成，已恢复 2 条应用执行记录（1 条明确返回失败）。\n\n- 步骤 1 · 即梦画布：已收到回执，任务终态仍需核实\n- 步骤 2 · 即梦画布：操作未完成\n\n请在应用操作面板核对回执；继续对话时先查询已有任务状态，避免重复提交。';
+  const compact=compactServiceChatText(legacy);
+  assert.match(compact,/右侧「自动工作流」/);
+  assert.doesNotMatch(compact,/^- 步骤 /m);
+  assert.equal(serviceRecoveryText([]),'');
 });
 
 test('no matching project material is informational; cancelled and empty replies are diagnosed',()=>{

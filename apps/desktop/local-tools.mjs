@@ -47,7 +47,7 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
     const expected=createHash('sha256').update(request.content).digest('hex'),actual=createHash('sha256').update(readFileSync(path)).digest('hex');
     return {ok:expected===actual,path,bytes:Buffer.byteLength(request.content),sha256:actual,verified:expected===actual};
   }
-  if(request.action!=='terminal'||typeof request.command!=='string'||!request.command.trim()||request.command.length>32000||request.command.includes('\0'))throw Error('终端请求需要有效的 command 字符串');
+  if(request.action!=='terminal'||typeof request.command!=='string'||!request.command.trim()||request.command.length>32000||request.command.includes('\0'))throw Error('终端请求需要有效的 command 字符串；请使用顶层字段，例如 {"action":"terminal","command":"pwd"}，不要将 command 放入 args。');
   const timeout=request.timeoutMs??60000;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>300000)throw Error('终端超时范围为 100–300000 毫秒');
   await authorize({risk:request.command.trim()==='pwd'&&inProject(context.projectRoot,cwd)?'read':'unknown',title:'终端执行授权',message:request.purpose||'执行当前任务的终端命令',detail:`工作目录：${cwd}\n命令：\n${request.command}\n超时：${timeout} 毫秒\n命令可以读取或修改本机文件并访问网络。`});

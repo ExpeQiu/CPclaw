@@ -4,10 +4,13 @@ import {browserPageService,executeComputerUse,pageOriginsForService} from './com
 import {annotateService,SERVICE_KINDS,serviceKind} from './service-kinds.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, mkdirSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { createHash, randomUUID, randomBytes } from 'node:crypto';
+import {serviceImageData,localServiceImage} from './service-images.mjs';
+import {DIAGNOSTIC_AUTHORITY,diagnosticOperationAllowed} from './diagnostic-authority.mjs';
+export {serviceImageData} from './service-images.mjs';
+import { readFileSync, realpathSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, extname, resolve } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 const runFile = promisify(execFile);
 const supported = /^(version|model( list| find)?|voice list|canvas (current|ls|use|create)|node (find|show|quote|run|create (image|video|audio|text)|edit (image|video|audio|text))|operation (status|wait)|resource (get|download)|auth (status|account|login|wait))$/;
 export const dreaminaService = annotateService({ id: 'dreamina', title: '即梦画布', type: 'CLI', kind: SERVICE_KINDS.cli, target: join(homedir(), '.local', 'bin', process.platform==='win32'?'dreamina-canvas.exe':'dreamina-canvas'), builtin: true });
@@ -37,22 +40,13 @@ export function sanitizeServiceResult(value) {
   if (typeof value === 'string') return value.replace(/Bearer\s+\S+/gi, 'Bearer [redacted]').replace(/((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+/gi,'$1[redacted]').replace(/https?:\/\/[^\s"<>]+/g, url => { try { const u = new URL(url); return u.username || u.password || (u.search && !(/^https:\/\/jimeng\.jianying\.com\//.test(url) && [...u.searchParams.keys()].every(k=>!/token|sign|auth|code|credential/i.test(k)))) ? '[临时访问地址已隐藏]' : url; } catch { return '[无效地址]'; } });
   return value;
 }
-export function serviceImageData(path,expected={}) {
-  const info=statSync(path);if(!info.isFile()||info.size<12||info.size>12*1024*1024)throw Error('图片文件为空或超过预览限制');
-  const bytes=readFileSync(path);
-  if(expected.size!==undefined&&expected.size!==bytes.length)throw Error('下载文件大小与服务回执不一致');
-  if(expected.sha256&&createHash('sha256').update(bytes).digest('hex')!==expected.sha256)throw Error('下载文件校验失败');
-  const mime=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':bytes[0]===255&&bytes[1]===216&&bytes[2]===255?'image/jpeg':bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP'?'image/webp':null;
-  if(!mime)throw Error('下载内容不是可预览的图片');
-  return `data:${mime};base64,${bytes.toString('base64')}`;
-}
 function commandFacts(schema) {
   const result = [];
   function visit(c, path) { const next = [...path,c.name]; result.push({ command:next, summary:c.summary, reads:c.reads, writes:c.writes, arguments:c.arguments, flags:c.flags }); for (const child of c.subcommands??[]) visit(child,next); }
   for (const c of schema.subcommands??[]) visit(c,[]);
   return result;
 }
-export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () => {}, run = runFile, fetcher = fetch, binaryPath = realpathSync, readBinary = readFileSync, getPermission = () => ({mode:'legacy',revision:0}), computerUsePage } = {}) {
+export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () => {}, previewImage = serviceImageData, run = runFile, fetcher = fetch, binaryPath = realpathSync, readBinary = readFileSync, getPermission = () => ({mode:'legacy',revision:0}), computerUsePage } = {}) {
   const sessions = new Map();
   const attempted = new Map();
   const grants = new Map();
@@ -64,24 +58,30 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
   }
   function check(context, signal) {
     signal.throwIfAborted(); if (!isCurrent(context)) throw Error('会话或账号已变化，已停止后续操作');
-    if(context.taskId){const key=JSON.stringify([context.actorId,context.chatId]),policy=getPermission(context),prior=taskPermissions.get(key);
+    if(context.taskId&&context.authority!==DIAGNOSTIC_AUTHORITY){const key=JSON.stringify([context.actorId,context.chatId]),policy=getPermission(context),prior=taskPermissions.get(key);
       if(prior?.taskId===context.taskId&&prior.revision!==policy.revision)throw Object.assign(Error('对话权限已改变，请重新发起任务。'),{code:'DENIED'});
       taskPermissions.set(key,{taskId:context.taskId,revision:policy.revision});}
   }
   async function consent(context, signal, details, identity, cost = 0) {
     check(context,signal);
+    if(context.authority===DIAGNOSTIC_AUTHORITY&&!details.forceApproval&&cost===0)return;
     const permission=getPermission(context);
     if(!details.forceApproval&&canAutoApprove(permission,details.risk,cost))return;
     const startRevision = revision, key = scopeKey(context, identity);
     const existing = grants.get(key);
-    const grant = permission.mode!=='ask' && existing && (existing.mode === 'auto' || existing.taskId === context.taskId) ? existing : null;
+    // 已保存授权只在自身范围内复用：本次对话授权跨任务有效，本次任务授权只在同一任务内有效。
+    const grant = existing && (existing.mode === 'auto' || existing.taskId === context.taskId) ? existing : null;
     if (existing && !grant) grants.delete(key);
     if (grant && cost <= grant.creditCeiling - grant.reservedCredits) {
       grant.reservedCredits += cost;
       notify({type:'permission', ...status(context)});
       return;
     }
-    const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask: permission.mode!=='ask' && Boolean(context.taskId), canAuthorizeAuto: permission.mode!=='ask' && Boolean(context.actorId && context.chatId), creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
+    // 授权范围由用户在弹窗内显式选择，不受对话权限模式限制；
+    // 「本次任务」需要任务标识，「本次对话」需要账号与对话标识，缺一不可。
+    const canAuthorizeTask = Boolean(context.taskId);
+    const canAuthorizeAuto = Boolean(context.actorId && context.chatId);
+    const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask, canAuthorizeAuto, conversationMode: permission.mode, creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
     check(context,signal);
     if (revision !== startRevision) throw Error('授权已撤销，已停止后续操作');
     if (accepted === true) return; // 兼容单次授权调用方。
@@ -98,6 +98,14 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
   async function execute(context, request, signal) {
     const { service } = context;
     check(context,signal);
+    if(context.authority===DIAGNOSTIC_AUTHORITY&&!diagnosticOperationAllowed(service,request))throw Error('该操作不在系统自诊断维护范围内');
+    if(service?.id==='dreamina'&&service.builtin===true&&request?.action==='recover_image') {
+      const image=localServiceImage(dataDir,context,request);
+      const dataUrl=await previewImage(image.path,image);
+      check(context,signal);
+      notify({type:'image',path:image.path,dataUrl,actorId:context.actorId,chatId:context.chatId});
+      return {ok:true,data:{...image,resourceId:request.resourceId,preview:{state:'ready'},deliveryVerified:true}};
+    }
     if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context,request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
     if(serviceKind(service)===SERVICE_KINDS.appDriver&&service.type==='APP'&&typeof service.root==='string'){
       const root=realpathSync(service.root);
@@ -186,7 +194,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(/^(node|operation|resource) /.test(path)&&!projectId)throw Error('请使用当前任务已确认的 --project-id，不依赖全局画布选择');
     if(path==='canvas create'&&!projectId)actual.push('--project-id',randomUUID());
     if(/^node (create|edit) /.test(path)) {
-      if(!ids('--node-id').length)actual.push('--node-id','node_'+randomUUID().replaceAll('-',''));
+      if(!ids('--node-id').length)actual.push('--node-id','node_'+Array.from(randomBytes(10),b=>'0123456789abcdefghjkmnpqrstvwxyz'[b&31]).join(''));
       if(!ids('--update-id').length)actual.push('--update-id',randomUUID());
     }
     if(path==='auth login') {
@@ -238,9 +246,17 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(isSave)result={...result,recovery};
     if(path==='auth login'){const c=result.data?.challenge;if(c?.deviceCode){discovered.deviceCode=c.deviceCode;const url=c.verificationUriComplete||c.verificationUri;notify({type:'authorization',url,userCode:c.userCode,actorId:context.actorId,chatId:context.chatId});return {ok:result.ok,status:'awaiting_login',message:'已启动官方授权，请用户在浏览器完成后调用 auth wait；勿重复 auth login。'};}}
     if(path==='resource download'&&result.ok&&typeof result.data?.path==='string') {
-      const path=resolve(result.data.path),root=resolve(dataDir,'service-artifacts');
-      if(!path.startsWith(root+'/'))throw Error('下载路径超出本机成果目录');
-      const dataUrl=serviceImageData(path,result.data);notify({type:'image',path,dataUrl,actorId:context.actorId,chatId:context.chatId});
+      const image=localServiceImage(dataDir,context,{path:result.data.path,expected:result.data});
+      result.data={...result.data,...image};
+      try {
+        const dataUrl=await previewImage(image.path,image);check(context,signal);
+        notify({type:'image',path:image.path,dataUrl,actorId:context.actorId,chatId:context.chatId});
+        result.data.preview={state:'ready'};result.data.deliveryVerified=true;
+      } catch(error) {
+        check(context,signal);
+        result.data.preview={state:'failed',message:error instanceof Error?error.message:'图片预览未完成'};
+        result.message='图片已下载并校验，预览未完成；请运行自诊断恢复已有图片，不要重新生成。';
+      }
     }
     return sanitizeServiceResult(result);
   }

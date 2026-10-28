@@ -59,7 +59,7 @@ function planRepairs(result) {
       kind: 'worker',
     });
   }
-  if ((codes.has('SERVICE_FAILED') || codes.has('HARNESS_CLEANUP')) && !seen.has('DREAMINA_AUTH_SCOPE') && !seen.has('OPEN_SERVICE_PANEL')) {
+  if ((codes.has('SERVICE_FAILED') || codes.has('HARNESS_CLEANUP')) && !seen.has('MEDIA_RESUME') && !seen.has('DREAMINA_AUTH_SCOPE') && !seen.has('OPEN_SERVICE_PANEL')) {
     seen.add('OPEN_SERVICE_PANEL');
     plans.push({
       code: 'OPEN_SERVICE_PANEL',
@@ -94,6 +94,35 @@ function planRepairs(result) {
       kind: 'bridge',
     });
   }
+  // 平台拒绝了本机服务目录：先让桌面端按平台能力裁剪，再重试本轮回复。
+  if (codes.has('SERVICE_CATALOG_REJECTED') && !seen.has('SERVICE_CATALOG_REJECTED')) {
+    seen.add('SERVICE_CATALOG_REJECTED');
+    plans.push({
+      code: 'SERVICE_CATALOG_REJECTED',
+      label: '按平台能力重裁服务目录',
+      detail: '刷新平台能力并裁剪不兼容的服务类型；本机可执行服务不受影响',
+      kind: 'catalog',
+    });
+  }
+  // 回复未完成：给出重试入口。只在没有更具体的修复项时兜底，避免掩盖真因。
+  if (codes.has('REPLY_INCOMPLETE') && !result.hasServiceSteps && !seen.has('REPLY_INCOMPLETE') && !seen.has('SERVICE_CATALOG_REJECTED')) {
+    seen.add('REPLY_INCOMPLETE');
+    plans.push({
+      code: 'REPLY_INCOMPLETE',
+      label: '重试本轮回复',
+      detail: '按原请求重新发起一次；本轮没有应用执行回执时可直接重试',
+      kind: 'retry',
+    });
+  }
+  if (codes.has('EMPTY_REPLY') && !seen.has('EMPTY_REPLY')) {
+    seen.add('EMPTY_REPLY');
+    plans.push({
+      code: 'EMPTY_REPLY',
+      label: '恢复空白回复摘要',
+      detail: '从已保存的应用回执恢复执行摘要；不代表原任务已完成',
+      kind: 'server',
+    });
+  }
   return plans;
 }
 
@@ -107,6 +136,29 @@ function syncRepairButton(result) {
 
 function renderDiagnoseReport(body, result) {
   body.replaceChildren();
+  if(result.summary){
+    const summary=result.summary;
+    diagParagraph(body,`检查完成 · ${{none:'未执行修复',verified:'本次修复已验证',failed:'修复仍有未通过项'}[summary.repairState]||'待核实'} · 当前待处理 ${summary.unresolved} 项`);
+  }
+  if(result.authority==='system-diagnostic')diagParagraph(body,'系统维护权限 · 自动恢复已有任务，修复后验证并记录经验','muted');
+  if(result.task&&(result.task.images?.length||result.task.operations?.length)){
+    diagSection(body,'任务成果与恢复');
+    diagParagraph(body,result.task.detail);
+    for(const image of result.task.images||[]){
+      if(image.localError)diagParagraph(body,`图片 ${image.resourceId}：${image.localError}`,'muted');
+      if(!image.local)continue;
+      const p=diagParagraph(body,image.local.path),button=document.createElement('button');
+      button.textContent='查看已恢复图片';
+      button.onclick=async()=>{
+        const r=await window.cpclaw.extensionAction({action:'result-image',path:image.local.path});
+        if(!r.ok){button.textContent='预览读取失败，请重新诊断';return;}
+        const img=document.createElement('img');img.alt='已生成图片的本机预览';img.src=r.dataUrl;img.style.maxWidth='100%';p.replaceChildren(img);
+      };
+      body.append(button);
+      const open=document.createElement('button');open.textContent='打开原图';
+      open.onclick=()=>void window.cpclaw.extensionAction({action:'open-result-image',path:image.local.path});body.append(open);
+    }
+  }
   diagSection(body, '检查结果');
   for (const finding of result.findings || []) {
     diagParagraph(body, `${statusLabel(finding.status)} · ${finding.detail}`);
@@ -190,6 +242,7 @@ function renderDiagnoseReport(body, result) {
       REPLY_INCOMPLETE: '回复未完成',
       EMPTY_REPLY: '空白回复',
       SERVICE_FAILED: '应用操作失败',
+      SERVICE_CATALOG_REJECTED: '平台拒绝服务目录',
       PROJECT_UNAVAILABLE: '项目目录不可用',
       PLATFORM_SESSION: '平台连接或登录异常',
       KERNEL_UNAVAILABLE: '内核不可用',
@@ -198,17 +251,34 @@ function renderDiagnoseReport(body, result) {
       SKILL_OUTPUT_FAILED: '技能输出校验失败',
     }[repeated.code] ?? '任务异常'} 已在此对话的 ${repeated.count} 轮任务中出现，请结合回执进一步排查。`);
   }
+  if(result.experience?.length){
+    diagSection(body,'经验与防复发');
+    for(const lesson of result.experience){
+      diagParagraph(body,`${lesson.state==='verified'?'已有验证有效的修复':'已记录待验证的问题'} · ${lesson.code} · 涉及 ${lesson.occurrences} 轮任务`);
+      diagParagraph(body,lesson.prevention,'muted');
+    }
+    if(result.reusedExperience)diagParagraph(body,`本次参考了 ${result.reusedExperience} 条已有经验。`,'muted');
+  }
   if (result.prevention) diagParagraph(body, result.prevention, 'muted');
   syncRepairButton(result);
 }
 
 async function executeOneRepair(action, log) {
-  if (action.kind === 'server' || (['SKILL_INSTALL_MISSING', 'SKILL_BINDING_STALE'].includes(action.code) && action.kind !== 'dreamina')) {
+  if (action.kind === 'server' || action.kind === 'catalog' || (['SKILL_INSTALL_MISSING', 'SKILL_BINDING_STALE'].includes(action.code) && action.kind !== 'dreamina')) {
     const fixed = await chatCall('chat.diagnoseRepair', { chatId: currentChatId, code: action.code });
     if (!fixed.ok) throw Error(fixed.message || `${action.label}失败`);
     const line = (fixed.repairs || []).map((r) => `${r.verified ? '已验证' : '未通过'} · ${r.detail}`).join('；') || action.label;
     log(line);
     return fixed;
+  }
+  if (action.kind === 'retry' || action.code === 'REPLY_INCOMPLETE') {
+    const send = typeof window.sendChat === 'function' ? window.sendChat : typeof sendChat === 'function' ? sendChat : null;
+    if (!send) throw Error('重试入口不可用，请手动重发本轮请求');
+    log('正在按原请求重试本轮回复…');
+    // 诊断窗是 modal，重试会走同一渲染层流程；先关窗避免 showModal 阻塞交互。
+    try { diagnosticsDialog.close(); } catch { /* ignore */ }
+    await send(true);
+    return { ok: true };
   }
   if (action.kind === 'dreamina' || action.code === 'DREAMINA_AUTH_SCOPE') {
     if (typeof window.showServiceWorkspace === 'function') {
@@ -321,7 +391,7 @@ async function runRepairPlan(plans, { single = false } = {}) {
     return;
   }
 
-  const needsAsk = !single || plans[0].needsConfirm;
+  const needsAsk = plans.some(p=>p.needsConfirm)||lastDiagnoseResult?.authority!=='system-diagnostic'&&!single;
   if (needsAsk) {
     const labels = plans.map((p) => p.label).join('、');
     const ok = await confirmRepairInDialog(`将依次执行：${labels}。涉及重新授权时仍会单独请求批准。是否继续？`);
@@ -368,7 +438,7 @@ async function runRepairPlan(plans, { single = false } = {}) {
         renderDiagnoseReport(body, again);
         const history = await chatCall('chat.history', { chatId: currentChatId });
         if (history.ok) { chatMessages = history.messages; renderChat(); }
-        setStatus('修复流程已完成，请查看更新后的诊断结果。');
+        setStatus(again.summary?.unresolved?`复检完成，仍有 ${again.summary.unresolved} 项待处理。`:'复检完成，请查看任务成果与修复结果。');
         return;
       }
       append(again.message || '重新诊断失败');
@@ -428,7 +498,7 @@ byId('chat-diagnose').onclick = async () => {
     renderDiagnoseReport(body, result);
     const history = await chatCall('chat.history', { chatId });
     if (current() && history.ok) { chatMessages = history.messages; renderChat(); }
-    setStatus('自诊断完成，请查看检查结果。有可修复项时可点右上角「执行修复」。');
+    setStatus(result.summary?.unresolved?`自诊断检查完成，仍有 ${result.summary.unresolved} 项待处理；已有成果可在报告中查看。`:'自诊断检查完成，请查看任务成果与修复结果。');
   } catch (error) {
     if (current()) { body.textContent = error.message || '诊断失败，请重试。'; setStatus(body.textContent); }
     window.cpclaw?.log?.({ level: 'error', event: 'diagnose_ui_failed', message: String(error?.message || '诊断失败').slice(0, 200) });

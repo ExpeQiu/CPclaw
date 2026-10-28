@@ -12,6 +12,8 @@ export { parseAcceptTaskCommand, parseTaskMode } from "./task.js";
 export type { AcceptTaskCommand, AcceptTaskResult, ParseCommandResult, TaskMode, TaskReceipt } from "./task.js";
 export { readTokenUsage } from "./usage.js";
 export type { ModelCheckKind, ModelCheckRecord, TokenUsage } from "./usage.js";
+export { SERVICE_TYPES, DESKTOP_SERVICE_TYPES, SERVICE_CATALOG_MAX, SERVICE_ID_MAX, SERVICE_TITLE_MAX, invalidCatalogReason, fitCatalogToPlatform } from './service-catalog.js';
+export type { CatalogService, ServiceType } from './service-catalog.js';
 export { checkSkill, checkSkillOutput, compareSkillVersions, readSkillMetadata, skillFiles, skillInstruction, skillVersionPattern } from './market.js';
 export type { MarketItem, SkillCheck, SkillDependency, SkillExample, SkillFile, SkillInput, SkillMetadata } from './market.js';
 export { skillPackage } from './market.js';

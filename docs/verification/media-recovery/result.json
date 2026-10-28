@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "checks": [
+    "native-large-image-preview",
+    "original-preserved",
+    "real-diagnostic-dialog",
+    "narrow-layout",
+    "worker-restart",
+    "persisted-service-panel-image",
+    "no-resubmission",
+    "no-repair-false-positive",
+    "system-diagnostic-authority",
+    "verified-experience-persisted"
+  ],
+  "preview": {
+    "width": 2048,
+    "height": 1152
+  },
+  "previewBytes": 753739,
+  "originalBytes": 24836029,
+  "sha256": "1686e747f83da72f04bd66509802f198e8a777fb401562cda72af55967297906"
+}

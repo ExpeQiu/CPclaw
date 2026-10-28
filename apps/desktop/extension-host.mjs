@@ -1,16 +1,28 @@
 import {createConversationPermissions} from './conversation-permissions.mjs';
 import { createServiceRuntime, serviceImageData } from './service-runtime.mjs';
+import {inspectServiceImage,localServiceImage} from './service-images.mjs';
 import { createNativePageController, isSensitiveUrl, pageOriginsForService, partitionForOrigins, validatePageUrl } from './computer-use.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { createCommandAuthorization } from './local-command-authorization.mjs';
-import { WebContentsView, dialog, shell } from 'electron';
+import { WebContentsView, dialog, shell, nativeImage } from 'electron';
 import { createExtensionService } from './extension-service.mjs';
 const DREAMINA_HOME = 'https://jimeng.jianying.com/';
+export function previewServiceImage(path,expected={}) {
+  const info=inspectServiceImage(path,expected),image=nativeImage.createFromPath(path);
+  if(image.isEmpty())throw Error('本机图片解码失败，请核对原图文件');
+  const {width,height}=image.getSize();
+  if(width>2048||height>2048||info.size>12*1024*1024){
+    const preview=image.resize(width>=height?{width:Math.min(width,2048)}:{height:Math.min(height,2048)}).toJPEG(85);
+    if(!preview.length||preview.length>12*1024*1024)throw Error('图片缩略预览超过限制，原图已保留');
+    return `data:image/jpeg;base64,${preview.toString('base64')}`;
+  }
+  return serviceImageData(path,info);
+}
 export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = () => null, approvalDialog = dialog.showMessageBox, service = createExtensionService() }) {
   const permissions=createConversationPermissions();
   let context = { actorId: null, chatId: '' };
@@ -78,7 +90,7 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     send,
   });
   const runtime=createServiceRuntime({dataDir,isCurrent:c=>c.actorId===effectiveContext().actorId&&c.chatId===effectiveContext().chatId,
-    getPermission:c=>permissions.get(c),approve:approveService,computerUsePage:nativePage,
+    getPermission:c=>permissions.get(c),approve:approveService,computerUsePage:nativePage,previewImage:previewServiceImage,
     notify:value=>{if(value.type==='permission'){send({state:'permission',...permissionStatus()});return;}if(value.type==='authorization'){try{const u=new URL(value.url);if(u.protocol==='https:'&&!u.username&&!u.password&&(/(^|\.)jianying\.com$/.test(u.hostname)||/(^|\.)bytedance\.com$/.test(u.hostname)))void shell.openExternal(u.href).catch(()=>{});}catch{}}send({state:'result',...value});}});
   async function executeService(request,signal){
     if(request.actorId!==effectiveContext().actorId||!request.chatId||request.chatId!==effectiveContext().chatId)return {ok:false,code:'CONTEXT_CHANGED',message:'请返回发起操作的对话后继续。'};
@@ -208,12 +220,12 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     if (input?.action === 'clear-context') { setContext(getActor(), ''); return { ok: true }; }
     if (input?.action === 'permission-status') return { ok: true, ...permissionStatus() };
     if (input?.action === 'revoke-permission') { const c=effectiveContext();if(c.actorId&&c.chatId)permissions.set(c,'ask'); serviceController?.abort(); runtime.revoke(); authorization.revoke(); connectorAuthorization?.revoke(); send({ state: 'permission', ...permissionStatus() }); return { ok: true, message: '已撤销本次对话的工具与终端执行授权，后续操作会重新申请。' }; }
-    if(input?.action==='result-image'){
+    if(input?.action==='result-image'||input?.action==='open-result-image'){
       try{
         const c=effectiveContext();if(!c.actorId||!c.chatId||typeof input.path!=='string')return {ok:false};
-        const root=resolve(dataDir,'service-artifacts',createHash('sha256').update(c.actorId).digest('hex').slice(0,16),c.chatId);
-        const path=realpathSync(input.path);if(!path.startsWith(root+'/'))return {ok:false};
-        return {ok:true,dataUrl:serviceImageData(path)};
+        const image=localServiceImage(dataDir,c,{path:input.path});
+        if(input.action==='open-result-image'){const error=await shell.openPath(image.path);return {ok:!error,message:error||'已打开原图'};}
+        return {ok:true,dataUrl:previewServiceImage(image.path,image)};
       }catch{return {ok:false};}
     }
     if (input?.action === 'hide') { hide(); return { ok: true }; }

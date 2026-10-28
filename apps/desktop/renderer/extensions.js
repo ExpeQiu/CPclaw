@@ -211,7 +211,7 @@
   void action({action:'permission-status'}).then(permission).catch(()=>{});
   function approvalScope(){
     const mode=el('service-approval-mode').value;
-    el('service-approval-scope').textContent=mode==='auto'?'自动执行本次对话中该服务的后续工具与终端指令，包含读取、写入、查询和下载。':mode==='task'?'覆盖当前这次 AI 任务中该服务的全部工具与终端指令，任务内不再逐条确认。':'只执行详情中列出的当前操作，后续操作再次询问。';
+    el('service-approval-scope').textContent=mode==='auto'?'自动执行本次对话中该服务的后续工具与终端指令，包含读取、写入、查询和下载；切换账号或对话后失效。':mode==='task'?'覆盖当前这次 AI 任务中该服务的全部工具与终端指令，任务内不再逐条确认；新任务重新确认。':'只执行详情中列出的当前操作，后续操作再次询问。';
     const spent=mode==='once'?0:approvalRequest?.reservedCredits??0;
     el('service-approval-budget').min=String(spent+(approvalRequest?.requiredCredits??0));
   }
@@ -225,7 +225,7 @@
   el('service-approval-deny').onclick=()=>void resolveApproval(false);
   approval.addEventListener('cancel',e=>{e.preventDefault();void resolveApproval(false);});
   function urls(value,result=[]){if(Array.isArray(value))for(const v of value)urls(v,result);else if(value&&typeof value==='object'){for(const [k,v]of Object.entries(value)){if(k==='webUrl'&&typeof v==='string')result.push(v);else urls(v,result);}}return result;}
-  function imageNode(dataUrl,path){const card=document.createElement('div');card.className='service-result';const title=document.createElement('strong');title.textContent='生成图片 · 已下载到本地';const img=document.createElement('img');img.src=dataUrl;img.alt='服务实际生成并下载的图片';const location=document.createElement('p');location.textContent=path;card.append(title,img,location);return card;}
+  function imageNode(dataUrl,path){const card=document.createElement('div');card.className='service-result';const title=document.createElement('strong');title.textContent='生成图片 · 原图已保存';const img=document.createElement('img');img.src=dataUrl;img.alt='服务实际生成并下载的图片预览';const location=document.createElement('p');location.textContent=path;const open=document.createElement('button');open.textContent='打开原图';open.onclick=()=>void action({action:'open-result-image',path});card.append(title,img,location,open);return card;}
   async function renderResults(){
     const generation=++resultsGeneration,root=el('service-operation-results');root.replaceChildren();canvasUrl='';
     for(const record of records){
@@ -234,7 +234,7 @@
       for(const url of urls(record.result)){try{const u=new URL(url);const allowed=pageOrigins(activeService);if((allowed.length? !allowed.includes(u.origin):u.origin!==DREAMINA_ORIGIN)||u.hash||[...u.searchParams.keys()].some(k=>/token|sign|auth|code|credential/i.test(k)))continue;canvasUrl=url;pageUrl=url;const button=document.createElement('button');button.textContent=u.origin===DREAMINA_ORIGIN?'打开此画布 ↗':'在原生页打开 ↗';button.onclick=e=>{e.preventDefault();canvasUrl=url;pageUrl=url;void mode(true);};card.append(button);}catch{}}
       root.append(card);
       const path=record.result.data?.path;
-      if(record.request.args?.[0]==='resource'&&record.request.args?.[1]==='download'&&typeof path==='string'){
+      if((record.request.action==='recover_image'||record.request.args?.[0]==='resource'&&record.request.args?.[1]==='download')&&typeof path==='string'){
         const r=await action({action:'result-image',path}).catch(()=>({}));
         if(generation!==resultsGeneration)return;
         if(r.ok&&r.dataUrl)root.append(imageNode(r.dataUrl,path));
@@ -258,6 +258,8 @@
       el('service-approval-budget-label').hidden=!event.creditManaged;
       el('service-approval-budget').value=String(Math.max(event.creditCeiling??0,(event.reservedCredits??0)+(event.requiredCredits??0)));
       el('service-approval-budget-note').textContent=event.creditManaged?`本次报价上限 ${event.requiredCredits??0} 积分，已累计预留 ${event.reservedCredits??0} 积分。可一次设定完整任务的总额度；填 0 仅允许不消耗积分的操作。`:'此授权覆盖该服务的工具与终端指令；如服务另行收费，按服务自身规则计费。';
+      const conversation={ask:'请求批准',auto:'帮我批准',full:'完全访问权限'}[event.conversationMode]||'请求批准';
+      el('service-approval-context').textContent=`当前对话权限：${conversation}。下方授权范围在本次确认后立即生效，与对话权限相互独立。`;
       approvalScope();if(!approval.open)approval.showModal();sync();return;
     }
     if(event.state==='approval-closed'){if(approvalRequest?.approvalId===event.approvalId){approvalRequest=undefined;approval.close();sync();}return;}

@@ -6,9 +6,11 @@ import { openPlatform, type PlatformApp, type PlatformCode, type PlatformFailure
 import { platformLog } from "./log.js";
 
 import { completeHarness, generateReport, streamChat, type ChatMessage, type ServiceContext, type DocumentContext, type RealGatewayConfig, type ReportInput } from "@cpclaw/model-gateway";
-import { checkReport } from "@cpclaw/contracts";
+import { checkReport, SERVICE_TYPES, invalidCatalogReason } from "@cpclaw/contracts";
 
 const MAX_BODY = 16_384;
+/** 平台接受的应用服务类型白名单；桌面端按此裁剪服务目录，避免整轮对话被 400 拒绝。 */
+const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 
 function publicSession(result: {
   accessToken: string;
@@ -217,6 +219,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         service: "cpclaw-platform",
         mode: aiMockMode ? "mock" : "real",
         aiMockMode,
+        serviceTypes: ALLOWED_SERVICE_TYPES,
       });
       return;
     }
@@ -318,8 +321,9 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       let serviceContext: ServiceContext | undefined;
       if(body.serviceTools!==undefined){
         const c=objectOf(body.serviceTools);
-        if(!c||!Array.isArray(c.services)||c.services.length>30||c.services.some(v=>{const s=objectOf(v);return !s||typeof s.id!=='string'||s.id.length>64||typeof s.title!=='string'||s.title.length>100||!['CLI','MCP','WEB','APP'].includes(String(s.type));})||typeof c.activeId!=='string'||c.activeId!==''&&!c.services.some(s=>s.id===c.activeId)){sendJson(res,400,{ok:false,message:'应用服务目录无效'});return;}
-        serviceContext={services:c.services.map(s=>({id:String(s.id),title:String(s.title),type:String(s.type)})),activeId:c.activeId};
+        const reason=invalidCatalogReason(c,ALLOWED_SERVICE_TYPES);
+        if(reason){sendJson(res,400,{ok:false,message:'应用服务目录无效',reason});return;}
+        serviceContext={services:(c as {services:{id:unknown;title:unknown;type:unknown}[]}).services.map(s=>({id:String(s.id),title:String(s.title),type:String(s.type)})),activeId:(c as {activeId:unknown}).activeId as string};
       }
       const held = app.beginReport(token, id);
       if (!held.ok) { sendFailure(res, held); return; }

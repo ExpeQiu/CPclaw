@@ -35,9 +35,25 @@ app.whenReady().then(async()=>{
   await choose('auto');assert.equal((await execute({action:'read_file',path:'input.txt'})).content,'fixture project');
   const pending=execute({action:'read_file',path:join(outside,'external.txt')});await until("document.getElementById('service-approval').open");
   await js("document.getElementById('service-approval-deny').click()");assert.equal((await pending).code,'DENIED');
-  await choose('ask');let ask=execute({action:'read_file',path:'input.txt'});await until("document.getElementById('service-approval').open");assert.equal(await js("document.getElementById('service-approval-mode').value"),'once');
+  await choose('ask');
+  // 「请求批准」模式下仍可显式选择「本次任务」或「本次对话」，授权范围由弹窗内的选择决定。
+  const onceTask='task-once-scope';
+  let ask=execute({action:'read_file',path:'input.txt'},onceTask);await until("document.getElementById('service-approval').open");
+  assert.equal(await js("document.getElementById('service-approval-mode').value"),'task');
+  assert.equal(await js("document.querySelector('#service-approval-mode [value=\"task\"]').disabled"),false);
+  assert.equal(await js("document.querySelector('#service-approval-mode [value=\"auto\"]').disabled"),false);
+  assert.match(await js("document.getElementById('service-approval-context').textContent"),/请求批准/);
+  // 选择「仅当前操作」时只放行当前这一次，同一任务的下一次仍需确认。
+  await js("document.getElementById('service-approval-mode').value='once';document.getElementById('service-approval-mode').dispatchEvent(new Event('change'))");
   await js("document.getElementById('service-approval-confirm').click()");assert.equal((await ask).ok,true);
-  ask=execute({action:'read_file',path:'input.txt'});await until("document.getElementById('service-approval').open");await js("document.getElementById('service-approval-deny').click()");assert.equal((await ask).code,'DENIED');
+  ask=execute({action:'read_file',path:'input.txt'},onceTask);await until("document.getElementById('service-approval').open");await js("document.getElementById('service-approval-deny').click()");assert.equal((await ask).code,'DENIED');
+  // 选择「本次任务」时，同一任务内的后续操作不再弹窗。
+  const reuseTask='task-reuse-scope';
+  ask=execute({action:'read_file',path:'input.txt'},reuseTask);await until("document.getElementById('service-approval').open");
+  await js("document.getElementById('service-approval-mode').value='task';document.getElementById('service-approval-mode').dispatchEvent(new Event('change'))");
+  await js("document.getElementById('service-approval-confirm').click()");assert.equal((await ask).ok,true);
+  const reused=execute({action:'read_file',path:'input.txt'},reuseTask);
+  assert.equal((await reused).ok,true);assert.equal(await js("document.getElementById('service-approval').open"),false);
   await choose('full');const running=execute({action:'terminal',command:'sleep 10'},'running-task');await settle();await choose('ask');assert.equal((await running).ok,false);
   const after=await execute({action:'terminal',command:'pwd'},'running-task');assert.equal(after.code,'DENIED');
   await choose('full');host.setContext(actor,'chat-2');await js("currentChatId='chat-2';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'ask');
@@ -47,6 +63,6 @@ app.whenReady().then(async()=>{
   win.setSize(680,640);await js("document.getElementById('conversation-permissions').open=true");await settle();
   assert(await js("document.querySelector('.permission-menu').getBoundingClientRect().right<=innerWidth"));
   writeFileSync(join(temp,'permission-modes-narrow.png'),(await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(errors,[]);clearTimeout(deadline);console.log(JSON.stringify({ok:true,checks:['three-modes','full-real-file-write','full-real-terminal','auto-read','external-read-prompts','ask-once','no-native-readonly-dialog','downgrade-aborts','chat-isolation','account-isolation','stale-mode-rejected','narrow-layout'],screenshots:temp}));app.exit(0);
+  assert.deepEqual(errors,[]);clearTimeout(deadline);console.log(JSON.stringify({ok:true,checks:['three-modes','full-real-file-write','full-real-terminal','auto-read','external-read-prompts','ask-offers-task-and-conversation','ask-once-never-reused','ask-task-reused-in-task','no-native-readonly-dialog','downgrade-aborts','chat-isolation','account-isolation','stale-mode-rejected','narrow-layout'],screenshots:temp}));app.exit(0);
  }catch(error){clearTimeout(deadline);console.error(error);app.exit(1);}
 });

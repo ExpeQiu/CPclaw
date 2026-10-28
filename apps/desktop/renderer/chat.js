@@ -93,8 +93,22 @@ function refreshElapsedLabels(){
   for(const node of document.querySelectorAll('.chat-elapsed')){const message=chatMessages.find(m=>m.role==='assistant'&&m.request===node.dataset.request);if(message){const label=elapsedLabel(message);if(node.textContent!==label)node.textContent=label;node.hidden=!label;}}
 }
 setInterval(refreshElapsedLabels,1000);
+/** 折叠历史恢复文本中的逐步清单，与 chat-diagnostics.compactServiceChatText 同口径。 */
+function compactServiceChatText(content=''){
+  const text=String(content||'');
+  if(!text.trim())return '';
+  const match=text.match(/本轮回复未完成，已恢复 (\d+) 条应用执行记录（(\d+) 条明确返回失败）/);
+  if(match&&/^- 步骤 \d+ ·/m.test(text)){
+    return `本轮回复未完成，已恢复 ${match[1]} 条应用执行记录（${match[2]} 条明确返回失败）。\n\n过程与回执见右侧「自动工作流」。继续对话时先查询已有任务状态，避免重复提交。`;
+  }
+  return text.replace(/\n*- 步骤 \d+ ·[^\n]*/g,'').replace(/\n{3,}/g,'\n\n').trim();
+}
 function chatDisplayText(message){
-  if(message.hasServiceSteps)return message.content;
+  if(message.hasServiceSteps){
+    const compact=compactServiceChatText(message.content);
+    if(!compact&&message.state==='streaming')return '正在右侧「自动工作流」执行…';
+    return compact;
+  }
   const artifact=chatArtifacts.find(a=>a.message===message.id);
   if(artifact&&message.content.length>400)return `已完成《${artifact.name}》。完整内容见右侧文档预览。`;
   return message.content;
@@ -116,15 +130,17 @@ function messageIconButton(label,symbol,callback){
   return button;
 }
 function updateProgress(container,message){
+  // 应用执行过程只在右侧栏展示，左侧不重复列过程步骤。
+  if(message.hasServiceSteps){container.replaceChildren();container.hidden=true;return;}
   container.hidden=!message.activities?.length;
   for(const step of message.activities??[]){let row=[...container.children].find(r=>r.dataset.step===step.step);if(!row){row=document.createElement('li');row.dataset.step=step.step;container.append(row);}row.dataset.state=step.state;row.textContent=step.label;}
 }
 function updateLiveMessage(message){
   if(!message)return false;
   const article=[...byId('chat-messages').children].find(node=>node.classList.contains('assistant')&&node.dataset.request===message.request);if(!article)return false;
-  const body=article.querySelector('.message-body');const value=message.content||'正在处理…';
+  const body=article.querySelector('.message-body');const value=chatDisplayText(message)||(message.state==='streaming'?'正在处理…':'没有收到回复正文');
   renderChatMarkdown(body,value,message.state==='streaming');
-  body.hidden=!message.content&&message.state==='streaming'&&Boolean(message.activities?.length);
+  body.hidden=!chatDisplayText(message)&&message.state==='streaming'&&!message.hasServiceSteps&&Boolean(message.activities?.length);
   updateProgress(article.querySelector('.chat-progress'),message);refreshElapsedLabels();
   if(nearBottom)requestAnimationFrame(()=>{conversation.scrollTop=conversation.scrollHeight;});
   return true;
@@ -149,7 +165,7 @@ function renderChat() {
     if(message.role==='assistant'){const elapsed=document.createElement('span');elapsed.className='chat-elapsed';elapsed.dataset.request=message.request;elapsed.textContent=elapsedLabel(message);elapsed.hidden=!elapsed.textContent;label.append(elapsed);}
     article.append(label);
     if(message.role==='assistant'){const activity=document.createElement('ol');activity.className='chat-progress';updateProgress(activity,message);article.append(activity);}
-    body.hidden=!message.content&&message.state==='streaming'&&Boolean(message.activities?.length);
+    body.hidden=!chatDisplayText(message)&&message.state==='streaming'&&!message.hasServiceSteps&&Boolean(message.activities?.length);
     article.append(body);
     if (message.role === "assistant") {
       const meta = document.createElement("div"); meta.className = "message-meta";

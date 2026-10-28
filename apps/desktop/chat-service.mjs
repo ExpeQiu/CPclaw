@@ -8,7 +8,10 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const desktopDir = dirname(fileURLToPath(import.meta.url));
 import { canOfferSkillDistill } from './message-actions.mjs';
-import { publicServices, sanitizeServiceResult } from './service-runtime.mjs';
+import { publicServices, sanitizeServiceResult, dreaminaService } from './service-runtime.mjs';
+import {mediaTaskState,mediaRecoveryText} from './media-task-state.mjs';
+import {DIAGNOSTIC_AUTHORITY} from './diagnostic-authority.mjs';
+import {createDiagnosticJournal} from './diagnostic-journal.mjs';
 import { addAppDriver, addComputerUseSite, listLocalExtensions, removeLocalExtension } from './local-extensions.mjs';
 import { runBoundReportLoop } from '@cpclaw/desktop-host';
 import { createKnowledgeStore, knowledgeSnippets } from './knowledge-service.mjs';
@@ -24,6 +27,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from "node:
 import { join } from "node:path";
 import { readCurrentAccountSession, writeAccountSession } from "@cpclaw/desktop-host/account-session";
 import { sessionRefresher } from "./session-refresh.mjs";
+import { fetchServiceTypes, fitServiceCatalog, clearPlatformCapabilityCache } from "./platform-capability.mjs";
 
 const fail = (code, message) => ({ ok: false, code, message });
 
@@ -49,6 +53,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   db.exec("CREATE TABLE IF NOT EXISTS chat_modes(chat TEXT PRIMARY KEY, mode TEXT NOT NULL, service TEXT NOT NULL); CREATE TABLE IF NOT EXISTS chat_service_steps(message TEXT NOT NULL, step INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(message,step));");
   db.exec('CREATE TABLE IF NOT EXISTS chat_diagnostics(message TEXT PRIMARY KEY,chat TEXT NOT NULL,codes TEXT NOT NULL,checked INTEGER NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS chat_message_feedback(message TEXT PRIMARY KEY, liked INTEGER NOT NULL, updated INTEGER NOT NULL)');
+  const diagnosticJournal=createDiagnosticJournal(db);
   const active = new Map(), distilling = new Map();
   let accountBusy = false, diagnosticBusy = false;
   const configPath = join(dataDir, "desktop-connection.json");
@@ -74,6 +79,13 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     const response = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body), signal: path === "/v1/chat/stream" ? signal : AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
     if (!response.ok) {
       const value = await response.json().catch(() => ({}));
+      // 平台拒绝服务目录时给出可执行提示；原始原因留在字段里供自诊断读取。
+      if (path === "/v1/chat/stream" && value?.message === "应用服务目录无效") {
+        const error = new Error("平台不接受本机服务目录，请更新平台服务后重试。");
+        error.catalogRejected = true;
+        error.catalogReason = typeof value.reason === "string" ? value.reason : "";
+        throw error;
+      }
       throw new Error(value.message || `平台返回 ${response.status}`);
     }
     return response;
@@ -169,7 +181,18 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
 
       const serviceSnapshot=await(await post(auth.base,'/v1/market',{action:'list'},controller.signal,auth.token)).json();
       const availableServices=publicServices(serviceSnapshot.connectors,listLocalExtensions(dataDir));
-      const serviceContext={services:availableServices.map(({id,title,type})=>({id,title,type})),activeId:availableServices.some(s=>s.id===execution.service)?execution.service:''};
+      // 平台按自身白名单校验 serviceTools；目录里混入平台不接受的类型会让整轮对话 400。
+      // 这里按平台自报能力裁剪后再下发，本机可执行服务不受影响。
+      const capability=await fetchServiceTypes(auth.base);
+      const fitted=fitServiceCatalog(availableServices.map(({id,title,type})=>({id,title,type})),availableServices.some(s=>s.id===execution.service)?execution.service:'',capability);
+      if(fitted.degraded){
+        desktopLog(dataDir,'cpclaw-desktop-worker','warn','service_catalog_trimmed','平台不支持部分服务类型，已裁剪下发目录',{
+          chatId:String(chat.id).slice(0,64),
+          allowedTypes:fitted.allowedTypes.join(','),
+          dropped:fitted.dropped.map(s=>`${s.id}:${s.type}`).join(',').slice(0,200),
+        });
+      }
+      const serviceContext={services:fitted.services,activeId:fitted.activeId};
       async function runSelectedService(serviceId) {
         if(!serviceId)serviceId=execution.service||'local-terminal';
         const service=availableServices.find(c=>c.id===serviceId);
@@ -328,12 +351,82 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     }
     return { ok: true, chatId: chat.id, state, artifact, artifactError, skillValidation };
   }
+  async function recoverMedia(actor,chatId,message,records,{remote=false}={}) {
+    const repairs=[],context={dataDir,actorId:actor,chatId};
+    const inspect=()=>mediaTaskState(records,context);
+    let task=inspect();
+    if(!message||!task.resources.length&&!task.operations.length)return {task,repairs};
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120_000);
+    const guard=()=>{
+      sameActor(actor);controller.signal.throwIfAborted();
+      const latest=history(chatId).findLast(m=>m.role==='assistant');
+      if(!owns(actor,chatId)||latest?.id!==message.id||latest.request!==message.request)throw Error('对话已变化，请重新诊断');
+    };
+    async function execute(request){
+      guard();
+      const result=sanitizeServiceResult(await executeService({actorId:actor,chatId,taskId:message.id,authority:DIAGNOSTIC_AUTHORITY,service:dreaminaService,request},controller.signal));
+      guard();
+      const step=records.reduce((max,s)=>Math.max(max,s.step),0)+1;
+      const record={step,service:{id:'dreamina',title:'即梦画布',type:'CLI'},request,result};
+      db.prepare('INSERT INTO chat_service_steps VALUES(?,?,?)').run(message.id,step,JSON.stringify(record));records.push(record);
+      emit({channel:'chat',actorId:actor,chatId,messageId:message.id,type:'service',service:record.service,record});
+      if(['DENIED','CONTEXT_CHANGED','CANCELLED'].includes(result.code))throw Error(result.message||'恢复操作已停止，未重新生成');
+      return result;
+    }
+    try{
+      if(remote){
+        const discovery=await execute({action:'discover',purpose:'恢复已有任务前检查即梦连接'});
+        if(!discovery.ok)throw Error(discovery.message||'即梦连接未通过，已有任务未重新生成');
+        for(const op of task.operations.filter(o=>!['success','succeeded','completed','failed','error','cancelled'].includes(o.state)).slice(0,8)){
+          const reply=await execute({action:'call',args:['operation','status',op.submitId,'--project-id',op.projectId],purpose:'仅查询原生成提交状态'});
+          if(!reply.ok)throw Error(reply.message||'查询原提交状态失败');
+        }
+        task=inspect();
+        const checkedResources=new Set();
+        for(const resource of task.resources.filter(r=>r.type==='unknown').slice(0,8)){
+          const result=await execute({action:'call',args:['resource','get',resource.resourceId,'--project-id',resource.projectId],purpose:'核实原资源类型及生成终态'});
+          if(!result.ok)throw Error(result.message||'原资源状态查询失败');
+          checkedResources.add(resource.projectId+':'+resource.resourceId);
+        }
+        task=inspect();
+        for(const image of task.images.filter(i=>['success','succeeded','completed'].includes(i.state)&&!i.local).slice(0,8)){
+          if(!checkedResources.has(image.projectId+':'+image.resourceId)){
+            const checked=await execute({action:'call',args:['resource','get',image.resourceId,'--project-id',image.projectId],purpose:'核实已有图片资源终态'});
+            if(!checked.ok||!['success','succeeded','completed'].includes(checked.data?.status||checked.data?.state))continue;
+          }
+          await execute({action:'call',args:['resource','download',image.resourceId,'--project-id',image.projectId],purpose:'仅下载原任务已生成的图片，不重新生成'});
+        }
+      }
+      task=inspect();
+      for(const image of task.images.filter(i=>i.local&&!i.delivered&&['success','succeeded','completed'].includes(i.state)).slice(0,8)){
+        const reply=await execute({action:'recover_image',resourceId:image.resourceId,projectId:image.projectId,path:image.local.path,expected:{size:image.local.size,sha256:image.local.sha256},purpose:'恢复已生成图片的本机预览与原图入口'});
+        const verified=Boolean(reply.ok&&reply.data?.deliveryVerified&&reply.data?.sha256===image.local.sha256);
+        repairs.push({code:'MEDIA_DELIVERY',detail:verified?'已校验原图并恢复图片预览；未重新生成。':reply.message||'图片预览恢复未通过验证',verified});
+      }
+      task=inspect();
+      if(task.images.some(i=>i.delivered&&i.local)){
+        guard();
+        const section='\n\n### 自诊断恢复成果\n'+mediaRecoveryText(task);
+        const original=db.prepare('SELECT content FROM chat_messages WHERE id=?').get(message.id).content;
+        const content=original.split('\n\n### 自诊断恢复成果\n')[0]+section;
+        if(content!==original)db.prepare('UPDATE chat_messages SET content=? WHERE id=?').run(content,message.id);
+        message.content=content;
+      }
+      if(remote&&!repairs.length)repairs.push({code:'MEDIA_RESUME',verified:task.status==='delivered',detail:task.detail});
+    }catch(error){repairs.push({code:'MEDIA_DELIVERY',verified:false,detail:error instanceof Error?error.message:'原任务恢复失败；未重新生成'});}
+    finally{clearTimeout(timeout);}
+    return {task:inspect(),repairs};
+  }
+
   async function diagnose(actor, input) {
     if (!owns(actor, input.chatId)) return fail('NOT_FOUND', '找不到当前账号的聊天');
     if (accountBusy || active.size || distilling.size) return fail('SLOT_BUSY', '请先停止或等待当前任务完成，再运行自诊断。');
     const rows=history(input.chatId), message=rows.findLast(m=>m.role==='assistant');
     const records=message ? db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(message.id).map(r=>JSON.parse(r.body)) : [];
-    const findings=analyzeChat(message, records), repairs=[];
+    let findings=analyzeChat(message, records);
+    const priorTask=mediaTaskState(records);
+    const usedExperience=diagnosticJournal.lessons(knowledgeAccount(actor),[...findings.map(f=>f.code),...(priorTask.images.length?['MEDIA_DELIVERY','MEDIA_RESUME']:[])]);
+    const repairs=[];
     const repairActions=[];
     const kernel = resolveKernelStatus(desktopDir);
     const kernelInfo = analyzeKernel(kernel);
@@ -351,6 +444,16 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     if (active.size || distilling.size || accountBusy) return fail('SLOT_BUSY','任务状态已变化，请等待后重新诊断。');
     const latest=history(input.chatId).findLast(m=>m.role==='assistant');
     if(latest?.id!==message?.id || latest?.request!==message?.request) return fail('CONFLICT','对话已更新，请重新诊断。');
+    let recovered=await recoverMedia(actor,input.chatId,message,records);
+    repairs.push(...recovered.repairs);
+    // System maintenance resumes existing identities automatically; no model loop or new generation.
+    if(recovered.task.status==='pending'||recovered.task.images.some(i=>['success','succeeded','completed'].includes(i.state)&&!i.local)){
+      recovered=await recoverMedia(actor,input.chatId,message,records,{remote:true});
+      repairs.push(...recovered.repairs);
+    }
+    // Rebuild conclusions from fresh receipts; keep the checks performed above.
+    findings=[...analyzeChat(message,records,recovered.task),kernelInfo.finding,platformFinding];
+    if(['generated','pending'].includes(recovered.task.status)||recovered.task.images.some(i=>['success','succeeded','completed'].includes(i.state)&&!i.delivered))repairActions.push({code:'MEDIA_RESUME',label:'续接已有任务并恢复图片',detail:'查询原提交并补下载已有图片，不创建节点、不重新生成或扣费',runnable:true});
     if(message && !message.content.trim() && records.length) {
       const recovered=serviceRecoveryText(records);
       db.prepare('UPDATE chat_messages SET content=? WHERE id=?').run(recovered,message.id);
@@ -404,6 +507,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       skillSegment:skillHealth.segment,
       hasArtifact:docs.length>0,
       artifactError:'',
+      task:recovered.task,
     });
     if(message&&docs.length){
       const art=timeline.find(t=>t.id==='artifact');
@@ -412,15 +516,20 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     const incidents=db.prepare('SELECT codes FROM chat_diagnostics WHERE chat=?').all(input.chatId);
     const repeated=findings.filter(f=>['error','fixed'].includes(f.status)).map(f=>({code:f.code,count:incidents.filter(i=>JSON.parse(i.codes).includes(f.code)).length}));
     const logs=readRecentLogs(dataDir,{chatId:input.chatId,limit:30});
-    desktopLog(dataDir,'cpclaw-desktop-worker','info','chat_diagnosed','自诊断完成',{
+    const journal=diagnosticJournal.record(knowledgeAccount(actor),input.chatId,message?.id,{findings,repairs,task:recovered.task});
+    desktopLog(dataDir,'cpclaw-desktop-worker','info','chat_diagnosed','自诊断检查完成',{
       chatId:String(input.chatId).slice(0,64),
       issues:findings.filter(f=>f.status==='error').length,
       repairs:repairs.length,
-      verified:repairs.every(r=>r.verified)?1:0,
+      verified:repairs.length>0&&repairs.every(r=>r.verified)?1:0,
+      repairState:repairs.length?repairs.every(r=>r.verified)?'verified':'failed':'none',
+      taskState:recovered.task.status,
+      runId:journal.runId,
     });
     return {
       ok:true,
       messageId:message?.id,
+      hasServiceSteps:records.length>0,
       findings,
       repairs,
       repairActions,
@@ -428,8 +537,14 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       timeline,
       logs,
       kernel,
+      authority:DIAGNOSTIC_AUTHORITY,
+      runId:journal.runId,
+      experience:journal.experience,
+      reusedExperience:usedExperience.length,
+      task:recovered.task,
+      summary:{checksComplete:true,repairState:repairs.length?repairs.every(r=>r.verified)?'verified':'failed':'none',unresolved:findings.filter(f=>f.status==='error').length,taskState:recovered.task.status},
       activities:refreshed?.activities??message?.activities??[],
-      prevention:'已启用：Harness 退出等待、异常时保留应用回执摘要、有执行回执的任务禁止整轮重跑。Skill 仅允许白名单重装/解绑。继续时先核实原任务状态。',
+      prevention:'系统维护：按原提交自动核实与恢复已有成果；修复后回读验证，保留阻塞原因。经验按当前账号存入本机台账，已验证策略优先展示；已有外部执行不整轮重跑。',
     };
   }
 
@@ -437,6 +552,13 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     if (!owns(actor, input.chatId)) return fail('NOT_FOUND', '找不到当前账号的聊天');
     if (accountBusy || active.size || distilling.size || marketService.isBusy()) return fail('SLOT_BUSY', '请先停止或等待当前任务完成，再执行修复。');
     const code = input?.code;
+    if(code==='MEDIA_RESUME'){
+      const message=history(input.chatId).findLast(m=>m.role==='assistant');
+      if(!message)return fail('NOT_FOUND','当前对话没有可恢复的任务');
+      const records=db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(message.id).map(r=>JSON.parse(r.body));
+      const result=await recoverMedia(actor,input.chatId,message,records,{remote:true});
+      return {ok:result.task.status==='delivered',...result,message:result.task.detail};
+    }
     if (code === 'SKILL_BINDING_STALE') {
       const result = marketService.unbindChat(actor, input.chatId);
       if (!result.ok) return result;
@@ -453,6 +575,41 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       const verified = result.ok && again.checks.every((c) => c.ok || c.code === 'ACCOUNT_MISMATCH');
       desktopLog(dataDir,'cpclaw-desktop-worker','info','diagnose_repair','技能重装修复',{chatId:String(input.chatId).slice(0,64),verified:verified?1:0});
       return { ok: Boolean(result.ok), message: result.message, repairs: [{ code, detail: result.ok ? '已重装绑定技能' : (result.message || '重装失败'), verified }] };
+    }
+    // 平台拒绝了本机服务目录：重新探测平台能力并清除缓存，下一轮按新能力裁剪下发。
+    if (code === 'SERVICE_CATALOG_REJECTED') {
+      clearPlatformCapabilityCache();
+      const base = platform();
+      const capability = await fetchServiceTypes(base);
+      const verified = capability.declared;
+      desktopLog(dataDir,'cpclaw-desktop-worker','info','diagnose_repair','服务目录重裁',{
+        chatId:String(input.chatId).slice(0,64),
+        allowedTypes:capability.types.join(','),
+        declared:capability.declared?1:0,
+        verified:verified?1:0,
+      });
+      return {
+        ok: true,
+        repairs: [{
+          code,
+          detail: verified
+            ? `已刷新平台能力并按 ${capability.types.join('/')} 裁剪下发目录；请重试本轮回复。`
+            : '平台未声明服务类型能力，已按最保守口径（CLI/MCP）下发目录；请重试本轮回复。',
+          verified,
+        }],
+      };
+    }
+    // 空白回复：从已保存的应用回执恢复执行摘要（与 diagnose 中的本地修复一致）。
+    if (code === 'EMPTY_REPLY') {
+      const rows = history(input.chatId), message = rows.findLast(m => m.role === 'assistant');
+      if (!message) return fail('NOT_FOUND', '当前对话没有可修复的回复');
+      const records = db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(message.id).map(r => JSON.parse(r.body));
+      if (!records.length) return fail('CONFLICT', '本轮没有应用执行回执，无法恢复摘要');
+      const recovered = serviceRecoveryText(records);
+      db.prepare('UPDATE chat_messages SET content=? WHERE id=?').run(recovered, message.id);
+      const verified = db.prepare('SELECT content FROM chat_messages WHERE id=?').get(message.id)?.content === recovered;
+      desktopLog(dataDir,'cpclaw-desktop-worker','info','diagnose_repair','空白回复恢复',{chatId:String(input.chatId).slice(0,64),verified:verified?1:0});
+      return { ok: true, repairs: [{ code, detail: '已从保存的应用回执恢复执行摘要；原任务仍待核实。', verified }] };
     }
     return fail('SCHEMA_INVALID', '不支持的修复动作');
   }
@@ -638,7 +795,17 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       if ((changing || diagnosing) && (accountBusy || diagnosticBusy || active.size || distilling.size || marketService.isBusy())) return fail("SLOT_BUSY", "请先停止当前回复或等待账号操作完成");
       if (changing) accountBusy = true;
       if (diagnosing) diagnosticBusy = true;
-      try { return await dispatch(method, actor, input); }
+      try {
+        const result=await dispatch(method, actor, input);
+        if(method==='chat.diagnoseRepair'&&owns(actor,input.chatId)){
+          const message=history(input.chatId).findLast(m=>m.role==='assistant');
+          const records=message?db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(message.id).map(r=>JSON.parse(r.body)):[];
+          const task=mediaTaskState(records,{dataDir,actorId:actor,chatId:input.chatId});
+          const journal=diagnosticJournal.record(knowledgeAccount(actor),input.chatId,message?.id,{findings:analyzeChat(message,records,task),repairs:result.repairs||[{code:input.code,verified:false}],task});
+          return {...result,runId:journal.runId,experience:journal.experience};
+        }
+        return result;
+      }
       catch (error) {
         if(method.startsWith('knowledge.'))process.stderr.write(JSON.stringify({timestamp:new Date().toISOString(),level:'warn',event:'knowledge_operation_failed',method,actorId:actor,message:error instanceof Error?error.message:'知识库操作失败'})+'\n');
         return fail("CHAT_FAILED", error instanceof Error ? error.message : "聊天服务调用失败");

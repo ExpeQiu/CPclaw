@@ -64,3 +64,56 @@ test('full mode terminal timeout is bounded and cancellation stops execution',as
   setTimeout(()=>controller.abort(),30);await assert.rejects(pending);
  }finally{f.close();}
 });
+test('ask mode still offers task and conversation scopes so one approval can cover a whole task',async()=>{
+ const f=fixture('ask',{mode:'task',creditCeiling:0});try{
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,1);
+  assert.equal(f.approvals[0].canAuthorizeTask,true);
+  assert.equal(f.approvals[0].canAuthorizeAuto,true);
+  assert.equal(f.approvals[0].conversationMode,'ask');
+  // 同任务内第二次操作复用授权，不再弹窗。
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,1);
+ }finally{f.close();}
+});
+test('ask mode without a task or chat identity can only authorize the current operation',async()=>{
+ const root=mkdtempSync('/tmp/cpclaw-permission-scope-');
+ const policy=createConversationPermissions();
+ const approvals=[];
+ const runtime=createServiceRuntime({dataDir:root,isCurrent:()=>true,getPermission:c=>policy.get(c),approve:async p=>{approvals.push(p);return {mode:'once',creditCeiling:0};}});
+ const c={actorId:'a',chatId:'',service:localService,workingDirectory:root};
+ await runtime.execute(c,{action:'terminal',command:'pwd'},new AbortController().signal);
+ assert.equal(approvals[0].canAuthorizeTask,false);
+ assert.equal(approvals[0].canAuthorizeAuto,false);
+ rmSync(root,{recursive:true,force:true});
+});
+test('narrowing to a single operation stops the saved task grant from covering later calls',async()=>{
+ const f=fixture('ask',{mode:'task',creditCeiling:0});try{
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,1);
+  // 同任务内第二次操作复用任务授权，不再弹窗。
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,1);
+  // 换一个任务后任务授权不再覆盖，必须重新确认。
+  f.c.taskId='task-2';
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,2);
+ }finally{f.close();}
+});
+test('a single operation grant never covers the next operation',async()=>{
+ const f=fixture('ask',{mode:'once',creditCeiling:0});try{
+  await f.execute({action:'read_file',path:'input.txt'});
+  await f.execute({action:'read_file',path:'input.txt'});
+  assert.equal(f.approvals.length,2);
+  assert.deepEqual(f.runtime.status(f.c).grants,[]);
+ }finally{f.close();}
+});
+test('narrowing to a single operation drops the saved task grant from the reported grants',async()=>{
+ const f=fixture('ask',{mode:'task',creditCeiling:8});try{
+  await f.execute({action:'read_file',path:'input.txt'});
+  const grants=f.runtime.status(f.c).grants;
+  assert.equal(grants.length,1);
+  assert.equal(grants[0].mode,'task');
+  assert.equal(grants[0].reservedCredits,0);
+ }finally{f.close();}
+});

@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync} from 'node:fs';
 import {createServiceRuntime,dreaminaService,publicServices,sanitizeServiceResult} from '../service-runtime.mjs';
+import {DIAGNOSTIC_AUTHORITY} from '../diagnostic-authority.mjs';
 const schema=JSON.parse(readFileSync(new URL('./fixtures/dreamina-schema.json',import.meta.url)));
 function setup({approve=async()=>true,run,fetcher,readBinary=()=>Buffer.from('fixed'),service={id:'other',title:'测试服务',type:'CLI',target:'/fixed/cli'},isCurrent=()=>true}={}){
  const calls=[],approvals=[],dataDir=mkdtempSync('/tmp/cpclaw-runtime-');
@@ -17,7 +18,7 @@ test('generic CLI uses reviewed argv with shell false, supports non-media operat
 test('context change while approval open prevents execution',async()=>{let current=true;const f=setup({isCurrent:()=>current,approve:async()=>{current=false;return true;}});await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover'},signal()),/已变化/);assert.equal(f.calls.length,0);});
 test('aborting approval prevents execution',async()=>{const c=new AbortController();const f=setup({approve:async()=>{c.abort();return true;}});await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover'},c.signal));assert.equal(f.calls.length,0);});
 function jimeng(options={}){return setup({...options,service:dreaminaService,run:async(file,args,opts)=>{
- const a=args.slice(3);if(a[0]==='schema')return {stdout:JSON.stringify({ok:true,data:schema})};
+ const a=args.slice(3);if(a[0]==='schema')return {stdout:JSON.stringify({ok:true,data:options.schema||schema})};
  if(a[0]==='version')return {stdout:'{"ok":true,"data":{"version":"fixture"}}'};
  if(a.join(' ')==='auth status')return {stdout:'{"ok":true,"data":{"loggedIn":true}}'};
  if(a.join(' ')==='auth account')return {stdout:'{"ok":true,"data":{"userId":1}}'};
@@ -28,6 +29,29 @@ function jimeng(options={}){return setup({...options,service:dreaminaService,run
  }});}
 const request={action:'call',args:['node','run','--project-id','00000000-0000-4000-8000-000000000001','--node-id','node_test']};
 test('Jimeng capability discovery is required and unknown flags rejected',async()=>{const f=jimeng();await assert.rejects(()=>f.runtime.execute(f.context,request,signal()),/先 discover/);await f.runtime.execute(f.context,{action:'discover'},signal());await assert.rejects(()=>f.runtime.execute(f.context,{action:'call',args:['model','list','--guessed','true']},signal()),/未声明该参数/);});
+test('host-injected node ID matches the current CLI Crockford Base32 contract',async()=>{
+ const f=jimeng();await f.runtime.execute(f.context,{action:'discover'},signal());
+ await f.runtime.execute(f.context,{action:'call',args:['node','create','image','--project-id','00000000-0000-4000-8000-000000000001','--dry-run']},signal());
+ const args=f.calls.at(-1).args;assert.match(args[args.indexOf('--node-id')+1],/^node_[0-9a-hjkmnp-tv-z]{10}$/);
+});
+test('system diagnostic authority is independent of conversation approval and limited to maintenance operations',async()=>{
+ const diagnosticSchema=structuredClone(schema);
+ diagnosticSchema.subcommands.push({name:'operation',subcommands:[{name:'status',reads:true,flags:[{name:'project-id',type:'string'}]}]});
+ const f=jimeng({schema:diagnosticSchema,approve:async()=>{throw Error('Maintenance must not request ordinary conversation approval');}});
+ const context={...f.context,authority:DIAGNOSTIC_AUTHORITY,taskId:'original-task'};
+ await f.runtime.execute(context,{action:'discover'},signal());
+ await f.runtime.execute(context,{action:'call',args:['operation','status','original-submit','--project-id','00000000-0000-4000-8000-000000000001']},signal());
+ assert.equal(f.approvals.length,0);
+ const count=f.calls.length;
+ for(const args of [request.args,['auth','login'],['node','create','image'],['resource','download','existing','--project-id','00000000-0000-4000-8000-000000000001','--output','/outside']])await assert.rejects(()=>f.runtime.execute(context,{action:'call',args},signal()),/维护范围/);
+ assert.equal(f.calls.length,count);
+});
+test('model tool arguments cannot mint diagnostic authority and maintenance preserves context isolation',async()=>{
+ const f=jimeng({approve:async()=>false});
+ await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover',authority:DIAGNOSTIC_AUTHORITY},signal()),e=>e.code==='DENIED');
+ const g=jimeng({isCurrent:()=>false});
+ await assert.rejects(()=>g.runtime.execute({...g.context,authority:DIAGNOSTIC_AUTHORITY},{action:'discover'},signal()),/已变化/);
+});
 test('model cannot bypass quote approval with run flags or confirm',async()=>{const f=jimeng();await f.runtime.execute(f.context,{action:'discover'},signal());for(const args of [['node','confirm'],['node','create','image','--run'],['node','run','--credit-token','bad']])await assert.rejects(()=>f.runtime.execute(f.context,{action:'call',args},signal()));assert(!f.calls.some(c=>c.args.includes('confirm')));});
 test('credit denial never confirms or submits',async()=>{const f=jimeng({approve:async p=>p.title!=='生成积分授权'});await f.runtime.execute(f.context,{action:'discover'},signal());await assert.rejects(()=>f.runtime.execute(f.context,request,signal()),e=>e.code==='DENIED');assert(f.calls.some(c=>c.args.includes('quote')));assert(!f.calls.some(c=>c.args.includes('confirm')||c.args.includes('run')));});
 test('approved generation uses live quote, keeps token local, and persists recovery before submission',async()=>{

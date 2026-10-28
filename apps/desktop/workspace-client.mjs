@@ -66,6 +66,7 @@ export function createWorkspaceClient(dataDir, desktopDir, { onEvent = () => {},
     child = next;
     const lines = createInterface({ input: next.stdout });
     lines.on("line", (line) => {
+      if(child!==next)return;
       let message;
       try {
         message = JSON.parse(line);
@@ -93,10 +94,12 @@ export function createWorkspaceClient(dataDir, desktopDir, { onEvent = () => {},
       process.stderr.write(chunk);
     });
     next.on("exit", (code) => {
+      if(child!==next)return;
       child = null;
       failAll(`工作区进程已退出，code=${code ?? "null"}`);
     });
     next.on("error", (error) => {
+      if(child!==next)return;
       child = null;
       failAll(error.message);
     });
