@@ -44,17 +44,18 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.getElementById('service-approval').open"),false);
   pending=execute('task-6','chat-2');await waitApproval();
   await js("document.getElementById('service-approval-deny').click()");assert.equal((await pending).code,'DENIED');
-  // The same interface manages a paid quote, without submitting a real generation.
-  win.webContents.send('extension.event',{state:'approval',approvalId:'quote-fixture',title:'调整工具执行授权',message:'本次生成报价上限 8 积分',detail:'fixture',mode:'auto',canAuthorizeTask:true,canAuthorizeAuto:true,creditManaged:true,requiredCredits:8,reservedCredits:8,creditCeiling:8,budgetExceeded:true});
+  // 付费报价只告知用户，不提供可编辑上限输入。
+  win.webContents.send('extension.event',{state:'approval',approvalId:'quote-fixture',title:'追加积分预留确认',message:'本次生成报价上限 8 积分',detail:'fixture',mode:'auto',canAuthorizeTask:true,canAuthorizeAuto:true,creditManaged:true,requiredCredits:8,reservedCredits:8,creditCeiling:8,budgetExceeded:true});
   await waitApproval();await settle();
-  assert.equal(await js("document.getElementById('service-approval-budget').min"),'16');
+  assert.equal(await js("document.getElementById('service-approval-budget')"),null);
   assert.equal(await js("document.getElementById('service-approval-mode').value"),'auto');
-  assert.equal(await js("document.getElementById('service-approval-budget-label').hidden"),false);
+  assert.equal(await js("document.getElementById('service-approval-budget-info').hidden"),false);
+  assert.match(await js("document.getElementById('service-approval-budget-info').textContent"),/追加预留至 16 积分/);
   writeFileSync(join(temp,'auto-authorization.png'),(await win.webContents.capturePage()).toPNG());
   win.setSize(650,640);await settle();
   assert.equal(await js("document.getElementById('service-approval').getBoundingClientRect().width<=innerWidth"),true);
   await js("document.getElementById('service-approval-deny').click()");
   assert.deepEqual(errors,[]);clearTimeout(deadline);
-  console.log(JSON.stringify({ok:true,checks:['real-terminal-command','one-task-many-commands','new-task-prompts','auto-across-tasks','revoke','escape-denies','context-change-cancels','stale-reply-rejected','cumulative-budget','narrow-dialog'],screenshots:temp}));app.exit(0);
+  console.log(JSON.stringify({ok:true,checks:['real-terminal-command','one-task-many-commands','new-task-prompts','auto-across-tasks','revoke','escape-denies','context-change-cancels','stale-reply-rejected','credit-info-only','narrow-dialog'],screenshots:temp}));app.exit(0);
  }catch(e){clearTimeout(deadline);console.error(e);app.exit(1);}
 });

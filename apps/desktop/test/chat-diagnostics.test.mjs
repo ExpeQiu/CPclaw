@@ -23,7 +23,7 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     throw Error('Unexpected route');
   });
   const service=createChatService(root,()=>{},{
-    runServiceLoop:async input=>{await input.service.execute(JSON.stringify({action:'discover'}));throw Error('Harness 子进程未回收');},
+    runServiceLoop:async input=>{await input.service.execute(JSON.stringify({action:'call',args:['node','create','image','--project-id','00000000-0000-4000-8000-000000000001']}));throw Error('Harness 子进程未回收');},
     executeService:async()=>{serviceCalls++;return {ok:true};}
   });
   const db=new DatabaseSync(join(root,'chat.sqlite'));

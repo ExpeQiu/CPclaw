@@ -104,6 +104,7 @@ function compactServiceChatText(content=''){
   return text.replace(/\n*- 步骤 \d+ ·[^\n]*/g,'').replace(/\n{3,}/g,'\n\n').trim();
 }
 function chatDisplayText(message){
+  if(message.issue&&(!message.content.trim()||/^本轮回复未完成，已恢复/.test(message.content)))return `${message.issue.title}\n\n${message.issue.summary}\n\n${message.issue.preserved}`;
   if(message.hasServiceSteps){
     const compact=compactServiceChatText(message.content);
     if(!compact&&message.state==='streaming')return '正在右侧「自动工作流」执行…';
@@ -169,8 +170,9 @@ function renderChat() {
     article.append(body);
     if (message.role === "assistant") {
       const meta = document.createElement("div"); meta.className = "message-meta";
-      meta.textContent = message.state === "streaming" ? "● 正在生成" : message.state === "done" ? "回复完成" : message.error || "回复未完成";
+      meta.textContent = message.state === "streaming" ? "● 正在生成" : message.state === "done" ? "回复完成" : message.issue?.impact||message.error||"回复未完成";
       article.append(meta);
+      if(message.issue){const action=document.createElement('button');action.className='task-issue-action';action.textContent=message.issue.actionLabel;action.onclick=()=>{if(message.issue.severity==='resolved')byId('chat-diagnose').click();else void window.showTaskIssue?.(message.issue,{messageId:message.id});};article.append(action);}
       if(message.skillResult){const result=message.skillResult;const badge=document.createElement('p');badge.className='skill-result-check';badge.style.cssText='font-size:12px;color:#537363';badge.textContent=(result.mode==='mock'?'Mock · ':'')+({passed:'技能输出结构检查通过',failed:'技能输出检查未通过',unverified:'技能回复完成，未配置自动检查规则'}[result.status])+(result.missing?.length?'：'+result.missing.join('、'):'');article.append(badge);}
 
       if(message.sources?.length){const sources=document.createElement('details');sources.className='project-citations';const summary=document.createElement('summary');summary.textContent=`参考项目资料 · ${message.sources.length} 个文件`;sources.append(summary);for(const source of message.sources){const row=document.createElement('div');row.textContent=`${source.path} · L${source.lineStart}–${source.lineEnd}`;sources.append(row);}article.append(sources);}
@@ -228,7 +230,7 @@ function renderChat() {
     list.append(article);
   }
   const last = chatMessages.at(-1);
-  byId("chat-retry").hidden = Boolean(last?.hasServiceSteps) || Boolean(runningChatId) || !last || !["error", "cancelled", "interrupted"].includes(last.state);
+  byId("chat-retry").hidden = last?.issue?.code==='MODEL_QUOTA_EXHAUSTED'||Boolean(last?.hasServiceSteps&&!last?.safeToRetry) || Boolean(runningChatId) || !last || !["error", "cancelled", "interrupted"].includes(last.state);
   if (nearBottom) requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; });
 }
 async function loadChats() {
@@ -238,6 +240,7 @@ async function loadChats() {
   chats = result.chats; projects=result.projects??[]; renderChat();
 }
 async function selectChat(id) {
+  window.clearTaskIssues?.();
   window.updateSkillBinding?.(null);
   window.clearChatDiagnostics?.();
   window.clearConversationPermission?.();
@@ -269,6 +272,7 @@ async function selectChat(id) {
   if (result.active) runningChatId = id;
   void window.refreshConversationPermission?.();
   renderChat();
+  const latest=chatMessages.at(-1);if(latest?.issue)void window.showTaskIssue?.(latest.issue,{automatic:true,messageId:latest.id});
 }
 async function sendChat(retry = false) {
   if (runningChatId) { setStatus("请等待当前回复，或先停止生成。"); return; }
@@ -323,12 +327,13 @@ window.cpclaw.onChatEvent(event => {
     if(event.type==='knowledge'){message.knowledgeSources=event.sources;}
     if(event.type==='retrieval'){message.sources=event.sources;message.retrievalStatus=event.retrievalStatus;}
     if (event.type === "delta") message.content = event.content;
-    if (event.type === "finish") { message.content = event.content; message.state = event.state; message.error = event.error; message.artifactError = event.artifactError; message.skillResult=event.skillValidation; }
+    if (event.type === "finish") { message.content = event.content; message.state = event.state; message.error = event.error; message.artifactError = event.artifactError; message.skillResult=event.skillValidation;message.issue=event.issue;message.safeToRetry=event.safeToRetry; }
   }
   if(event.type==='service')window.showServiceEvent?.(event);
   if (event.type === "activity") setStatus(event.message);
   if (event.type === "mode") setStatus(event.mode === "mock" ? "Mock 演示模式 · 未调用真实模型" : "MiniMax-M3 · 正在生成回复");
-  if (event.type === "finish") setStatus(event.state === "done" ? (event.mode === "mock" ? "Mock 演示回复完成" : "回复完成") : event.error);
+  if (event.type === "finish") setStatus(event.state === "done" ? (event.mode === "mock" ? "Mock 演示回复完成" : "回复完成") : event.issue?.title||event.error);
+  if(event.type==='finish'&&event.issue)void window.showTaskIssue?.(event.issue,{automatic:true,messageId:event.messageId});
   if(event.type==='finish'&&event.artifact){
     addArtifact(event.artifact);editingArtifact=null;byId('document-edit-context').hidden=true;
     showDocument(event.artifact.id).catch(e=>setStatus(e.message));
@@ -342,7 +347,7 @@ async function loadAccount() {
   window.clearConversationPermission?.();
   const result = await chatCall("account.status");
   if (!result.ok) throw new Error(result.message);
-  if(chatAccount!==result.employeeId)window.clearMarket?.();
+  if(chatAccount!==result.employeeId){window.clearMarket?.();window.clearTaskIssues?.();}
   chatAccount = result.employeeId;
   if(typeof clearKnowledge === "function")clearKnowledge();
   if(typeof refreshQuickRail==="function")refreshQuickRail();

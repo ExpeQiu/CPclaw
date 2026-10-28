@@ -212,16 +212,40 @@
   function approvalScope(){
     const mode=el('service-approval-mode').value;
     el('service-approval-scope').textContent=mode==='auto'?'自动执行本次对话中该服务的后续工具与终端指令，包含读取、写入、查询和下载；切换账号或对话后失效。':mode==='task'?'覆盖当前这次 AI 任务中该服务的全部工具与终端指令，任务内不再逐条确认；新任务重新确认。':'只执行详情中列出的当前操作，后续操作再次询问。';
-    const spent=mode==='once'?0:approvalRequest?.reservedCredits??0;
-    el('service-approval-budget').min=String(spent+(approvalRequest?.requiredCredits??0));
+  }
+  function approvalCreditCeiling(request,mode){
+    const required=Number(request?.requiredCredits??0);
+    const reserved=Number(request?.reservedCredits??0);
+    const prior=Number(request?.creditCeiling??0);
+    if(mode==='once')return Math.max(0,required);
+    return Math.max(0,prior,reserved+required);
+  }
+  function renderApprovalBudget(event){
+    const info=el('service-approval-budget-info');
+    if(!event.creditManaged){
+      info.hidden=true;
+      info.textContent='此授权覆盖该服务的工具与终端指令；如服务另行收费，按服务自身规则计费。';
+      return;
+    }
+    const required=event.requiredCredits??0,reserved=event.reservedCredits??0;
+    const next=approvalCreditCeiling(event,el('service-approval-mode').value);
+    info.hidden=false;
+    info.textContent=event.budgetExceeded
+      ?`本次报价 ${required} 积分，已累计预留 ${reserved} 积分；继续授权将按本次报价追加预留至 ${next} 积分。`
+      :`本次报价 ${required} 积分，已累计预留 ${reserved} 积分；授权后按此额度预留，无需另行填写上限。`;
   }
   async function resolveApproval(choice){
     if(!approvalRequest)return;
     const id=approvalRequest.approvalId;approvalRequest=undefined;
     approval.close();sync();await action({action:'resolve-approval',approvalId:id,choice});
   }
-  el('service-approval-mode').onchange=approvalScope;
-  el('service-approval-form').onsubmit=e=>{e.preventDefault();if(!e.target.reportValidity())return;void resolveApproval({mode:el('service-approval-mode').value,creditCeiling:Number(el('service-approval-budget').value)});};
+  el('service-approval-mode').onchange=()=>{approvalScope();if(approvalRequest)renderApprovalBudget(approvalRequest);};
+  el('service-approval-form').onsubmit=e=>{
+    e.preventDefault();
+    if(!e.target.reportValidity()||!approvalRequest)return;
+    const mode=el('service-approval-mode').value;
+    void resolveApproval({mode,creditCeiling:approvalCreditCeiling(approvalRequest,mode)});
+  };
   el('service-approval-deny').onclick=()=>void resolveApproval(false);
   approval.addEventListener('cancel',e=>{e.preventDefault();void resolveApproval(false);});
   function urls(value,result=[]){if(Array.isArray(value))for(const v of value)urls(v,result);else if(value&&typeof value==='object'){for(const [k,v]of Object.entries(value)){if(k==='webUrl'&&typeof v==='string')result.push(v);else urls(v,result);}}return result;}
@@ -249,18 +273,15 @@
     if(event.state==='approval'){
       approvalRequest=event;
       const sensitive=/登录或支付|登录|支付/.test(`${event.title||''}${event.message||''}`);
-      el('service-approval-title').textContent=event.budgetExceeded?'调整工具执行授权':event.title;
-      el('service-approval-message').textContent=event.budgetExceeded?'当前累计积分额度不足。可提高上限后继续，或拒绝停止。':event.message+(sensitive&&!/不会代填/.test(event.message||'')?' 宿主不会代填密码或支付凭据。':'');
+      el('service-approval-title').textContent=event.budgetExceeded?'追加积分预留确认':event.title;
+      el('service-approval-message').textContent=event.budgetExceeded?'当前累计积分预留不足。可继续授权按本次报价追加，或拒绝停止。':event.message+(sensitive&&!/不会代填/.test(event.message||'')?' 宿主不会代填密码或支付凭据。':'');
       el('service-approval-detail').textContent=event.detail;
       el('service-approval-mode').querySelector('[value="task"]').disabled=!event.canAuthorizeTask;
       el('service-approval-mode').querySelector('[value="auto"]').disabled=!event.canAuthorizeAuto;
       el('service-approval-mode').value=event.mode==='auto'&&event.canAuthorizeAuto?'auto':event.canAuthorizeTask?'task':event.canAuthorizeAuto?'auto':'once';
-      el('service-approval-budget-label').hidden=!event.creditManaged;
-      el('service-approval-budget').value=String(Math.max(event.creditCeiling??0,(event.reservedCredits??0)+(event.requiredCredits??0)));
-      el('service-approval-budget-note').textContent=event.creditManaged?`本次报价上限 ${event.requiredCredits??0} 积分，已累计预留 ${event.reservedCredits??0} 积分。可一次设定完整任务的总额度；填 0 仅允许不消耗积分的操作。`:'此授权覆盖该服务的工具与终端指令；如服务另行收费，按服务自身规则计费。';
       const conversation={ask:'请求批准',auto:'帮我批准',full:'完全访问权限'}[event.conversationMode]||'请求批准';
       el('service-approval-context').textContent=`当前对话权限：${conversation}。下方授权范围在本次确认后立即生效，与对话权限相互独立。`;
-      approvalScope();if(!approval.open)approval.showModal();sync();return;
+      approvalScope();renderApprovalBudget(event);if(!approval.open)approval.showModal();sync();return;
     }
     if(event.state==='approval-closed'){if(approvalRequest?.approvalId===event.approvalId){approvalRequest=undefined;approval.close();sync();}return;}
     if(event.state==='choose-service'){

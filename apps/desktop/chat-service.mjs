@@ -1,6 +1,6 @@
 import { createMarketService } from './market-service.mjs';
 import {homedir} from 'node:os';
-import { analyzeChat, analyzeKernel, analyzeSkillHealth, buildTimeline, serviceRecoveryText } from './chat-diagnostics.mjs';
+import { analyzeChat, analyzeKernel, analyzeSkillHealth, buildTimeline, serviceRecoveryText, analyzeModelQuota } from './chat-diagnostics.mjs';
 import { desktopLog, readRecentLogs } from './desktop-log.mjs';
 import { resolveKernelStatus } from './workspace-client.mjs';
 import {creationProcess,skillMaterial,skillDraftMetadata,wrapSkillDraft} from './creation-process.mjs';
@@ -12,6 +12,8 @@ import { publicServices, sanitizeServiceResult, dreaminaService } from './servic
 import {mediaTaskState,mediaRecoveryText} from './media-task-state.mjs';
 import {DIAGNOSTIC_AUTHORITY} from './diagnostic-authority.mjs';
 import {createDiagnosticJournal} from './diagnostic-journal.mjs';
+import {serviceReplaySafe} from './service-replay.mjs';
+import {taskIssue,recoveredMediaIssue} from './task-issue.mjs';
 import { addAppDriver, addComputerUseSite, listLocalExtensions, removeLocalExtension } from './local-extensions.mjs';
 import { runBoundReportLoop } from '@cpclaw/desktop-host';
 import { createKnowledgeStore, knowledgeSnippets } from './knowledge-service.mjs';
@@ -53,6 +55,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   db.exec("CREATE TABLE IF NOT EXISTS chat_modes(chat TEXT PRIMARY KEY, mode TEXT NOT NULL, service TEXT NOT NULL); CREATE TABLE IF NOT EXISTS chat_service_steps(message TEXT NOT NULL, step INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(message,step));");
   db.exec('CREATE TABLE IF NOT EXISTS chat_diagnostics(message TEXT PRIMARY KEY,chat TEXT NOT NULL,codes TEXT NOT NULL,checked INTEGER NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS chat_message_feedback(message TEXT PRIMARY KEY, liked INTEGER NOT NULL, updated INTEGER NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS chat_issues(message TEXT PRIMARY KEY,body TEXT NOT NULL)');
   const diagnosticJournal=createDiagnosticJournal(db);
   const active = new Map(), distilling = new Map();
   let accountBusy = false, diagnosticBusy = false;
@@ -86,7 +89,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         error.catalogReason = typeof value.reason === "string" ? value.reason : "";
         throw error;
       }
-      throw new Error(value.message || `平台返回 ${response.status}`);
+      throw Object.assign(new Error(value.message || `平台返回 ${response.status}`),{status:response.status,code:value.code});
     }
     return response;
   }
@@ -106,7 +109,23 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     sameActor(result.employeeId);
     return { base, token: result.accessToken, actor: result.employeeId };
   }
-  function history(chatId) { return db.prepare("SELECT m.id,m.role,m.content,m.state,m.error,m.request,EXISTS(SELECT 1 FROM chat_service_steps s WHERE s.message=m.id) AS hasServiceSteps,r.sources,r.status AS retrievalStatus FROM chat_messages m LEFT JOIN chat_retrieval r ON r.assistant_message=m.id WHERE m.chat=? ORDER BY m.seq").all(chatId).map(row=>({...row,...db.prepare('SELECT started AS startedAt,finished AS finishedAt FROM chat_timing WHERE assistant_message=?').get(row.id),knowledgeSources:JSON.parse(db.prepare('SELECT sources FROM chat_knowledge WHERE message=?').get(row.id)?.sources??'[]'),sources:row.sources?JSON.parse(row.sources):[],activities:row.role==='assistant'?db.prepare('SELECT step,label,state FROM chat_activity WHERE assistant_message=? ORDER BY rowid').all(row.id):[],liked:Boolean(db.prepare('SELECT liked FROM chat_message_feedback WHERE message=?').get(row.id)?.liked)})); }
+  async function readModelQuota(auth,signal=new AbortController().signal) {
+    try{
+      const response=await fetch(auth.base+'/v1/me/quota',{headers:{authorization:`Bearer ${auth.token}`},signal:AbortSignal.any([signal,AbortSignal.timeout(10_000)])});
+      if(!response.ok)return null;
+      const payload=await response.json(),value=payload.quota;
+      const fields=['limitTokens','settledKnown','unsettledUnknown','openReserved','availableTokens','concurrentInUse','concurrentLimit'];
+      if(!value||fields.some(key=>!Number.isFinite(value[key])||value[key]<0)||value.concurrentLimit<1)return null;
+      return {...Object.fromEntries(fields.map(key=>[key,value[key]])),...(Number.isSafeInteger(value.minimumRequestTokens)&&value.minimumRequestTokens>0?{minimumRequestTokens:value.minimumRequestTokens}:{}),requestPolicy:payload.quotaPolicy?.approvalMode==='auto'?{approvalMode:'auto',maxAdditionalTokens:payload.quotaPolicy.maxAdditionalTokens}:null};
+    }catch{return null;}
+  }
+  function messageEvidence(row){
+    if(row.role!=='assistant')return {safeToRetry:false,issue:null};
+    const records=db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(row.id).map(r=>JSON.parse(r.body));
+    const safeToRetry=serviceReplaySafe(records),saved=db.prepare('SELECT body FROM chat_issues WHERE message=?').get(row.id);
+    return {safeToRetry,issue:saved?JSON.parse(saved.body):taskIssue({error:row.error,state:row.state,safeToRetry,hasServiceSteps:records.length>0})};
+  }
+  function history(chatId) { return db.prepare("SELECT m.id,m.role,m.content,m.state,m.error,m.request,EXISTS(SELECT 1 FROM chat_service_steps s WHERE s.message=m.id) AS hasServiceSteps,r.sources,r.status AS retrievalStatus FROM chat_messages m LEFT JOIN chat_retrieval r ON r.assistant_message=m.id WHERE m.chat=? ORDER BY m.seq").all(chatId).map(row=>({...row,...messageEvidence(row),...db.prepare('SELECT started AS startedAt,finished AS finishedAt FROM chat_timing WHERE assistant_message=?').get(row.id),knowledgeSources:JSON.parse(db.prepare('SELECT sources FROM chat_knowledge WHERE message=?').get(row.id)?.sources??'[]'),sources:row.sources?JSON.parse(row.sources):[],activities:row.role==='assistant'?db.prepare('SELECT step,label,state FROM chat_activity WHERE assistant_message=? ORDER BY rowid').all(row.id):[],liked:Boolean(db.prepare('SELECT liked FROM chat_message_feedback WHERE message=?').get(row.id)?.liked)})); }
   function serviceSteps(chatId){return db.prepare('SELECT s.body FROM chat_service_steps s JOIN chat_messages m ON m.id=s.message WHERE m.chat=? ORDER BY m.seq,s.step').all(chatId).map(r=>JSON.parse(r.body));}
   function list(actor) { return db.prepare("SELECT c.id,c.title,c.updated,pc.project AS projectId FROM chats c LEFT JOIN project_chats pc ON pc.chat=c.id WHERE c.actor=? ORDER BY c.updated DESC,c.rowid DESC").all(actor); }
   function context(chatId, userId) {
@@ -143,7 +162,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     if (input.retry) {
       const rows = history(chat.id), last = rows.at(-1), user = rows.at(-2);
       if (!last || last.role !== "assistant" || !["error", "cancelled", "interrupted"].includes(last.state) || user?.role !== "user") return fail("CONFLICT", "只能重试最后一条未完成的回复");
-      if (last.hasServiceSteps) return fail("SERVICE_REPLAY_BLOCKED", "本轮已有应用执行回执，请先使用自诊断恢复记录，再继续对话查询原任务状态，避免重复执行。");
+      if (last.hasServiceSteps&&!serviceReplaySafe(db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(last.id).map(r=>JSON.parse(r.body)))) return fail("SERVICE_REPLAY_BLOCKED", "本轮已有应用执行回执，请先使用自诊断恢复记录，再继续对话查询原任务状态，避免重复执行。");
       userId = user.id; assistantId = last.id;
       documentPlan = documents.plan(actor, chat.id, userId, user.content, {});
       db.prepare("UPDATE chat_messages SET content='',state='streaming',error='',request=? WHERE id=?").run(input.requestId, assistantId);
@@ -163,7 +182,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     db.prepare("UPDATE chats SET title=CASE WHEN title='新聊天' THEN ? ELSE title END,updated=? WHERE id=?").run(history(chat.id).find(m => m.role === "user").content.slice(0, 36), Date.now(), chat.id);
     const execution = db.prepare("SELECT mode,service FROM chat_modes WHERE chat=?").get(chat.id) ?? {mode:"chat",service:""};
     const controller = new AbortController(); active.set(chat.id, controller);
-    let content = "", state = "error", errorText = "", mode = "", done = false, artifact = null, artifactError = "";
+    let content = "", state = "error", errorText = "", mode = "", done = false, artifact = null, artifactError = "",modelQuota=null,authContext=null,issue=null;
     const startedAt=Date.now();db.prepare('INSERT OR REPLACE INTO chat_timing VALUES(?,?,NULL)').run(assistantId,startedAt);
     const event = (type, extra = {}) => emit({ startedAt,channel: "chat", actorId: actor, chatId: chat.id, messageId: assistantId, requestId: input.requestId, type, ...extra });
     if(input.retry)db.prepare('DELETE FROM chat_activity WHERE assistant_message=?').run(assistantId);
@@ -177,6 +196,8 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     let lastSave = 0, deadline, delivery, serviceRequest, skillRun=null, skillValidation=null;
     try {
       const auth = await refreshSession(controller.signal);progress('connect','已连接工作平台','done');
+      authContext=auth;modelQuota=await readModelQuota(auth,controller.signal);sameActor(actor);
+      if(modelQuota&&modelQuota.availableTokens<Math.max(1,modelQuota.minimumRequestTokens||1))throw Error(`平台模型额度不足：可用${modelQuota.availableTokens}/${modelQuota.limitTokens} tokens，请申请新额度后继续原请求。`);
       const messages = context(chat.id, userId);
 
       const serviceSnapshot=await(await post(auth.base,'/v1/market',{action:'list'},controller.signal,auth.token)).json();
@@ -200,7 +221,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         db.prepare('INSERT OR REPLACE INTO chat_modes VALUES(?,?,?)').run(chat.id,'chat',service.id);
         const taskProject=projects.forChat(actor,chat.id);
         let projectRoot;try{if(taskProject)projectRoot=projects.folder(actor,taskProject.id);}catch{}
-        let count=0, denied=false;content='';
+        let count=db.prepare('SELECT COALESCE(MAX(step),0) AS n FROM chat_service_steps WHERE message=?').get(assistantId).n, denied=false;content='';
         event('delta',{text:'',content});
         progress('service',`已选择 ${service.title} · ${service.type}`,'done');
         event('service',{service:{id:service.id,title:service.title,type:service.type},steps:[]});
@@ -322,7 +343,11 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       if (!done) throw new Error("连接提前结束，回复尚未完成");
       if(serviceRequest){deadline.dispose();deadline=undefined;done=false;await runSelectedService(serviceRequest.serviceId);}
       state = "done";
-    } catch (error) { state = controller.signal.aborted ? "cancelled" : "error"; errorText = state === "cancelled" ? "已停止生成" : (deadline?.signal.aborted ? deadline.signal.reason.message : error.message) || "聊天调用失败"; }
+    } catch (error) {
+      state = controller.signal.aborted ? "cancelled" : "error";errorText=state==='cancelled'?'已停止生成':(deadline?.signal.aborted?deadline.signal.reason.message:error.message)||'聊天调用失败';
+      if(error.code==='QUOTA_EXCEEDED'&&!/并发/.test(errorText)&&!/平台模型额度不足/.test(errorText))errorText='平台模型额度不足：'+errorText;
+      if(authContext&&!controller.signal.aborted&&/网关返回 429|平台模型额度不足/.test(errorText))modelQuota=await readModelQuota(authContext,controller.signal);
+    }
     finally {
       deadline?.dispose();
       if(state!=='done'&&delivery)content=state==='cancelled'?'已停止，文档尚未保存。':'文档交付未完成，请重试。';
@@ -347,9 +372,14 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       skillValidation=marketService.recordResult(assistantId,{content:delivery?.content??content,state,mode,artifact,artifactError,records:db.prepare('SELECT body FROM chat_service_steps WHERE message=?').all(assistantId).map(r=>JSON.parse(r.body))});
       for(const row of db.prepare("SELECT step,label FROM chat_activity WHERE assistant_message=? AND state='running'").all(assistantId))progress(row.step,row.label,state==='done'?'done':state==='cancelled'?'cancelled':'error');
       const finishedAt=Date.now();db.prepare('UPDATE chat_timing SET finished=? WHERE assistant_message=?').run(finishedAt,assistantId);
-      active.delete(chat.id); event("finish", { finishedAt,content, state, error: errorText, mode, artifact, artifactError, skillValidation });
+      const records=db.prepare('SELECT body FROM chat_service_steps WHERE message=? ORDER BY step').all(assistantId).map(r=>JSON.parse(r.body));
+      const safeToRetry=serviceReplaySafe(records);
+      const serviceAuthRequired=analyzeChat({content,state,error:errorText},records).some(f=>f.code==='DREAMINA_AUTH_SCOPE'&&f.status==='error');
+      issue=taskIssue({error:errorText,state,safeToRetry,hasServiceSteps:records.length>0,modelQuota,serviceAuthRequired});
+      if(issue)db.prepare('INSERT OR REPLACE INTO chat_issues VALUES(?,?)').run(assistantId,JSON.stringify(issue));else db.prepare('DELETE FROM chat_issues WHERE message=?').run(assistantId);
+      active.delete(chat.id); event("finish", { finishedAt,content, state, error: errorText, mode, artifact, artifactError, skillValidation,issue,safeToRetry });
     }
-    return { ok: true, chatId: chat.id, state, artifact, artifactError, skillValidation };
+    return { ok: true, chatId: chat.id, state, artifact, artifactError, skillValidation,issue };
   }
   async function recoverMedia(actor,chatId,message,records,{remote=false}={}) {
     const repairs=[],context={dataDir,actorId:actor,chatId};
@@ -432,9 +462,10 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     const kernelInfo = analyzeKernel(kernel);
     findings.push(kernelInfo.finding);
     // All awaited checks precede local repairs; revalidate ownership and active state afterwards.
-    let platformFinding;
+    let platformFinding,modelQuota=null;
     try {
-      await refreshSession(new AbortController().signal);
+      const auth=await refreshSession(new AbortController().signal);
+      modelQuota=await readModelQuota(auth);
       platformFinding={code:'PLATFORM_SESSION',status:'ok',detail:'平台连接及账号会话验证通过，已刷新登录会话。'};
     } catch {
       platformFinding={code:'PLATFORM_SESSION',status:'error',detail:'平台连接或登录会话验证失败，请检查网络和平台地址，必要时重新登录。'};
@@ -453,6 +484,10 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     }
     // Rebuild conclusions from fresh receipts; keep the checks performed above.
     findings=[...analyzeChat(message,records,recovered.task),kernelInfo.finding,platformFinding];
+    if(modelQuota){
+      if(modelQuota.availableTokens>=Math.max(1,modelQuota.minimumRequestTokens||1))for(const finding of findings.filter(f=>['HARNESS_RATE_LIMIT','MODEL_QUOTA_EXHAUSTED'].includes(f.code))){finding.status='warn';finding.detail='上轮模型请求曾受限；当前模型额度已可用，可在核实执行回执后续接原请求。';}
+      for(const finding of analyzeModelQuota(modelQuota)){findings=findings.filter(f=>f.code!==finding.code);findings.push(finding);}
+    }else if(findings.some(f=>f.code==='HARNESS_RATE_LIMIT'))findings.push({code:'MODEL_QUOTA_UNAVAILABLE',status:'warn',detail:'暂未取得平台模型额度明细，不能确定429是额度还是并发限制，请检查平台连接或管理端。'});
     if(['generated','pending'].includes(recovered.task.status)||recovered.task.images.some(i=>['success','succeeded','completed'].includes(i.state)&&!i.delivered))repairActions.push({code:'MEDIA_RESUME',label:'续接已有任务并恢复图片',detail:'查询原提交并补下载已有图片，不创建节点、不重新生成或扣费',runnable:true});
     if(message && !message.content.trim() && records.length) {
       const recovered=serviceRecoveryText(records);
@@ -517,6 +552,10 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     const repeated=findings.filter(f=>['error','fixed'].includes(f.status)).map(f=>({code:f.code,count:incidents.filter(i=>JSON.parse(i.codes).includes(f.code)).length}));
     const logs=readRecentLogs(dataDir,{chatId:input.chatId,limit:30});
     const journal=diagnosticJournal.record(knowledgeAccount(actor),input.chatId,message?.id,{findings,repairs,task:recovered.task});
+    const quotaBlocked=modelQuota&&modelQuota.availableTokens<Math.max(1,modelQuota.minimumRequestTokens||1);
+    const originalIssue=taskIssue({error:message?.error||(quotaBlocked?'平台模型额度不足':''),state:message?.state,safeToRetry:serviceReplaySafe(records),hasServiceSteps:records.length>0,modelQuota});
+    const mediaIssue=recoveredMediaIssue(recovered.task,originalIssue),issue=quotaBlocked?originalIssue:mediaIssue;
+    if(message&&mediaIssue)db.prepare('INSERT OR REPLACE INTO chat_issues VALUES(?,?)').run(message.id,JSON.stringify(mediaIssue));
     desktopLog(dataDir,'cpclaw-desktop-worker','info','chat_diagnosed','自诊断检查完成',{
       chatId:String(input.chatId).slice(0,64),
       issues:findings.filter(f=>f.status==='error').length,
@@ -530,6 +569,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       ok:true,
       messageId:message?.id,
       hasServiceSteps:records.length>0,
+      safeToRetry:serviceReplaySafe(records),
       findings,
       repairs,
       repairActions,
@@ -537,6 +577,8 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       timeline,
       logs,
       kernel,
+      modelQuota,
+      issue,
       authority:DIAGNOSTIC_AUTHORITY,
       runId:journal.runId,
       experience:journal.experience,
@@ -655,6 +697,23 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   }
   async function dispatch(method, actor, input) {
       if (method === "account.status") return { ok: true, employeeId: account()?.employeeId ?? null, platformUrl: platform() };
+      if(method==='account.quota'){
+        sameActor(actor);const auth=await refreshSession(new AbortController().signal),quota=await readModelQuota(auth);sameActor(actor);
+        if(platform()!==auth.base)return fail('CONTEXT_CHANGED','平台连接已变化，请重新读取额度。');
+        return quota?{ok:true,quota}:fail('MODEL_QUOTA_UNAVAILABLE','暂时无法读取平台模型额度，请检查连接后重试。');
+      }
+      if(method==='account.quotaRequest'){
+        sameActor(actor);
+        if(typeof input.requestId!=='string'||!/^[\w-]{1,64}$/.test(input.requestId)||!Number.isSafeInteger(input.additionalTokens)||input.additionalTokens<1||input.additionalTokens>1_000_000)return fail('SCHEMA_INVALID','请填写1至1000000之间的新增tokens整数。');
+        const auth=await refreshSession(new AbortController().signal);sameActor(actor);
+        let result;
+        try{result=await(await post(auth.base,'/v1/me/quota-requests',{requestId:input.requestId,additionalTokens:input.additionalTokens},new AbortController().signal,auth.token)).json();}
+        catch(error){if(error.status===404)return fail('QUOTA_REQUEST_UNAVAILABLE','平台尚未启用额度申请接口，需要更新平台服务后使用。');throw error;}
+        sameActor(actor);
+        if(platform()!==auth.base)return fail('CONTEXT_CHANGED','平台连接已变化，请在原账号核实申请结果。');
+        desktopLog(dataDir,'cpclaw-desktop-worker','info','quota_request_result','额度申请结果',{requestId:input.requestId,additionalTokens:input.additionalTokens,approved:result.status==='approved'});
+        return result;
+      }
       if (method === "account.login") {
         if (active.size||distilling.size) return fail("SLOT_BUSY", "请先完成当前回复或 Skill 提炼，再切换账号");
         let url;
@@ -808,7 +867,8 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       }
       catch (error) {
         if(method.startsWith('knowledge.'))process.stderr.write(JSON.stringify({timestamp:new Date().toISOString(),level:'warn',event:'knowledge_operation_failed',method,actorId:actor,message:error instanceof Error?error.message:'知识库操作失败'})+'\n');
-        return fail("CHAT_FAILED", error instanceof Error ? error.message : "聊天服务调用失败");
+        const message=error instanceof Error?error.message:'聊天服务调用失败';
+        return {...fail('CHAT_FAILED',message),...(['account.quota','account.quotaRequest'].includes(method)?{issue:taskIssue({error:message})}:{})};
       }
       finally { if (changing) accountBusy = false; if (diagnosing) diagnosticBusy = false; }
     },

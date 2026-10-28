@@ -303,8 +303,16 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         sendFailure(res, result);
         return;
       }
-      sendJson(res, 200, { schemaVersion: 1, quota: result.quota });
+      sendJson(res, 200, { schemaVersion: 1, quota: result.quota, quotaPolicy:{approvalMode:'auto',maxAdditionalTokens:1_000_000} });
       return;
+    }
+    if(req.method==='POST'&&path==='/v1/me/quota-requests'){
+      if(typeof body.requestId!=='string'||typeof body.additionalTokens!=='number'){
+        sendFailure(res,{ok:false,code:'CONFIG_INVALID',message:'额度申请需要requestId与新增tokens整数'});return;
+      }
+      const result=app.requestOwnQuota(token,{requestId:body.requestId,additionalTokens:body.additionalTokens});
+      if(!result.ok){sendFailure(res,result);return;}
+      sendJson(res,200,{schemaVersion:1,...result});return;
     }
     if (req.method === "POST" && path === "/v1/chat/stream") {
       const messages = parseChatMessages(body.messages);

@@ -42,6 +42,8 @@ export function analyzeChat(message, steps = [], task = mediaTaskState(steps)) {
   if(failures.some(r=>/终端请求需要有效的 command/.test(r.message||'')))findings.push({code:'LOCAL_TOOL_ARGUMENTS',status:issueStatus,detail:'终端参数结构错误：应使用顶层 action、command、cwd、timeoutMs，不能把 command 放入 args。'});
   if(failures.some(r=>/未声明该参数/.test(r.message||'')||/^cli\.(invalid_command|unexpected_argument)$/.test(r.error?.code||'')))findings.push({code:'CLI_ARGUMENT_INVALID',status:issueStatus,detail:'CLI 参数校验失败。请使用 discover 返回的参数定义；布尔开关不追加 true，不重复提交相同错误参数。'});
   if(/网关返回 502/.test(error))findings.push({code:'HARNESS_GATEWAY',status:issueStatus,detail:'推理网关返回502；先恢复已有成果或查询原提交状态。仅凭本机日志无法确定远端服务根因。'});
+  if(/网关返回 429/.test(error))findings.push({code:'HARNESS_RATE_LIMIT',status:issueStatus,detail:'上轮模型网关返回429。需核实平台模型额度与并发；即梦积分与模型tokens额度分别核算，不自动重复请求。'});
+  if(/平台模型额度不足/.test(error))findings.push({code:'MODEL_QUOTA_EXHAUSTED',status:issueStatus,detail:'平台模型额度不足，后续模型请求已停止。需管理员调整额度；不要通过重复提交生图绕过。'});
   if(/步骤达到上限/.test(error))findings.push({code:'MODEL_STEP_LIMIT',status:issueStatus,detail:'推理步骤已用尽。先恢复已有成果或查询原提交，不整轮重新生成。'});
   if(task.status==='delivered'){
     for(const f of findings){
@@ -55,6 +57,14 @@ export function analyzeChat(message, steps = [], task = mediaTaskState(steps)) {
   else if(task.status==='failed')findings.push({code:'MEDIA_GENERATION_FAILED',status:'error',detail:task.detail+' 如需重新生成，应重新取得生成及积分授权。'});
   if (!findings.length) findings.push({code:'NO_KNOWN_FAILURE',status:'info',detail:'当前已保存记录未发现已知异常；这不代表外部任务已经完成。'});
   return findings;
+}
+
+export function analyzeModelQuota(quota) {
+  if(!quota)return [];
+  if(quota.availableTokens<Math.max(1,quota.minimumRequestTokens||1))return [{code:'MODEL_QUOTA_EXHAUSTED',status:'error',detail:`平台模型额度不足：上限 ${quota.limitTokens} tokens，已结算 ${quota.settledKnown}，未知预留 ${quota.unsettledUnknown}，可用 ${quota.availableTokens}，下次请求最低预留 ${quota.minimumRequestTokens||1}。即梦积分不包含此额度；${quota.requestPolicy?.approvalMode==='auto'?'可在弹窗申请新增额度，自动审批后继续原请求。':'当前平台尚未声明自动申请入口，请更新平台服务或联系管理员。'}`}];
+  if(quota.concurrentInUse>=quota.concurrentLimit)return [{code:'MODEL_CONCURRENCY_FULL',status:'error',detail:`平台模型并发位已满（${quota.concurrentInUse}/${quota.concurrentLimit}），请等待已有调用结束后续接原任务。`}];
+  if(quota.availableTokens<quota.limitTokens*0.1)return [{code:'MODEL_QUOTA_LOW',status:'warn',detail:`平台模型可用额度仅剩 ${quota.availableTokens}/${quota.limitTokens} tokens，请提前处理额度，避免多步任务中断。`}];
+  return [{code:'MODEL_QUOTA_OK',status:'ok',detail:`平台模型可用额度 ${quota.availableTokens}/${quota.limitTokens} tokens，并发占用 ${quota.concurrentInUse}/${quota.concurrentLimit}。`}];
 }
 
 /** 内核探测结果转 finding。 */

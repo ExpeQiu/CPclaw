@@ -214,6 +214,23 @@ export async function cancelHarness(input: {
   };
 }
 
+/** Preserve actionable platform failures without echoing arbitrary upstream bodies or credentials. */
+export async function harnessGatewayError(response: Response): Promise<Error> {
+  const value: unknown = await response.json().catch(() => null);
+  const record = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const code = ['QUOTA_EXCEEDED','AUTH_REQUIRED','SESSION_REVOKED','FORBIDDEN','CONFLICT','CONFIG_INVALID','NOT_FOUND'].includes(String(record.code)) ? String(record.code) : '';
+  let reason = '';
+  if(code==='QUOTA_EXCEEDED') reason=record.message==='并发已达上限'?'平台模型并发位已满':record.message==='额度不足'?'平台模型额度不足':'平台模型额度或并发受限';
+  else if(['AUTH_REQUIRED','SESSION_REVOKED'].includes(code)) reason='平台登录会话不可用';
+  else if(code==='FORBIDDEN') reason='平台权限不足';
+  else if(response.status===429) reason='请求受限，请核实平台模型额度与并发';
+  const retryAfter=Number(response.headers.get('retry-after'));
+  return Object.assign(new Error(`远程 Harness 网关返回 ${response.status}${reason?'：'+reason:''}${code?'（'+code+'）':''}`),{
+    httpStatus:response.status,platformCode:code,
+    ...(Number.isFinite(retryAfter)&&retryAfter>0?{retryAfterSeconds:retryAfter}:{}),
+  });
+}
+
 export async function runReportLoop(input: {
   homeParent: string; platformBase: string; accessToken: string;
   goal: string; materials: { fileName: string; paragraphs: { id: string; text: string }[] }[];
@@ -256,7 +273,7 @@ export async function runReportLoop(input: {
           method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": `loop-${randomUUID()}` },
           body: JSON.stringify(body), signal: input.signal,
         });
-        if (!response.ok) throw new Error(`远程 Harness 网关返回 ${response.status}`);
+        if (!response.ok) throw await harnessGatewayError(response);
         const text = await response.text();
         res.writeHead(200, { "content-type": "text/event-stream" }); res.end(text);
       } catch (error) {

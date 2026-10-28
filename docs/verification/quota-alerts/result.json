@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "checks": [
+    "automatic-quota-dialog",
+    "cause-impact-preserved-next-action",
+    "model-vs-service-credits",
+    "narrow-layout",
+    "auto-approval",
+    "ambiguous-response-retry-same-id",
+    "no-double-credit",
+    "approved-but-insufficient",
+    "usage-preserved",
+    "resume-original-request",
+    "quota-read-session-expired-action"
+  ],
+  "limitTokens": 1001001
+}

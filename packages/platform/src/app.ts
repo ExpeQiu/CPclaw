@@ -119,6 +119,14 @@ CREATE TABLE IF NOT EXISTS reservations (
   output_tokens INTEGER,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS quota_requests (
+  employee_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  additional_tokens INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(employee_id,request_id)
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at_ms INTEGER NOT NULL,
@@ -187,6 +195,7 @@ export type PlatformApp = {
   logout(accessToken: string): { ok: true } | PlatformFailure;
   listOwnSessions(accessToken: string): { ok: true; sessions: SessionView[] } | PlatformFailure;
   readOwnQuota(accessToken: string): { ok: true; quota: QuotaView } | PlatformFailure;
+  requestOwnQuota(accessToken: string, input: {requestId: string; additionalTokens: number}): {ok:true;requestId:string;additionalTokens:number;status:'approved';approvalMode:'auto';replayed:boolean;quota:QuotaView} | PlatformFailure;
   beginReport(accessToken: string, requestId: string): (ReserveSuccess & { finish: (usage: UsageView) => SettleSuccess | PlatformFailure }) | PlatformFailure;
   reserve(accessToken: string, input: { requestId: string; model?: string }): ReserveSuccess | PlatformFailure;
   settle(accessToken: string, input: { requestId: string; usage: UsageView }): SettleSuccess | PlatformFailure;
@@ -387,6 +396,7 @@ export type QuotaView = {
   concurrentInUse: number;
   concurrentLimit: number;
   availableTokens: number;
+  minimumRequestTokens?: number;
 };
 export type ReserveSuccess = {
   ok: true;
@@ -644,6 +654,7 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
       concurrentInUse,
       concurrentLimit,
       availableTokens: available > 0 ? available : 0,
+      ...(numberOf(row,'reserve_tokens')!==undefined?{minimumRequestTokens:numberOf(row,'reserve_tokens')!}:{}),
     };
   }
 
@@ -795,6 +806,30 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         return failure("NOT_FOUND", "没有该员工的额度账户");
       }
       return { ok: true, quota };
+    },
+
+    requestOwnQuota(accessToken,input) {
+      const actor=principal(accessToken);
+      if(!actor.ok)return actor;
+      if(!requestIdOk(input.requestId)||!Number.isSafeInteger(input.additionalTokens)||input.additionalTokens<1||input.additionalTokens>1_000_000)return failure('CONFIG_INVALID','每次可申请新增1至1000000 tokens，请填写整数。');
+      const decision=withTx(db,()=>{
+        const existing=rowOf(db.prepare('SELECT additional_tokens FROM quota_requests WHERE employee_id=? AND request_id=?').get(actor.employeeId,input.requestId));
+        if(existing&&numberOf(existing,'additional_tokens')!==input.additionalTokens)return failure('CONFLICT','该申请编号已用于其他金额，请核实原申请结果。');
+        const row=readQuotaRow(actor.employeeId),quota=row&&quotaView(row);
+        if(!quota)return failure('NOT_FOUND','没有该员工的额度账户');
+        if(!existing){
+          const next=quota.limitTokens+input.additionalTokens;
+          if(!Number.isSafeInteger(next))return failure('CONFIG_INVALID','额度累计值超出允许范围');
+          db.prepare('UPDATE quota SET limit_tokens=? WHERE employee_id=?').run(next,actor.employeeId);
+          db.prepare('INSERT INTO quota_requests VALUES(?,?,?,?,?)').run(actor.employeeId,input.requestId,input.additionalTokens,'approved',config.now());
+          audit(actor.orgId,actor.employeeId,'quota_request_approved',actor.employeeId+':'+input.requestId);
+        }
+        const updated=quotaView(readQuotaRow(actor.employeeId)!);
+        if(!updated)throw Error('额度回读失败');
+        return {ok:true,requestId:input.requestId,additionalTokens:input.additionalTokens,status:'approved',approvalMode:'auto',replayed:Boolean(existing),quota:updated} as const;
+      });
+      if(decision.ok&&!decision.replayed)platformLog(config.dataDir,'info','quota_request_approved','额度申请已自动批准',{employeeId:actor.employeeId,additionalTokens:input.additionalTokens},input.requestId);
+      return decision;
     },
 
     beginReport(accessToken, requestId) {

@@ -105,12 +105,12 @@ function planRepairs(result) {
     });
   }
   // 回复未完成：给出重试入口。只在没有更具体的修复项时兜底，避免掩盖真因。
-  if (codes.has('REPLY_INCOMPLETE') && !result.hasServiceSteps && !seen.has('REPLY_INCOMPLETE') && !seen.has('SERVICE_CATALOG_REJECTED')) {
+  if (codes.has('REPLY_INCOMPLETE') && (!result.hasServiceSteps||result.safeToRetry) && !codes.has('MODEL_QUOTA_EXHAUSTED') && !codes.has('MODEL_CONCURRENCY_FULL') && !seen.has('REPLY_INCOMPLETE') && !seen.has('SERVICE_CATALOG_REJECTED')) {
     seen.add('REPLY_INCOMPLETE');
     plans.push({
       code: 'REPLY_INCOMPLETE',
-      label: '重试本轮回复',
-      detail: '按原请求重新发起一次；本轮没有应用执行回执时可直接重试',
+      label: result.hasServiceSteps?'继续原请求（此前仅有只读查询）':'重试本轮回复',
+      detail: '按原请求继续；仅无执行回执或已确认全部为只读操作时可用，已有生成或写入仍禁止整轮重放',
       kind: 'retry',
     });
   }
@@ -141,6 +141,10 @@ function renderDiagnoseReport(body, result) {
     diagParagraph(body,`检查完成 · ${{none:'未执行修复',verified:'本次修复已验证',failed:'修复仍有未通过项'}[summary.repairState]||'待核实'} · 当前待处理 ${summary.unresolved} 项`);
   }
   if(result.authority==='system-diagnostic')diagParagraph(body,'系统维护权限 · 自动恢复已有任务，修复后验证并记录经验','muted');
+  if(result.issue?.action==='quota'){
+    const button=document.createElement('button');button.className='primary';button.textContent='申请新额度';
+    button.onclick=()=>void window.showTaskIssue?.(result.issue,{messageId:result.messageId});body.append(button);
+  }
   if(result.task&&(result.task.images?.length||result.task.operations?.length)){
     diagSection(body,'任务成果与恢复');
     diagParagraph(body,result.task.detail);
@@ -498,7 +502,8 @@ byId('chat-diagnose').onclick = async () => {
     renderDiagnoseReport(body, result);
     const history = await chatCall('chat.history', { chatId });
     if (current() && history.ok) { chatMessages = history.messages; renderChat(); }
-    setStatus(result.summary?.unresolved?`自诊断检查完成，仍有 ${result.summary.unresolved} 项待处理；已有成果可在报告中查看。`:'自诊断检查完成，请查看任务成果与修复结果。');
+    const recoveredImage=result.task?.images?.some(image=>image.delivered&&image.local);
+    setStatus((result.summary?.unresolved?`自诊断检查完成，仍有 ${result.summary.unresolved} 项待处理，请查看具体原因。`:'自诊断检查完成，请查看检查与修复结果。')+(recoveredImage?'已恢复图片可在报告中查看。':''));
   } catch (error) {
     if (current()) { body.textContent = error.message || '诊断失败，请重试。'; setStatus(body.textContent); }
     window.cpclaw?.log?.({ level: 'error', event: 'diagnose_ui_failed', message: String(error?.message || '诊断失败').slice(0, 200) });
