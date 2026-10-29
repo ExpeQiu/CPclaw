@@ -1,13 +1,30 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, lstatSync, realpathSync, rmSync, constants } from 'node:fs';
-import { join, dirname, relative, isAbsolute } from 'node:path';
+import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, lstatSync, realpathSync, rmSync, constants, existsSync } from 'node:fs';
+import { join, dirname, basename, relative, isAbsolute } from 'node:path';
 
 export const documentHash = body => createHash('sha256').update(body).digest('hex');
+const UUID_FOLDER=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function filename(text, body) {
   const explicit = text.match(/(?:^|[\s"'`：“”])([\p{L}\p{N}_\-][\p{L}\p{N}_\-.]{0,70}\.md)\b/iu)?.[1];
   const heading = body.match(/^#\s+(.+)$/m)?.[1];
   const title = (explicit || heading || '文档').replace(/\.md$/i, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0,80).replace(/^\.+/, '') || '文档';
   return title + '.md';
+}
+function sanitizeFolderName(text) {
+  return String(text||'未命名对话').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\s+/g,' ').trim().slice(0,60).replace(/^\.+/, '').replace(/[. ]+$/,'') || '未命名对话';
+}
+/** 修订沿用已有成果目录；新建按对话标题命名，重名时追加短编号。 */
+function projectResultFolder(targetRoot, actor, chatId, documentId, plan, db) {
+  if (plan.base?.path) {
+    const folderDir=dirname(dirname(plan.base.path));
+    if (basename(dirname(folderDir))==='CPclaw成果') return basename(folderDir);
+  }
+  const title=db.prepare('SELECT title FROM chats WHERE id=? AND actor=?').get(chatId,actor)?.title;
+  const base=sanitizeFolderName(title);
+  const root=join(targetRoot,'CPclaw成果');
+  if (!existsSync(join(root,base))) return base;
+  const short=`${base}-${documentId.slice(0,8)}`;
+  return existsSync(join(root,short))?`${base}-${documentId}`:short;
 }
 export function createDocumentStore(db, dataDir, projectFolder = () => null) {
   db.exec(`CREATE TABLE IF NOT EXISTS chat_documents (
@@ -64,9 +81,10 @@ export function createDocumentStore(db, dataDir, projectFolder = () => null) {
     const savedRoot=db.prepare('SELECT root FROM document_roots WHERE document_id=?').get(documentId)?.root;
     const targetRoot=savedRoot??projectFolder(actor,chatId)??rootReal;
     if(realpathSync(targetRoot)!==targetRoot)throw Error('项目文件夹已改变');
-    const dir=targetRoot===rootReal?join(root,actor,documentId,`r${revision}`):join(targetRoot,'CPclaw成果',documentId,`v${revision}`);
+    const resultFolder=targetRoot===rootReal?documentId:projectResultFolder(targetRoot,actor,chatId,documentId,plan,db);
+    const dir=targetRoot===rootReal?join(root,actor,resultFolder,`r${revision}`):join(targetRoot,'CPclaw成果',resultFolder,`v${revision}`);
     if(targetRoot===rootReal)mkdirSync(dir,{recursive:true,mode:0o700});
-    else {let parent=targetRoot;for(const part of ['CPclaw成果',documentId,`v${revision}`]){parent=join(parent,part);try{mkdirSync(parent,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}const st=lstatSync(parent);if(st.isSymbolicLink()||!st.isDirectory())throw Error('项目成果目录不能为链接');}}
+    else {let parent=targetRoot;for(const part of ['CPclaw成果',resultFolder,`v${revision}`]){parent=join(parent,part);try{mkdirSync(parent,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}const st=lstatSync(parent);if(st.isSymbolicLink()||!st.isDirectory())throw Error('项目成果目录不能为链接');}}
     const rel=relative(targetRoot,realpathSync(dir));if(rel.startsWith('..')||isAbsolute(rel))throw Error('文档目录无效');
     const path=join(realpathSync(dir),name);let wrote=false;
     try {
@@ -86,5 +104,10 @@ export function createDocumentStore(db, dataDir, projectFolder = () => null) {
     if(active && active.body.length<=10000)context.active={id:active.id,name:active.name,body:active.body};
     return {context,captures};
   }
-  return { list, read, plan, create, snapshot };
+  /** 成果子目录若仍为文档编号，返回对话标题供界面展示。 */
+  function folderLabel(actor, folderName) {
+    if (!UUID_FOLDER.test(folderName)) return '';
+    return db.prepare('SELECT c.title AS title FROM chat_documents d JOIN chats c ON c.id=d.chat AND c.actor=d.actor WHERE d.document_id=? AND d.actor=? ORDER BY d.created LIMIT 1').get(folderName,actor)?.title||'';
+  }
+  return { list, read, plan, create, snapshot, folderLabel };
 }

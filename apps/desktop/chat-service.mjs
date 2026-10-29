@@ -306,7 +306,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         }
         controller.signal.throwIfAborted();sameActor(actor);
         messages.at(-1).content+=retrievalMessage(retrieval);
-        progress('search',retrieval.sources.length?`项目检索 · 找到 ${retrieval.sources.length} 份相关资料`:retrieval.status==='unavailable'?'项目目录不可用，本次跳过检索':'项目检索 · 未找到相关片段',retrieval.status==='unavailable'?'error':'done');
+        progress('search',retrieval.sources.length?`项目检索 · 找到 ${retrieval.sources.length} 份相关资料`:retrieval.status==='unavailable'?'项目目录不可用，本次跳过检索':'项目检索',retrieval.status==='unavailable'?'error':'done');
         event('retrieval',{sources:retrieval.sources,retrievalStatus:retrieval.status});
       }
       const knowledgeDocs=[];
@@ -851,7 +851,12 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       if (method === 'project.create') return {ok:true,project:projects.create(actor,input.folder)};
       if (method === 'project.get') return {ok:true,project:{...projects.get(actor,input.id),folder:projects.folder(actor,input.id)}};
       if (method === 'project.assign') {if(active.has(input.chatId))throw Error('请等待回复完成再移动聊天');projects.assign(actor,input.chatId,input.projectId);return {ok:true};}
-      if (method === 'project.entries') return {ok:true,entries:projects.entries(actor,input.id,input.path)};
+      if (method === 'project.entries') {
+        const entries=projects.entries(actor,input.id,input.path);
+        // 旧成果目录仍为文档编号时，侧栏改显示对话标题。
+        if(input.path==='CPclaw成果')for(const entry of entries){if(entry.directory){const label=documents.folderLabel(actor,entry.name);if(label)entry.label=label;}}
+        return {ok:true,entries};
+      }
       if (method === 'project.entry') return {ok:true,path:projects.entry(actor,input.id,input.path)};
       if (method === 'project.file') {const file=projects.readFile(actor,input.id,input.path);return {ok:true,file:{path:file.path,name:file.name}};}
       if (method === "document.list") return { ok: true, artifacts: documents.list(actor,input.chatId) };

@@ -832,7 +832,11 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 .message-body input[type=checkbox],.markdown-preview input[type=checkbox]{width:auto;margin:0 7px 0 0;vertical-align:middle}
 
-.chat-message.assistant>.message-label{display:flex;align-items:center;justify-content:space-between;gap:12px}.chat-elapsed{font-weight:400;color:#899381;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.chat-message.assistant>.message-label{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.chat-label-meta{display:flex;align-items:center;gap:10px;min-width:0}
+.chat-elapsed{font-weight:400;color:#899381;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.chat-id{margin:0;padding:0;border:0;background:none;font:inherit;font-weight:400;color:#b4bdaa;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;white-space:nowrap}
+.chat-id:hover{color:#899381;text-decoration:underline}
 
 /* 拓展工作区沿用右侧面板，原生网页由隔离 WebContentsView 承载。 */
 #panel-extensions{display:flex;flex-direction:column;gap:14px;min-height:0;flex:1}

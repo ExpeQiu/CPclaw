@@ -10,7 +10,7 @@ export function taskIssue({error='',state='error',safeToRetry=false,hasServiceSt
   if(/登录凭证|请先.*登录|会话.*失效|登录会话不可用|AUTH_REQUIRED|SESSION_REVOKED/.test(error))return {...base,code:'SESSION_EXPIRED',popup:true,title:'登录已失效，请重新连接',summary:'当前平台会话不可用，任务进度已保留。',action:'login',actionLabel:'前往登录'};
   if(/图片.*(预览|解码)|超过预览限制/.test(error))return {...base,code:'IMAGE_DELIVERY_FAILED',title:'图片交付尚未完成',summary:'图片读取或预览遇到问题，需要先核实已有文件。',action:'diagnose',actionLabel:'查找并恢复图片'};
   if(/网关返回 50[234]|timeout|超时|fetch failed|断网|连接中断/i.test(error))return {...base,code:'CONNECTION_INTERRUPTED',severity:'temporary',title:'连接中断，任务未完成',summary:'模型或平台暂未正常响应，当前原因仍需检查。',action:safeToRetry?'retry':'diagnose',actionLabel:safeToRetry?'继续原请求':'检查原任务状态'};
-  if(/模型步骤达到上限/.test(error))return {...base,code:'MODEL_STEP_LIMIT',title:'本轮执行已暂停',summary:'本轮推理步骤已用尽，需要核实当前进度后续接。',action:'diagnose',actionLabel:'检查进度并恢复'};
+  if(/模型步骤达到上限/.test(error))return {...base,code:'MODEL_STEP_LIMIT',title:'本轮执行已暂停',summary:'本轮模型调用已达次数上限，需要核实已有进度后继续。',action:'diagnose',actionLabel:'检查进度并恢复'};
   return {...base,code:'TASK_INTERRUPTED',title:'任务遇到问题，进度已保留',summary:'本轮执行未完成，需要检查具体原因。',action:'diagnose',actionLabel:'运行自诊断'};
 }
 

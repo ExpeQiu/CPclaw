@@ -253,7 +253,7 @@
   async function renderResults(){
     const generation=++resultsGeneration,root=el('service-operation-results');root.replaceChildren();canvasUrl='';
     for(const record of records){
-      const card=document.createElement('details');card.className='service-result';const title=document.createElement('summary');title.textContent=`${record.step}. ${record.service.title} · ${record.request.purpose||record.request.tool||record.request.args?.slice(0,3).join(' ')||'发现能力'} · ${record.result.ok===false?'未完成':'已返回'}`;
+      const card=document.createElement('details');card.className='service-result';const title=document.createElement('summary');title.textContent=`${record.step}. ${record.service.title} · ${record.request.purpose||record.request.tool||record.request.args?.slice(0,3).join(' ')||({discover:'发现能力',terminal:'执行终端命令',read_file:'读取文件',write_file:'写入文件'}[record.request.action])||record.request.action||'执行操作'} · ${record.result.ok===false?'未完成':'已返回'}`;
       const pre=document.createElement('pre');pre.textContent=JSON.stringify(record.result,null,2);card.append(title,pre);
       for(const url of urls(record.result)){try{const u=new URL(url);const allowed=pageOrigins(activeService);if((allowed.length? !allowed.includes(u.origin):u.origin!==DREAMINA_ORIGIN)||u.hash||[...u.searchParams.keys()].some(k=>/token|sign|auth|code|credential/i.test(k)))continue;canvasUrl=url;pageUrl=url;const button=document.createElement('button');button.textContent=u.origin===DREAMINA_ORIGIN?'打开此画布 ↗':'在原生页打开 ↗';button.onclick=e=>{e.preventDefault();canvasUrl=url;pageUrl=url;void mode(true);};card.append(button);}catch{}}
       root.append(card);

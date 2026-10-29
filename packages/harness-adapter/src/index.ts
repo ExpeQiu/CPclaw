@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { prepareServiceCompletion, serviceModelBudget } from "./loop-budget.js";
+
 const SOURCE_START_TIMEOUT_MS = 180_000;
 
 const SDK_SPECIFIER: string = "@deepseek-ai/dsh-sdk-client";
@@ -237,6 +239,7 @@ export async function runReportLoop(input: {
   signal: AbortSignal; beforeCall: () => void; unknownUsage: () => void;
   service?: { context: string; execute: (request: string) => Promise<string> };
 }): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean }> {
+  const budget = input.service ? serviceModelBudget() : null;
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
   const { mkdtempSync } = await import("node:fs");
@@ -250,6 +253,11 @@ export async function runReportLoop(input: {
     void (async () => {
       if (input.signal.aborted || fatal || req.headers.authorization !== `Bearer ${nonce}`) { res.writeHead(403); res.end(); return; }
       if (input.service && req.method === "POST" && req.url === "/service") {
+        if (budget && modelCalls > budget.finalOnlyAt) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, code: "ROUND_WRAP_UP", message: "本轮已进入收尾阶段，未执行此操作。请依据已有回执完成回答；未知任务状态请明确说明，勿重复提交。" }));
+          return;
+        }
         if (++toolCalls > 40) throw new Error("服务步骤超过 40 次，请分批执行");
         let raw = ""; for await (const chunk of req) { raw += String(chunk); if (raw.length > 16000) throw new Error("服务参数超限"); }
         const result = await input.service.execute(raw);
@@ -267,11 +275,11 @@ export async function runReportLoop(input: {
         let raw = "";
         for await (const chunk of req) { raw += String(chunk); if (Buffer.byteLength(raw) > (input.service ? 240_000 : 16_000)) throw new Error("模型上下文超过验证上限"); }
         const body: unknown = JSON.parse(raw);
-        if (modelCalls >= (input.service ? 24 : 8)) throw Error("模型步骤达到上限，请继续当前任务");
+        if (modelCalls >= (budget?.limit ?? 8)) throw Error("模型步骤达到上限，请继续当前任务");
         input.beforeCall(); charged = true; modelCalls++;
         const response = await fetch(`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
           method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": `loop-${randomUUID()}` },
-          body: JSON.stringify(body), signal: input.signal,
+          body: JSON.stringify(budget ? prepareServiceCompletion(body, modelCalls - 1, budget) : body), signal: input.signal,
         });
         if (!response.ok) throw await harnessGatewayError(response);
         const text = await response.text();
@@ -296,7 +304,7 @@ export async function runReportLoop(input: {
     "- id: persistent-bash\n  disabled: true",
     "- id: persistent-pwsh\n  disabled: true",
     "- id: session-log-deepseek\n  disabled: true",
-    `- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: false\n    personaPrefix: ${JSON.stringify(input.service ? input.service.context : "你是报告助手。必须先调用 read_material，再依据返回材料生成中文报告，不得编造来源。只输出报告正文，必须逐字使用这四个标题（井号后有空格）：# 任务目标、# 材料与来源、# 要点、# 未覆盖项。每段材料都必须引用 fileName#段落id。")}`,
+    `- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: false\n    personaPrefix: ${JSON.stringify(input.service ? input.service.context + " 对资料查询类问题，只查询回答所需的信息；已有证据足够时立即整理答复，不扩展到无关源码、用户目录或测试夹具。区分内置、项目和用户安装的技能。" : "你是报告助手。必须先调用 read_material，再依据返回材料生成中文报告，不得编造来源。只输出报告正文，必须逐字使用这四个标题（井号后有空格）：# 任务目标、# 材料与来源、# 要点、# 未覆盖项。每段材料都必须引用 fileName#段落id。")}`,
     `- insert:\n    - id: llm-pi-ai\n      name: '@deepseek-ai/dsh-llm-pi-ai'\n      config: ${JSON.stringify({ providers: { 'cpclaw-real': { apiKeyEnv: 'CPCLAW_LOOP_KEY', api: 'openai-completions', baseURL: base + '/v1', models: [{ id: 'MiniMax-M3' }] } } })}\n    - id: cpclaw-service\n      name: ${JSON.stringify(plugin)}`,
   ].join("\n"));
   const env = scrubbedEnv(homeDir);

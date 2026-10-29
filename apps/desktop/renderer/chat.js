@@ -134,7 +134,11 @@ function updateProgress(container,message){
   // 应用执行过程只在右侧栏展示，左侧不重复列过程步骤。
   if(message.hasServiceSteps){container.replaceChildren();container.hidden=true;return;}
   container.hidden=!message.activities?.length;
-  for(const step of message.activities??[]){let row=[...container.children].find(r=>r.dataset.step===step.step);if(!row){row=document.createElement('li');row.dataset.step=step.step;container.append(row);}row.dataset.state=step.state;row.textContent=step.label;}
+  for(const step of message.activities??[]){
+    // 无匹配不展示「未找到」说明，只保留中性步骤名。
+    const label=step.step==='search'&&/未找到相关片段/.test(step.label||'')?'项目检索':step.label;
+    let row=[...container.children].find(r=>r.dataset.step===step.step);if(!row){row=document.createElement('li');row.dataset.step=step.step;container.append(row);}row.dataset.state=step.state;row.textContent=label;
+  }
 }
 function updateLiveMessage(message){
   if(!message)return false;
@@ -163,7 +167,14 @@ function renderChat() {
     const visibleText=chatDisplayText(message)||(message.state==='streaming'?'正在连接模型…':'没有收到回复正文');
     if(message.role==='assistant')renderChatMarkdown(body,visibleText,message.state==='streaming');
     else body.textContent=visibleText;
-    if(message.role==='assistant'){const elapsed=document.createElement('span');elapsed.className='chat-elapsed';elapsed.dataset.request=message.request;elapsed.textContent=elapsedLabel(message);elapsed.hidden=!elapsed.textContent;label.append(elapsed);}
+    if(message.role==='assistant'){
+      const meta=document.createElement('span');meta.className='chat-label-meta';
+      const elapsed=document.createElement('span');elapsed.className='chat-elapsed';elapsed.dataset.request=message.request;elapsed.textContent=elapsedLabel(message);elapsed.hidden=!elapsed.textContent;
+      const chatId=currentChatId;const idBtn=document.createElement('button');idBtn.type='button';idBtn.className='chat-id';
+      idBtn.textContent=chatId?`对话 ${chatId.slice(0,8)}`:'';idBtn.hidden=!chatId;idBtn.title=chatId?`对话 ID：${chatId}\n点击复制，便于排查`:'';
+      idBtn.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(chatId);idBtn.textContent='已复制';setTimeout(()=>{idBtn.textContent=`对话 ${chatId.slice(0,8)}`;},1200);setStatus('已复制对话 ID');}catch{setStatus('复制对话 ID 失败');}});
+      meta.append(elapsed,idBtn);label.append(meta);
+    }
     article.append(label);
     if(message.role==='assistant'){const activity=document.createElement('ol');activity.className='chat-progress';updateProgress(activity,message);article.append(activity);}
     body.hidden=!chatDisplayText(message)&&message.state==='streaming'&&!message.hasServiceSteps&&Boolean(message.activities?.length);
@@ -178,7 +189,7 @@ function renderChat() {
       if(message.skillResult){const result=message.skillResult;const badge=document.createElement('p');badge.className='skill-result-check';badge.style.cssText='font-size:12px;color:#537363';badge.textContent=(result.mode==='mock'?'Mock · ':'')+({passed:'技能输出结构检查通过',failed:'技能输出检查未通过',unverified:'技能回复完成，未配置自动检查规则'}[result.status])+(result.missing?.length?'：'+result.missing.join('、'):'');article.append(badge);}
 
       if(message.sources?.length){const sources=document.createElement('details');sources.className='project-citations';const summary=document.createElement('summary');summary.textContent=`参考项目资料 · ${message.sources.length} 个文件`;sources.append(summary);for(const source of message.sources){const row=document.createElement('div');row.textContent=`${source.path} · L${source.lineStart}–${source.lineEnd}`;sources.append(row);}article.append(sources);}
-      else if(message.retrievalStatus){const notice=document.createElement('small');notice.className='retrieval-notice';notice.textContent={unavailable:'项目资料暂不可用，本次未引用本地资料',limited:'已在检索范围内查找，未找到相关文本片段','no-match':'项目检索未找到相关文本片段'}[message.retrievalStatus]??'';if(notice.textContent)article.append(notice);}
+      else if(message.retrievalStatus==='unavailable'){const notice=document.createElement('small');notice.className='retrieval-notice';notice.textContent='项目资料暂不可用，本次未引用本地资料';article.append(notice);}
 
       if(message.knowledgeSources?.length && typeof renderKnowledgeCitations === "function")article.append(renderKnowledgeCitations(message.knowledgeSources));
       for (const artifact of chatArtifacts.filter(a=>a.message===message.id)) article.append(renderDocumentCard(artifact));

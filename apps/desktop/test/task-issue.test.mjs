@@ -20,3 +20,8 @@ test('verified recovery replaces a stale blocking message without declaring othe
  const recovered=recoveredMediaIssue({status:'delivered',images:[{delivered:true,local:{path:'/saved.png'}}]},previous);
  assert.equal(recovered.severity,'resolved');assert.equal(recovered.popup,false);assert(!recovered.summary.includes('任务已完成'));assert.match(recovered.preserved,/没有重新提交/);
 });
+test('model call limit is not described as thinking tokens or account quota exhaustion',()=>{
+ const issue=taskIssue({error:'模型步骤达到上限，请继续当前任务',hasServiceSteps:true});
+ assert.equal(issue.code,'MODEL_STEP_LIMIT');assert.match(issue.summary,/模型调用.*次数上限/);
+ assert.doesNotMatch(issue.summary,/推理步骤|额度|tokens/);assert.equal(issue.action,'diagnose');
+});

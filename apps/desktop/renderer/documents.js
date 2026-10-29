@@ -136,7 +136,8 @@ async function renderProjectFolder(){
       for(const entry of result.entries){
         if(entry.directory){
           const group=document.createElement('details');group.className='project-folder-group';
-          const summary=document.createElement('summary');summary.append(projectFileIcon(entry.name,true),projectEntryName(entry.name));summary.title=entry.path;
+          const shown=entry.label||entry.name;
+          const summary=document.createElement('summary');summary.append(projectFileIcon(entry.name,true),projectEntryName(shown));summary.title=entry.label&&entry.label!==entry.name?`${entry.label}\n${entry.path}`:entry.path;
           const children=document.createElement('div');children.className='project-folder-children';let loaded=false;
           group.ontoggle=()=>{if(group.open&&!loaded){loaded=true;void load(children,entry.path);}};
           group.append(summary,children);container.append(group);

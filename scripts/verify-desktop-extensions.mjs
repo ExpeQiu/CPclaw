@@ -96,7 +96,11 @@ document.getElementById('close-panel').onclick=()=>document.getElementById('insp
  assert.equal(await js("document.documentElement.scrollWidth<=innerWidth"),true);
  writeFileSync(join(evidence,'extensions-narrow.png'),(await w.webContents.capturePage()).toPNG());
  w.setSize(1500,900);await settle();writeFileSync(join(evidence,'extensions-wide.png'),(await w.webContents.capturePage()).toPNG());
- assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,checks:['picker-first','picker-escape','three-kind-tabs','kind-scoped-services','no-dreamina-outside-cli','selection-opens-panel','native-hidden-under-picker','scope-status','rail-selection','native-bounds','failure-fallback','toolbar-removed','close','narrow-layout'],screenshots:evidence}));app.exit(0);
+ // 回放旧记录时，没有 purpose 的终端/文件操作也应显示实际动作。
+ await js(`restoreServicePanel(['discover','terminal','read_file','write_file'].map((action,i)=>({step:i+1,service:{id:'local-terminal',title:'本机文件与终端'},request:{action},result:{ok:true}})),{})`);await settle();
+ const operationTitles=await js("Array.from(document.querySelectorAll('#service-operation-results summary')).map(n=>n.textContent)");
+ for(const [i,label] of ['发现能力','执行终端命令','读取文件','写入文件'].entries())assert(operationTitles[i].includes(label));
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({ok:true,checks:['picker-first','picker-escape','three-kind-tabs','kind-scoped-services','no-dreamina-outside-cli','selection-opens-panel','native-hidden-under-picker','scope-status','rail-selection','native-bounds','failure-fallback','toolbar-removed','close','narrow-layout','operation-action-labels'],screenshots:evidence}));app.exit(0);
 } catch(e){console.error(e);app.exit(1);}
 
 });
