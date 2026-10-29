@@ -27,7 +27,12 @@ function renderProjectChats(){
     group.open=query?true:projectOpen.get(chatAccount+project.id)??true;
     group.ontoggle=()=>projectOpen.set(chatAccount+project.id,group.open);
     const summary=document.createElement('summary');const name=document.createElement('span');name.className='sidebar-text';name.textContent=project.name;name.title=project.folder||'尚未归入项目的聊天';summary.append(name);
-    if(project.id){const folder=documentButton('↗',async()=>{const r=await window.cpclaw.projectAction({action:'reveal',id:project.id});if(!r.ok)throw Error(r.message);});folder.title='在文件夹中显示项目';folder.setAttribute('aria-label','显示项目文件夹：'+project.name);folder.addEventListener('click',e=>e.stopPropagation());summary.append(folder);}
+    if(project.id){
+      const compress=documentButton('',()=>openProjectWiki(project));compress.className='project-wiki-action';compress.title='信息压缩 · 整理项目知识';compress.setAttribute('aria-label','信息压缩：'+project.name);
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
+      const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M4 3h10l4 4v5M14 3v5h4M7 11h6M7 15h3M3 7v14h11M13 16h8m-3-3 3 3-3 3');svg.append(path);compress.append(svg);compress.addEventListener('click',e=>e.stopPropagation());summary.append(compress);
+      const folder=documentButton('↗',async()=>{const r=await window.cpclaw.projectAction({action:'reveal',id:project.id});if(!r.ok)throw Error(r.message);});folder.title='在文件夹中显示项目';folder.setAttribute('aria-label','显示项目文件夹：'+project.name);folder.addEventListener('click',e=>e.stopPropagation());summary.append(folder);
+    }
     const add=documentButton('＋',()=>newProjectChat(project.id));add.title='在此项目新建聊天';add.setAttribute('aria-label','新建聊天：'+project.name);add.addEventListener('click',e=>e.stopPropagation());summary.append(add);group.append(summary);
     for(const chat of rows)group.append(projectChatRow(chat));
     if(!rows.length){const empty=document.createElement('p');empty.className='project-empty';empty.textContent=chatAccount?'点击 ＋ 开始聊天':'登录后开始聊天';group.append(empty);}

@@ -775,6 +775,13 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .project-group>summary>.sidebar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .project-group>summary>button{margin:0;border:0;background:transparent;padding:3px 5px;flex-shrink:0}
 .project-empty{padding:2px 12px 8px;font-size:11px;color:#939b8b}
+.project-wiki-action svg{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.project-wiki-dialog{width:min(780px,calc(100vw - 48px));max-height:85vh;overflow:auto;padding:24px;color:#44503e;border:1px solid #dce3d5;border-radius:14px}
+.project-wiki-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.project-wiki-heading h2{margin:0;font-size:18px}
+.project-wiki-dialog p{font-size:13px;line-height:1.7}.project-wiki-dialog li{font-size:12px;overflow-wrap:anywhere}.project-wiki-dialog details{margin-top:12px}
+.project-wiki-preview{margin-top:20px;border-top:1px solid #dce3d5;overflow-wrap:anywhere}.project-wiki-preview:empty{display:none}
+.project-wiki-navigation{display:flex;flex-wrap:wrap;gap:6px;padding-top:14px}.project-wiki-navigation button{font-size:12px}
+.project-wiki-preview .project-wiki-link{display:inline;margin:0;padding:0;border:0;background:transparent;color:inherit;text-decoration:underline;font-size:inherit;text-align:left}
 .project-chat-row{display:flex;align-items:center;position:relative}
 .project-chat-row .task-row{min-width:0;padding-right:28px}
 .chat-move{position:absolute;right:4px;border:0;padding:3px 5px;background:transparent;opacity:0}

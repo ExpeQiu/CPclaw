@@ -14,6 +14,15 @@ function defaultHarnessRoot(desktopDir) {
   return resolve(desktopDir, "../../../../13 Github/deepseek-harness");
 }
 
+/** 安装包内置 Harness 时检出路径可留空；仅开发机无包内内核时才回落默认检出。 */
+export function bundledHarnessRoot(desktopDir) {
+  return resolve(desktopDir, "../harness");
+}
+
+export function hasBundledHarness(desktopDir) {
+  return existsSync(join(bundledHarnessRoot(desktopDir), "manifest.json"));
+}
+
 export function settingsPath(dataDir) {
   return join(dataDir, SETTINGS_FILE);
 }
@@ -107,7 +116,10 @@ export function getDesktopSettingsView(dataDir, desktopDir, { appVersion = "", e
   const envEngine = env.CPCLAW_REPORT_ENGINE === "harness" ? "harness" : "none";
   const reportEngine = coalesceSaved(saved.reportEngine, envEngine);
   const envRoot = typeof env.CPCLAW_HARNESS_ROOT === "string" ? env.CPCLAW_HARNESS_ROOT : undefined;
-  const harnessRoot = coalesceSaved(saved.harnessRoot, envRoot !== undefined ? envRoot : defaultHarnessRoot(desktopDir));
+  const bundledPresent = hasBundledHarness(desktopDir);
+  // 包内内核优先：勿把开发机默认检出路径灌进新机器表单，否则一点保存就报「缺少 package.json」。
+  const fallbackRoot = envRoot !== undefined ? envRoot : (bundledPresent ? "" : defaultHarnessRoot(desktopDir));
+  const harnessRoot = coalesceSaved(saved.harnessRoot, fallbackRoot);
   const envMode = env.CPCLAW_REPORT_MODEL_MODE === "real" || env.CPCLAW_REPORT_MODEL_MODE === "mock"
     ? env.CPCLAW_REPORT_MODEL_MODE
     : "mock";
@@ -164,7 +176,9 @@ export function saveDesktopSettings(dataDir, desktopDir, input, { env = process.
   if (harnessRoot && !isAbsolute(harnessRoot)) {
     return { ok: false, code: "SCHEMA_INVALID", message: "内核路径须为绝对路径" };
   }
-  if (engine === "harness" && harnessRoot && !existsSync(join(harnessRoot, "package.json")) && !existsSync(join(harnessRoot, "manifest.json"))) {
+  const bundled = hasBundledHarness(desktopDir);
+  // 安装包已带包内内核时运行时忽略检出路径；仅在无包内内核且用户显式填写时校验目录。
+  if (engine === "harness" && harnessRoot && !bundled && !existsSync(join(harnessRoot, "package.json")) && !existsSync(join(harnessRoot, "manifest.json"))) {
     return { ok: false, code: "CONFIG_INVALID", message: "所选目录不是可用的 deepseek-harness（缺少 package.json 或 manifest.json）" };
   }
 

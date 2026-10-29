@@ -126,15 +126,20 @@ export function createMarket(db: DatabaseSync, now: () => number) {
     }
     if(action==='list')return {ok:true,items:visible.map(x=>input.summary?summary(x):full(x)),installs,connectors:connectors(),role:actor.role};
     if(action==='catalog'){
-      let found=visible.filter(x=>input.scope==='studio'?owned(x):input.scope==='review'?actor.role==='admin'&&(input.status==='retired'?['retired','withdrawn'].includes(x.status):x.status===(input.status??'pending')):input.scope==='mine'?installedIds.has(x.id)||(owned(x)&&x.personalAvailable):x.status==='published');
+      // mine：默认仅账号安装偏好；桌面端传入 localReleaseIds 后改为「本机已装制品」。
+      // 个人可用草稿只出现在创作，不再混入「我的技能」。
+      const localReleaseIds=Array.isArray(input.localReleaseIds)?input.localReleaseIds.filter(x=>typeof x==='string'):null;
+      // 内部技能由桌面内核提供；平台 Web 目录为空，避免与官方精选混淆。
+      if(input.scope==='internal')return {ok:true,items:[],total:0,offset:0,next:null,categories:[],installs,role:actor.role};
+      let found=visible.filter(x=>input.scope==='studio'?owned(x):input.scope==='review'?actor.role==='admin'&&(input.status==='retired'?['retired','withdrawn'].includes(x.status):x.status===(input.status??'pending')):input.scope==='mine'?localReleaseIds?localReleaseIds.includes(x.id):installedIds.has(x.id):x.status==='published');
       if(input.kind)found=found.filter(x=>x.kind===input.kind);
       if(input.source)found=found.filter(x=>x.source===input.source);
       if(input.excludeSource)found=found.filter(x=>x.source!==input.excludeSource);
       if(input.category)found=found.filter(x=>x.category===input.category);
       const q=String(input.q??'').toLowerCase().trim();if(q)found=found.filter(x=>[x.title,x.description,x.category,x.outputType,x.applicability,...x.tags].join(' ').toLowerCase().includes(q));
-      if(input.installed==='yes')found=found.filter(x=>installedIds.has(x.id));
-      if(input.installed==='no')found=found.filter(x=>!installedIds.has(x.id));
-      // 普通目录一个稳定技能展示最新发布版；创作和本人库保留版本历史。
+      if(input.installed==='yes')found=found.filter(x=>localReleaseIds?localReleaseIds.includes(x.id):installedIds.has(x.id));
+      if(input.installed==='no')found=found.filter(x=>localReleaseIds?!localReleaseIds.includes(x.id):!installedIds.has(x.id));
+      // 普通目录一个稳定技能展示最新发布版；创作和审核保留版本历史。我的技能按本机/偏好版本展示。
       if(!['studio','review'].includes(String(input.scope))){const latest=new Map<string,MarketItem>();for(const x of found){const old=latest.get(x.skillId);const preferred=Array.isArray(input.preferredIds)?input.preferredIds:[];if(!old||(preferred.includes(x.id)&&!preferred.includes(old.id))||(!preferred.includes(old.id)&&compareSkillVersions(x.version,old.version)>0))latest.set(x.skillId,x);}found=[...latest.values()];}
       found.sort((a,b)=>input.sort==='name'?a.title.localeCompare(b.title,'zh-CN'):input.sort==='updated'?b.updated-a.updated:b.featured-a.featured||b.updated-a.updated);
       const offset=Math.max(0,Number(input.offset)||0),limit=Math.min(100,Math.max(1,Number(input.limit)||30));
@@ -186,8 +191,22 @@ export function createMarket(db: DatabaseSync, now: () => number) {
       const {title,type,target}=input;if(typeof title!=='string'||!title.trim()||title.length>100||typeof target!=='string'||target.length>1000||!['MCP','CLI'].includes(String(type)))return fail('连接器配置无效');
       if(type==='MCP'){try{const u=new URL(target);if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash)return fail('地址不能包含凭据或查询参数');}catch{return fail('请输入 HTTP(S) 服务地址');}}else if(!target.startsWith('/')||/[\n\r\0]/.test(target))return fail('CLI 需要程序绝对路径');
       const old=connectors().find(c=>c.id===input.id);if(input.id&&!old)return fail('连接器不存在');
-      const c={id:old?.id??randomUUID(),title,type,target,enabled:input.enabled!==false,status:'未检测',revision:Number(old?.revision??0)+1,updated:now()};
+      const targetChanged=!old||old.target!==target||old.type!==type;
+      const c={id:old?.id??randomUUID(),title:title.trim(),type,target,enabled:input.enabled!==false,status:targetChanged?'未检测':(old?.status??'未检测'),probe:targetChanged?null:(old?.probe??null),kind:old?.kind??'service',revision:Number(old?.revision??0)+1,updated:now()};
       db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(c.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:c};
+    }
+    if(action==='connector-probe-result'){
+      const old=connectors().find(c=>c.id===input.id);if(!old)return fail('连接器不存在','NOT_FOUND');
+      if(typeof input.status!=='string'||input.status.length>200||!input.probe||typeof input.probe!=='object')return fail('探测结果无效');
+      const probe=input.probe as Record<string,unknown>;
+      if(typeof probe.layer!=='string'||probe.layer.length>40||typeof probe.message!=='string'||probe.message.length>1000)return fail('探测分层无效');
+      const c={...old,status:input.status,probe:{layer:String(probe.layer),message:String(probe.message),checkedAt:Number(probe.checkedAt)||now(),capabilities:Array.isArray(probe.capabilities)?probe.capabilities.filter((x):x is string=>typeof x==='string').slice(0,40):[],auth:typeof probe.auth==='string'?probe.auth:undefined,version:typeof probe.version==='string'?probe.version.slice(0,80):undefined},updated:now()};
+      db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(old.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:c};
+    }
+    if(action==='connector-dependents'){
+      const id=String(input.id||'');const c=connectors().find(x=>x.id===id);if(!c)return fail('连接器不存在','NOT_FOUND');
+      const deps=visible.filter(x=>['published','personal'].includes(x.status)||x.personalAvailable).filter(x=>x.dependencies.some(d=>d.service===c.id||d.service===c.title||d.title===c.title));
+      return {ok:true,items:deps.map(summary),total:deps.length};
     }
     if(action==='connector-remove'){db.prepare('DELETE FROM market_connectors WHERE id=? AND org=? AND employee=?').run(String(input.id),actor.orgId,actor.employeeId);return {ok:true};}
     if(action==='uninstall'){db.prepare('DELETE FROM market_installs WHERE org=? AND employee=? AND id=?').run(actor.orgId,actor.employeeId,String(input.id));return {ok:true};}

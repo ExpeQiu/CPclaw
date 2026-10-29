@@ -31,7 +31,7 @@ function fillSettingsForm(view) {
   settingsById("settings-kernel-status").classList.toggle("settings-ok", Boolean(view.kernel?.ready));
   settingsById("settings-kernel-status").classList.toggle("settings-fail", !view.kernel?.ready);
   const bundledNote = view.bundled
-    ? "当前检测到包内 deepseek-harness，运行时优先使用包内内核。"
+    ? "当前检测到包内 deepseek-harness，运行时优先使用包内内核；上方检出路径可留空（仅开发机需要）。"
     : "未检测到包内内核；启用后将使用上方检出路径。";
   settingsById("settings-kernel-hint").textContent =
     `${bundledNote} 保存后工作区进程按新配置重启。路径来源：${sourceLabel(view.sources?.harnessRoot)}；引擎：${sourceLabel(view.sources?.reportEngine)}。`;

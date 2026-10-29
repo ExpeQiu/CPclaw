@@ -2,6 +2,7 @@ import {canAutoApprove} from './conversation-permissions.mjs';
 import {localService,executeLocalTool} from './local-tools.mjs';
 import {browserPageService,executeComputerUse,pageOriginsForService} from './computer-use.mjs';
 import {annotateService,SERVICE_KINDS,serviceKind} from './service-kinds.mjs';
+import { resolveFeishuCli } from './connector-health.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
@@ -14,6 +15,11 @@ import { isAbsolute, join } from 'node:path';
 const runFile = promisify(execFile);
 const supported = /^(version|model( list| find)?|voice list|canvas (current|ls|use|create)|node (find|show|quote|run|create (image|video|audio|text)|edit (image|video|audio|text))|operation (status|wait)|resource (get|download)|auth (status|account|login|wait))$/;
 export const dreaminaService = annotateService({ id: 'dreamina', title: '即梦画布', type: 'CLI', kind: SERVICE_KINDS.cli, target: join(homedir(), '.local', 'bin', process.platform==='win32'?'dreamina-canvas.exe':'dreamina-canvas'), builtin: true });
+export function feishuService(env = process.env) {
+  const target = resolveFeishuCli(env);
+  if (!target) return null;
+  return annotateService({ id: 'feishu', title: '飞书 CLI', type: 'CLI', kind: SERVICE_KINDS.cli, target, builtin: true });
+}
 export { browserPageService };
 export { SERVICE_KINDS, serviceKind, annotateService };
 export function publicServices(connectors = [], localExtensions = []) {
@@ -25,12 +31,15 @@ export function publicServices(connectors = [], localExtensions = []) {
   }));
   const locals = (localExtensions || []).filter(s => s && s.enabled !== false).map(annotateService);
   const localIds = new Set(locals.map(s => s.id));
+  const feishu = feishuService();
+  const builtinIds = new Set([dreaminaService.id, ...(feishu ? [feishu.id] : [])]);
   return [
     annotateService({ ...dreaminaService }),
+    ...(feishu ? [feishu] : []),
     annotateService({ ...localService, kind: SERVICE_KINDS.appDriver }),
     annotateService({ ...browserPageService, kind: SERVICE_KINDS.computerUse }),
     ...locals,
-    ...fromConnectors.filter(c => !localIds.has(c.id)),
+    ...fromConnectors.filter(c => !localIds.has(c.id) && !builtinIds.has(c.id) && c.builtin !== true),
   ];
 }
 // 服务回执是数据；凭据、临时访问地址不进入模型上下文、聊天历史或日志。

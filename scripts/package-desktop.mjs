@@ -79,8 +79,13 @@ for (const helper of readdirSync(join(contents,'Frameworks')).filter(n=>!n.start
   const helperPlist = join(contents,'Frameworks',helper,'Contents/Info.plist');
   execFileSync('/usr/libexec/PlistBuddy',['-c',`Set :CFBundleIdentifier com.cpclaw.desktop.${helper.replace(/[^a-zA-Z]/g,'')}`,helperPlist]);
 }
-// 修改 bundle 后重签本地临时签名；不声称 Developer ID 签名或公证。
-execFileSync('/usr/bin/xattr',['-cr',bundle]);
+// 外置盘常夹带 AppleDouble（._*）；先清再剥 xattr，避免 xattr -cr 因海量 ._ 报 ENOBUFS。
+execFileSync('/usr/bin/find',[bundle,'-name','._*','-delete'],{stdio:'inherit'});
+try {
+  execFileSync('/usr/bin/xattr',['-cr',bundle],{stdio:['ignore','ignore','pipe'], maxBuffer: 16 * 1024 * 1024});
+} catch (error) {
+  process.stderr.write(`${JSON.stringify({ level: 'warn', event: 'package_xattr_partial', message: error instanceof Error ? error.message : 'xattr failed' })}\n`);
+}
 execFileSync('/usr/bin/codesign',['--force','--deep','--sign','-',bundle],{stdio:'inherit'});
 execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'inherit'});
 execFileSync(join(nodeTarget, 'bin/node'), [join(root, 'scripts/verify-bundled-harness.mjs'), bundle], {stdio:'inherit'});
@@ -90,7 +95,14 @@ mkdirSync(dmgStage);
 execFileSync('/usr/bin/ditto', [bundle, join(dmgStage, 'CPclaw.app')]);
 execFileSync('/bin/ln', ['-s', '/Applications', join(dmgStage, 'Applications')]);
 const dmg = `${out}.dmg`;
-execFileSync('/usr/bin/hdiutil', ['create', '-volname', `CPclaw ${version}`, '-srcfolder', dmgStage, '-ov', '-format', 'UDZO', dmg], {stdio:'inherit'});
+// hdiutil 在部分外置卷上会报「操作不被允许」；先在本机临时目录建盘再移回产物目录。
+const dmgTmp = join('/tmp', `cpclaw-dmg-${version}-${process.pid}.dmg`);
+try {
+  execFileSync('/usr/bin/hdiutil', ['create', '-volname', `CPclaw ${version}`, '-srcfolder', dmgStage, '-ov', '-format', 'UDZO', dmgTmp], {stdio:'inherit'});
+  execFileSync('/bin/cp', ['-f', dmgTmp, dmg], {stdio:'inherit'});
+} finally {
+  try { execFileSync('/bin/rm', ['-f', dmgTmp]); } catch { /* ignore */ }
+}
 const zip = `${out}.zip`;
 execFileSync('/usr/bin/ditto',['-c','-k','--sequesterRsrc','--keepParent',bundle,zip]);
 const manifest = {product:'CPclaw',version,platform:'darwin',arch:'arm64',electron:'33.4.11',node:'22.23.3',harness:harnessManifest,dmg:basename(dmg),dmgSha256:createHash('sha256').update(readFileSync(dmg)).digest('hex'),signature:'ad-hoc',notarized:false,createdAt:new Date().toISOString(),zip:basename(zip),sha256:createHash('sha256').update(readFileSync(zip)).digest('hex')};

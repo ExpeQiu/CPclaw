@@ -19,6 +19,7 @@ import { runBoundReportLoop } from '@cpclaw/desktop-host';
 import { createKnowledgeStore, knowledgeSnippets } from './knowledge-service.mjs';
 import { searchProject, retrievalMessage } from './project-search.mjs';
 import { createProjectStore } from './project-service.mjs';
+import { createProjectWiki, wikiPrompt } from './project-wiki.mjs';
 import { createDocumentStore } from "./document-service.mjs";
 import { createStreamDeadline } from "@cpclaw/model-gateway";
 import { inflateRawSync } from "node:zlib";
@@ -51,13 +52,49 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   const knowledge = createKnowledgeStore(db);
   db.exec('CREATE TABLE IF NOT EXISTS chat_knowledge(message TEXT PRIMARY KEY,sources TEXT NOT NULL)');
   const projects = createProjectStore(db);
+  const projectWiki = createProjectWiki({
+    assertCurrent: context => {sameActor(context.actor);if(platform()!==context.platform)throw Error('平台连接已变化，请重新打开项目');projects.folder(context.actor,context.id);},
+    progress: (context,value) => {
+      emit({channel:'project-wiki',actorId:context.actor,projectId:context.id,...value});
+      desktopLog(dataDir,'cpclaw-desktop-worker','info','project_wiki_progress','项目信息压缩',{projectId:context.id,stage:value.stage,...(value.completed!==undefined?{completed:value.completed,total:value.total}:{})});
+    },
+    summarize: async ({file,chunk,requestId,signal,context}) => {
+      const auth=await refreshSession(signal);sameActor(context.actor);
+      const deadline=createStreamDeadline({signal,idleMs:chatIdleMs,totalMs:chatTotalMs,label:'项目信息压缩'});
+      try {
+        const response=await post(auth.base,'/v1/chat/stream',{requestId,messages:[{role:'user',content:wikiPrompt(file,chunk)}]},deadline.signal,auth.token);
+        if(!response.body || !response.headers.get('content-type')?.includes('application/x-ndjson'))throw Error('平台未返回知识加工数据流');
+        const reader=response.body.getReader(),decoder=new TextDecoder();let raw='';
+        try {while(true){const part=await reader.read();if(part.value?.length)deadline.touch();raw+=decoder.decode(part.value,{stream:!part.done});if(raw.length>1_000_000)throw Error('知识加工流超过上限');if(part.done)break;}}
+        finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
+        let text='',done=false,mode='';
+        for(const line of raw.split('\n').filter(Boolean)) {
+          const event=JSON.parse(line);
+          if(event.event==='delta')text+=event.text??'';
+          if(event.event==='done')done=true;
+          if(event.event==='start')mode=event.mode;
+          if(event.event==='error')throw Error(event.message||'知识加工失败');
+        }
+        if(!done || !text.trim())throw Error('知识加工未完成；再次执行会复用原请求编号和已完成结果');
+        if(mode==='mock')throw Object.assign(Error('当前平台为 Mock 演示模式，不能生成真实项目知识'),{completed:true});
+        if(mode!=='real')throw Object.assign(Error('平台未确认真实模型模式，未发布知识页'),{completed:true});
+        try{return JSON.parse(text.replace(/^```(?:json)?\s*\n?/,'').replace(/\n?```\s*$/,''));}
+        catch{throw Object.assign(Error('Wiki 模型返回的结构无效'),{completed:true});}
+      } catch(error){
+        if(deadline.signal.aborted)throw deadline.signal.reason;
+        if(error.status===409)throw Error('原请求 '+requestId+' 已受理，平台暂不支持结果回读；请核实原请求，未重复提交。');
+        throw error;
+      }
+      finally {deadline.dispose();}
+    },
+  });
   const documents = createDocumentStore(db, dataDir, (actor,chatId)=>{const p=projects.forChat(actor,chatId);return p?projects.folder(actor,p.id):null;});
   db.exec("CREATE TABLE IF NOT EXISTS chat_modes(chat TEXT PRIMARY KEY, mode TEXT NOT NULL, service TEXT NOT NULL); CREATE TABLE IF NOT EXISTS chat_service_steps(message TEXT NOT NULL, step INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(message,step));");
   db.exec('CREATE TABLE IF NOT EXISTS chat_diagnostics(message TEXT PRIMARY KEY,chat TEXT NOT NULL,codes TEXT NOT NULL,checked INTEGER NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS chat_message_feedback(message TEXT PRIMARY KEY, liked INTEGER NOT NULL, updated INTEGER NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS chat_issues(message TEXT PRIMARY KEY,body TEXT NOT NULL)');
   const diagnosticJournal=createDiagnosticJournal(db);
-  const active = new Map(), distilling = new Map();
+  const active = new Map(), distilling = new Map(), wikiBusy = new Set();
   let accountBusy = false, diagnosticBusy = false;
   const configPath = join(dataDir, "desktop-connection.json");
   const marketService=createMarketService({db,dataDir,scope:actor=>knowledgeAccount(actor),
@@ -715,7 +752,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         return result;
       }
       if (method === "account.login") {
-        if (active.size||distilling.size) return fail("SLOT_BUSY", "请先完成当前回复或 Skill 提炼，再切换账号");
+        if (active.size||distilling.size||wikiBusy.size) return fail("SLOT_BUSY", "请先完成当前回复、知识整理或 Skill 提炼，再切换账号");
         let url;
         try { url = new URL(input.platformUrl); } catch { return fail("CONFIG_INVALID", "请输入完整的平台地址"); }
         if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return fail("CONFIG_INVALID", "平台地址只包含 http(s) 协议、主机和端口");
@@ -727,7 +764,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         return { ok: true, employeeId: result.employeeId, platformUrl: url.origin };
       }
       if (method === "account.logout") {
-        if (active.size||distilling.size) return fail("SLOT_BUSY", "请先完成当前回复或 Skill 提炼，再退出登录");
+        if (active.size||distilling.size||wikiBusy.size) return fail("SLOT_BUSY", "请先完成当前回复、知识整理或 Skill 提炼，再退出登录");
         const session = account(); let remoteRevoked = false;
         try { const auth = await refreshSession(new AbortController().signal); await post(auth.base, "/v1/session/logout", {}, new AbortController().signal, auth.token); remoteRevoked = true; } catch { /* 断网仍可退出本机 */ }
         if (session) rmSync(join(dataDir, "accounts", session.employeeId, "session.json"), { force: true });
@@ -754,12 +791,33 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         }
         const snapshot = await (await post(auth.base, "/v1/market", { action: "list" }, new AbortController().signal, auth.token)).json();
         if (method === "market.probe") {
+          if (input.id === 'dreamina') {
+            const { dreaminaService } = await import('./service-runtime.mjs');
+            sameActor(actor);
+            return { ok: false, code: 'LOCAL_EXECUTION_REQUIRED', message: '本机即梦检测需要用户授权。', localExecution: { id: 'dreamina', title: dreaminaService.title, target: dreaminaService.target, builtin: true } };
+          }
+          if (input.id === 'feishu') {
+            const { resolveFeishuCli } = await import('./connector-health.mjs');
+            const target = resolveFeishuCli();
+            sameActor(actor);
+            if (!target) return { ok: false, code: 'NOT_FOUND', message: '未找到 lark-cli。请安装 @larksuite/cli，或设置 CPCLAW_FEISHU_CLI 为程序绝对路径。' };
+            return { ok: false, code: 'LOCAL_EXECUTION_REQUIRED', message: '本机飞书 CLI 检测需要用户授权。', localExecution: { id: 'feishu', title: '飞书 CLI', target, builtin: true } };
+          }
+          if (String(input.id || '').startsWith('channel-')) {
+            sameActor(actor);
+            return { ok: false, code: 'NOT_SUPPORTED', message: '消息渠道仍属后续规划，请使用服务调用类连接器（即梦 / 飞书 CLI）。' };
+          }
           const c = snapshot.connectors.find(c => c.id === input.id); if (!c || !c.enabled) throw Error("连接器不存在或已停用");
-          if (c.type === "CLI") { sameActor(actor); return { ok: false, code: "LOCAL_EXECUTION_REQUIRED", message: "本机 CLI 检测需要用户授权。", localExecution: { title: c.title, target: c.target } }; }
+          if (c.type === "CLI") { sameActor(actor); return { ok: false, code: "LOCAL_EXECUTION_REQUIRED", message: "本机 CLI 检测需要用户授权。", localExecution: { id: c.id, title: c.title, target: c.target } }; }
           const response = await fetch(c.target, { method: "POST", redirect: "error", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "CPclaw", version: "0.0.1" } } }), signal: AbortSignal.timeout(5000) });
           if (!response.ok) throw Error("MCP 检测返回 " + response.status + "，请检查地址或授权");
           const text = (await response.text()).slice(0,65536); const payload = text.split("\n").find(l => l.startsWith("data:")); const value = JSON.parse(payload ? payload.slice(5) : text);
-          if (!value.result?.protocolVersion || !value.result?.serverInfo) throw Error("服务未返回有效 MCP 握手结果"); sameActor(actor); return { ok: true, message: "MCP 握手通过：" + value.result.serverInfo.name + "（尚未授权业务写入）" };
+          if (!value.result?.protocolVersion || !value.result?.serverInfo) throw Error("服务未返回有效 MCP 握手结果");
+          sameActor(actor);
+          const { summarizeMcpProbe } = await import('./connector-health.mjs');
+          const probe = summarizeMcpProbe({ ok: true, serverName: value.result.serverInfo.name });
+          await marketService.dispatch('market.record-probe', actor, { id: c.id, probe });
+          return { ok: true, message: probe.message, probe };
         }
       }
       if (method.startsWith('knowledge.')) {
@@ -778,6 +836,18 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         if(method==='knowledge.entry')return {ok:true,path:knowledge.entry(key,input.id,input.path)};
       }
       if (method === 'project.list') return {ok:true,projects:projects.list(actor)};
+      if (method === 'project.wiki.status') return {ok:true,...await projectWiki.status(projects.folder(actor,input.id))};
+      if (method === 'project.wiki.read') return {ok:true,...await projectWiki.view(projects.folder(actor,input.id),input.path)};
+      if (method === 'project.wiki.cancel') {projects.get(actor,input.id);projectWiki.cancel(input.id);return {ok:true};}
+      if (method === 'project.wiki.run') {
+        const root=projects.folder(actor,input.id);
+        if(wikiBusy.has(input.id))throw Error('此项目正在整理，请等待完成');
+        if(accountBusy)throw Error('账号正在切换，请稍后再整理');
+        wikiBusy.add(input.id);
+        try{return {ok:true,...await projectWiki.run(root,{id:input.id,actor,platform:platform()})};}
+        catch(error){sameActor(actor);emit({channel:'project-wiki',actorId:actor,projectId:input.id,stage:'error',message:error.message});throw error;}
+        finally{wikiBusy.delete(input.id);}
+      }
       if (method === 'project.create') return {ok:true,project:projects.create(actor,input.folder)};
       if (method === 'project.get') return {ok:true,project:{...projects.get(actor,input.id),folder:projects.folder(actor,input.id)}};
       if (method === 'project.assign') {if(active.has(input.chatId))throw Error('请等待回复完成再移动聊天');projects.assign(actor,input.chatId,input.projectId);return {ok:true};}
@@ -872,7 +942,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       }
       finally { if (changing) accountBusy = false; if (diagnosing) diagnosticBusy = false; }
     },
-    stop() { marketService.stop();for (const controller of [...active.values(),...distilling.values()]) controller.abort(); },
+    stop() { projectWiki.stop();marketService.stop();for (const controller of [...active.values(),...distilling.values()]) controller.abort(); },
   };
 }
 

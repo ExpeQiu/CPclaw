@@ -2,8 +2,10 @@ import {createHash,randomUUID} from 'node:crypto';
 import {existsSync,lstatSync,accessSync,constants} from 'node:fs';
 import {join} from 'node:path';
 import {installSkillPackage,readInstalledSkill,readCurrentSkill,activateInstalledSkill} from '@cpclaw/desktop-host';
-import {checkSkillOutput,skillInstruction} from '@cpclaw/contracts';
+import {checkSkill,checkSkillOutput,compareSkillVersions,skillPackage} from '@cpclaw/contracts';
 import {publicServices} from './service-runtime.mjs';
+import {getInternalSkill,isInternalSkillId,listInternalSkills} from './internal-skills.mjs';
+import {mergeConnectorViews,statusLabel} from './connector-health.mjs';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(code,message,extra={})=>({ok:false,code,message,...extra});
 /** 本机安装/运行事实只在宿主保存；平台安装记录仅是账号偏好。 */
@@ -13,14 +15,54 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     CREATE TABLE IF NOT EXISTS skill_bindings(chat TEXT PRIMARY KEY,body TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS skill_run_snapshots(message TEXT PRIMARY KEY,chat TEXT NOT NULL,body TEXT NOT NULL,result TEXT);
     CREATE TABLE IF NOT EXISTS skill_operations(account TEXT NOT NULL,id TEXT NOT NULL,release TEXT NOT NULL,state TEXT NOT NULL,message TEXT NOT NULL,updated INTEGER NOT NULL,PRIMARY KEY(account,id));
+    CREATE TABLE IF NOT EXISTS connector_probes(account TEXT NOT NULL,connector TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(account,connector));
     UPDATE skill_operations SET state='interrupted',message='应用退出时尚未完成，请重新检查后安装' WHERE state NOT IN ('done','failed','cancelled');`);
+  if(!db.prepare('PRAGMA table_info(local_skill_installs)').all().some(c=>c.name==='title'))db.exec(`ALTER TABLE local_skill_installs ADD COLUMN title TEXT NOT NULL DEFAULT ''`);
+  if(!db.prepare('PRAGMA table_info(local_skill_installs)').all().some(c=>c.name==='kind'))db.exec(`ALTER TABLE local_skill_installs ADD COLUMN kind TEXT NOT NULL DEFAULT 'skill'`);
   const installing=new Map(),installControllers=new Map();
   const account=actor=>hash(scope(actor));
   function ensureScope(actor,expected){assertCurrent(actor);if(scope(actor)!==expected)throw Error('平台或账号已变化，请重新打开技能市场');}
   const folder=actor=>{const base=join(dataDir,'skill-accounts'),target=join(base,account(actor));for(const p of [base,target])if(existsSync(p)&&lstatSync(p).isSymbolicLink())throw Error('技能账号安装区不能是链接');return target;};
   const installed=(actor,id)=>db.prepare('SELECT * FROM local_skill_installs WHERE account=? AND release=?').get(account(actor),id);
   function localState(actor,items=[]){return db.prepare('SELECT * FROM local_skill_installs WHERE account=?').all(account(actor)).map(r=>{const check=readInstalledSkill(folder(actor),r.skill,r.version,r.digest);return {...r,valid:check.ok,error:check.ok?'':check.message,current:readCurrentSkill(folder(actor),r.skill).installed?.version===r.version};});}
-  function status(actor,snapshot){const local=localState(actor);return {...snapshot,localInstalls:local,items:snapshot.items.map(item=>({...item,local:local.find(x=>x.release===item.id)??null,hasUpdate:local.some(x=>x.skill===item.skillId&&x.version!==item.version)}))};}
+  /** 成员技能所属的已装场景包标题，供「我的技能」标注。 */
+  function expertPackagesFor(actor,releaseId){
+    const a=account(actor);
+    const titles=[];
+    for(const row of db.prepare('SELECT expert FROM local_skill_members WHERE account=? AND member=?').all(a,releaseId)){
+      const expertRow=db.prepare('SELECT title,skill FROM local_skill_installs WHERE account=? AND release=?').get(a,row.expert);
+      if(expertRow)titles.push(expertRow.title||expertRow.skill);
+    }
+    return [...new Set(titles)];
+  }
+  function localProbes(actor){
+    const rows=db.prepare('SELECT connector,payload FROM connector_probes WHERE account=?').all(account(actor));
+    return Object.fromEntries(rows.map(r=>[r.connector,JSON.parse(r.payload)]));
+  }
+  function saveProbe(actor,connectorId,probe){
+    db.prepare('INSERT INTO connector_probes VALUES(?,?,?) ON CONFLICT(account,connector) DO UPDATE SET payload=excluded.payload').run(account(actor),connectorId,JSON.stringify(probe));
+  }
+  function enrichConnectors(actor,connectors){
+    return mergeConnectorViews(connectors||[],localProbes(actor),{includeChannels:true});
+  }
+  function status(actor,snapshot){
+    const local=localState(actor);
+    return {
+      ...snapshot,
+      localInstalls:local,
+      connectors:enrichConnectors(actor,snapshot.connectors),
+      items:snapshot.items.map(item=>({...item,local:local.find(x=>x.release===item.id)??null,hasUpdate:local.some(x=>x.skill===item.skillId&&x.version!==item.version),expertPackages:expertPackagesFor(actor,item.id)})),
+    };
+  }
+  function internalCatalog(input={}){
+    const items=listInternalSkills({q:input.q,category:input.category,sort:input.sort});
+    const offset=Math.max(0,Number(input.offset)||0),limit=Math.min(100,Math.max(1,Number(input.limit)||30));
+    return {ok:true,items:items.slice(offset,offset+limit).map(x=>{const {body,...rest}=x;return {...rest,checks:checkSkill(x)};}),total:items.length,offset,next:offset+limit<items.length?offset+limit:null,localInstalls:[],role:'employee'};
+  }
+  function internalDetail(id){
+    const item=getInternalSkill(id);if(!item)return fail('NOT_FOUND','没有这个内部技能');
+    return {ok:true,item:{...item,owned:false,checks:checkSkill(item)},versions:[{id:item.id,version:item.version,status:item.status,changelog:item.changelog}],feedback:[]};
+  }
   function operation(actor,id,release,state,message,savedAccount=account(actor)){db.prepare('INSERT INTO skill_operations VALUES(?,?,?,?,?,?) ON CONFLICT(account,id) DO UPDATE SET state=excluded.state,message=excluded.message,updated=excluded.updated').run(savedAccount,id,release,state,message,Date.now());emit({channel:'market',actorId:actor,type:'installation',operationId:id,releaseId:release,state,message});}
   async function install(actor,id){
     const startingScope=scope(actor),installAccount=account(actor);
@@ -41,7 +83,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
         const preferred=await remote(actor,'install',{id},controller.signal);ensureScope(actor,startingScope);if(!preferred.ok)throw Error(preferred.message);
         controller.signal.throwIfAborted();const root=resolved.resources[0];const activated=activateInstalledSkill(folder(actor),root.item.skillId,root.item.version,root.digest);if(!activated.ok)throw Error(activated.message);
         db.exec('BEGIN IMMEDIATE');try{
-          for(const {item,digest} of resolved.resources){db.prepare('INSERT INTO local_skill_installs VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account,release) DO UPDATE SET enabled=1,explicit=MAX(explicit,excluded.explicit),digest=excluded.digest,updated=excluded.updated').run(account(actor),item.id,item.skillId,item.version,digest,1,item.id===id?1:0,Date.now());if(item.id!==id)db.prepare('INSERT OR IGNORE INTO local_skill_members VALUES(?,?,?)').run(account(actor),id,item.id);}
+          for(const {item,digest} of resolved.resources){db.prepare('INSERT INTO local_skill_installs(account,release,skill,version,digest,enabled,explicit,updated,title,kind) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account,release) DO UPDATE SET enabled=1,explicit=MAX(explicit,excluded.explicit),digest=excluded.digest,updated=excluded.updated,title=excluded.title,kind=excluded.kind').run(account(actor),item.id,item.skillId,item.version,digest,1,item.id===id?1:0,Date.now(),item.title||'',item.kind||'skill');if(item.id!==id)db.prepare('INSERT OR IGNORE INTO local_skill_members VALUES(?,?,?)').run(account(actor),id,item.id);}
           db.exec('COMMIT');
         }catch(e){db.exec('ROLLBACK');throw e;}
         report('done','固定版本已安装，执行前将检查所需条件');return {ok:true,operationId,installed:resolved.resources.map(r=>r.item.id)};
@@ -51,24 +93,73 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
   function binding(chatId){return JSON.parse(db.prepare('SELECT body FROM skill_bindings WHERE chat=?').get(chatId)?.body??'null');}
   function readiness(resources,snapshot){
     const services=publicServices(snapshot.connectors),checks=[];
+    const probes=Object.fromEntries((snapshot.connectors||[]).filter(c=>c.probe).map(c=>[c.id,c.probe]));
     for(const {item} of resources){
       if(!item.platforms.includes(process.platform+'-'+process.arch))checks.push({title:item.title,state:'incompatible',required:true,message:'当前平台不兼容'});
       for(const dep of item.dependencies){
         if(dep.type==='internal'){checks.push({title:dep.title,state:'available',required:dep.required,message:'使用现有宿主能力；材料和访问权在本次任务检查'});continue;}
         const matches=services.filter(s=>s.type===dep.type&&(s.id===dep.service||s.title===dep.service||s.title===dep.title));
-        let state='needs_check',message='将在开始执行时发现工具并检查账号';
+        let state='needs_check',message='已配置，开始时仍需实际发现工具并检查账号';
         if(!matches.length){state='missing';message='请先在连接器中配置 '+dep.title;}
         else if(matches.length>1){state='ambiguous';message='找到多个服务，请使用明确的服务标识';}
-        else if(matches[0].type==='CLI'){try{accessSync(matches[0].target,constants.X_OK);}catch{state='missing';message='未找到可执行程序，请检查安装和程序路径';}}
+        else if(matches[0].type==='CLI'){
+          try{accessSync(matches[0].target,constants.X_OK);}catch{state='missing';message='未找到可执行程序，请检查安装和程序路径';}
+          const probe=probes[matches[0].id]||matches[0].probe;
+          if(state!=='missing'&&probe){
+            if(probe.layer==='auth_required'){state='needs_check';message='程序可用，但账号尚未登录';}
+            else if(probe.layer==='binary_missing'||probe.layer==='failed'){state='missing';message=probe.message||'连接检测未通过';}
+            else if(['binary_ok','handshake_ok','auth_ok','ready'].includes(probe.layer)){state='needs_check';message='最近检测：'+statusLabel(probe)+'；任务开始时仍会重新发现';}
+          }
+        }
         checks.push({...dep,state,message,instanceId:matches[0]?.id});
       }
     }
     const blocked=checks.some(c=>c.required&&['missing','ambiguous','incompatible'].includes(c.state));
     return {checks,canUse:!blocked,ready:!blocked&&!checks.some(c=>c.required&&c.state==='needs_check'),checkedAt:Date.now()};
   }
+  /** 场景包安装后的分态：制品 / 连接器 / 任务。 */
+  async function expertReadiness(actor,id){
+    const resolved=await remote(actor,'resolve',{id});if(!resolved.ok)return resolved;
+    if(resolved.item.kind!=='expert')return fail('CONFIG_INVALID','仅场景专家支持就绪检查');
+    const snapshot=await remote(actor,'list',{summary:true});
+    const local=localState(actor);
+    const members=resolved.resources.filter(r=>r.item.id!==resolved.item.id).map(({item})=>{
+      const row=local.find(l=>l.release===item.id);
+      return {id:item.id,title:item.title,version:item.version,state:row?.valid?'installed':row?'corrupt':'pending',message:row?.valid?'本机已装':row?'本机制品需修复':'待安装'};
+    });
+    const packageRow=local.find(l=>l.release===id);
+    const packageInstalled=Boolean(packageRow?.valid)&&members.every(m=>m.state==='installed');
+    const ready=readiness(resolved.resources,status(actor,snapshot));
+    const connectors=ready.checks.filter(c=>c.type!=='internal');
+    return {
+      ok:true,
+      package:{installed:packageInstalled,members},
+      connectors:{ready:ready.ready,canUse:ready.canUse,checks:connectors},
+      task:{completed:false,message:'任务完成以实际产物和服务终态为准，与安装/连接分开展示'},
+      message:packageInstalled?(ready.canUse?'场景包已安装；连接器已配置，任务开始时仍会实际发现':'场景包已安装，但连接器尚未就绪'):'场景包成员尚未全部安装成功',
+    };
+  }
+  async function useInternal(actor,input){
+    if(isActive())return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
+    const item=getInternalSkill(input.id);if(!item)return fail('NOT_FOUND','没有这个内部技能');
+    const values=input.values??{};if(!values||typeof values!=='object'||Array.isArray(values)||Object.entries(values).some(([k,v])=>typeof v!=='string'||v.length>8000))return fail('INPUT_INVALID','技能输入无效');
+    const missing=item.inputs.filter(p=>p.required&&!String(values[p.name]??'').trim());if(missing.length)return fail('INPUT_REQUIRED','请补充：'+missing.map(p=>p.label).join('、'),{missing});
+    if(Object.values(values).join('\n').length>6000)return fail('INPUT_INVALID','技能输入合计超过 6000 字，请精简');
+    if(input.chatId&&!owns(actor,input.chatId))return fail('NOT_FOUND','无权访问当前聊天');
+    const storageSkill='internal-'+item.skillId.replace(/[^a-zA-Z0-9_-]/g,'_');
+    const packageBody=skillPackage(item);
+    const packed=installSkillPackage({dataDir:folder(actor),skillId:storageSkill,version:item.version,expectedSha256:item.digest,packageBody,platforms:item.platforms});if(!packed.ok)return packed;
+    const checked=readInstalledSkill(folder(actor),storageSkill,item.version,item.digest);if(!checked.ok)return fail('INSTALL_CORRUPT','内部技能文件需重新校验：'+checked.message);
+    const chatId=input.chatId||createChat(actor,item.title,input.projectId);
+    const value={account:account(actor),id:item.id,skillId:item.skillId,title:item.title,version:item.version,resources:[{id:item.id,skillId:item.skillId,storageSkill,version:item.version,digest:item.digest,title:item.title,revision:item.revision}],values,trial:false,taskMember:null,created:Date.now(),internal:true};
+    db.prepare('INSERT INTO skill_bindings VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET body=excluded.body').run(chatId,JSON.stringify(value));
+    db.prepare('INSERT INTO chat_skills VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET skill=excluded.skill').run(chatId,item.id);
+    return {ok:true,chatId,binding:value,readiness:{checks:[],canUse:true,ready:true,checkedAt:Date.now()},prompt:item.inputs.map(p=>p.label+'：'+(values[p.name]??'')).join('\n')};
+  }
   async function use(actor,input,trial=false,migrating=false){
     const startingScope=scope(actor);
     if(!migrating&&isActive())return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
+    if(isInternalSkillId(input.id))return useInternal(actor,input);
     const resolved=await remote(actor,'resolve',{id:input.id,trial});ensureScope(actor,startingScope);if(!resolved.ok)return resolved;
     const taskMember=resolved.item.kind==='expert'?resolved.resources.find(r=>r.item.id===input.taskMember&&r.item.id!==resolved.item.id):null;
     if(resolved.item.kind==='expert'&&resolved.item.inputs.length&&!taskMember)return fail('INPUT_REQUIRED','请选择本次专家任务');
@@ -77,7 +168,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     const values=input.values??{};if(!values||typeof values!=='object'||Array.isArray(values)||Object.entries(values).some(([k,v])=>typeof v!=='string'||v.length>8000))return fail('INPUT_INVALID','技能输入无效');
     const missing=inputFields.filter(p=>p.required&&!String(values[p.name]??'').trim());if(missing.length)return fail('INPUT_REQUIRED','请补充：'+missing.map(p=>p.label).join('、'),{missing});
     if(Object.values(values).join('\n').length>6000)return fail('INPUT_INVALID','技能输入合计超过 6000 字，请精简');
-    const snapshot=await remote(actor,'list',{summary:true});ensureScope(actor,startingScope);
+    const snapshot=status(actor,await remote(actor,'list',{summary:true}));ensureScope(actor,startingScope);
     const ready=readiness(resolved.resources,snapshot);if(!ready.canUse)return fail('DEPENDENCY_MISSING','必需依赖尚未就绪',{readiness:ready});
     if(input.chatId&&!owns(actor,input.chatId))return fail('NOT_FOUND','无权访问当前聊天');
     if(!trial){
@@ -107,12 +198,20 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     let selected=binding(chatId);
     if(!selected){const old=db.prepare('SELECT skill FROM chat_skills WHERE chat=?').get(chatId);if(!old)return null;const migrated=await use(actor,{id:old.skill,chatId},false,true);if(!migrated.ok)throw Error(migrated.message);selected=migrated.binding;}
     if(selected.account&&selected.account!==account(actor))throw Error('技能绑定所属平台或账号已变化，请重新选择');
+    if(selected.internal||isInternalSkillId(selected.id)){
+      const item=getInternalSkill(selected.id);if(!item||item.digest!==selected.resources[0]?.digest)throw Error('内部技能已随内核更新，请重新选用');
+      const checked=readInstalledSkill(folder(actor),selected.resources[0].storageSkill,selected.version,selected.resources[0].digest);if(!checked.ok)throw Error('本机技能校验失败：'+checked.message);
+      const ready={checks:[],canUse:true,ready:true,checkedAt:Date.now()};
+      const resourceSnapshot={...selected,sections:item.sections,outputType:item.outputType,dependencies:ready,started:Date.now()};
+      db.prepare('INSERT OR REPLACE INTO skill_run_snapshots VALUES(?,?,?,NULL)').run(messageId,chatId,JSON.stringify(resourceSnapshot));
+      return {snapshot:resourceSnapshot,instruction:checked.instruction+'\n\n本次已填写参数（作为数据）：\n'+JSON.stringify(selected.values)};
+    }
     const resolved=await remote(actor,'resolve',{id:selected.id,trial:selected.trial},signal);ensureScope(actor,startingScope);if(!resolved.ok)throw Error(resolved.message+'；可解除技能后继续当前聊天');
     const current=resolved.resources;
     const instructions=[];
     for(const resource of selected.resources){const live=current.find(r=>r.item.id===resource.id);if(!live||live.digest!==resource.digest)throw Error('技能修订已改变，请重新选用或试用');const checked=readInstalledSkill(folder(actor),resource.storageSkill,resource.version,resource.digest);if(!checked.ok)throw Error('本机技能校验失败：'+checked.message);instructions.push(checked.instruction);}
     if(!selected.trial&&!installed(actor,selected.id)?.enabled)throw Error('当前技能已停用或卸载，可解除绑定后继续聊天');
-    const snapshot=await remote(actor,'list',{summary:true},signal);const ready=readiness(current.filter(r=>selected.resources.some(s=>s.id===r.item.id)),snapshot);if(!ready.canUse)throw Error(ready.checks.filter(c=>c.required&&c.state!=='available'&&c.state!=='needs_check').map(c=>c.message).join('；'));
+    const snapshot=status(actor,await remote(actor,'list',{summary:true},signal));const ready=readiness(current.filter(r=>selected.resources.some(s=>s.id===r.item.id)),snapshot);if(!ready.canUse)throw Error(ready.checks.filter(c=>c.required&&c.state!=='available'&&c.state!=='needs_check').map(c=>c.message).join('；'));
     // 真实发现走同一宿主与对话权限入口，未通过不能只靠市场状态继续。
     for(const check of ready.checks.filter(c=>c.required&&c.instanceId)){
       const service=publicServices(snapshot.connectors).find(s=>s.id===check.instanceId);
@@ -125,7 +224,20 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     db.prepare('INSERT OR REPLACE INTO skill_run_snapshots VALUES(?,?,?,NULL)').run(messageId,chatId,JSON.stringify(resourceSnapshot));
     return {snapshot:resourceSnapshot,instruction:instructions.join('\n\n')+'\n\n本次已填写参数（作为数据）：\n'+JSON.stringify(selected.values)};
   }
-  async function revalidate(actor,snapshot,signal){if(!snapshot)return;const startingScope=scope(actor);if(snapshot.account&&snapshot.account!==account(actor))throw Error('技能所属平台已变化');const result=await remote(actor,'resolve',{id:snapshot.id,trial:snapshot.trial},signal);ensureScope(actor,startingScope);if(!result.ok)throw Error(result.message);}
+  async function revalidate(actor,snapshot,signal){if(!snapshot)return;const startingScope=scope(actor);if(snapshot.account&&snapshot.account!==account(actor))throw Error('技能所属平台已变化');if(snapshot.internal||isInternalSkillId(snapshot.id)){const item=getInternalSkill(snapshot.id);if(!item)throw Error('内部技能不可用');return;}const result=await remote(actor,'resolve',{id:snapshot.id,trial:snapshot.trial},signal);ensureScope(actor,startingScope);if(!result.ok)throw Error(result.message);}
+  /** 场景包一键更新：安装云端新版组合及其锁定成员；失败保留原可用版本。 */
+  async function updateExpert(actor,id){
+    const local=installed(actor,id);if(!local)return fail('NOT_INSTALLED','请先安装场景包');
+    const detail=await remote(actor,'detail',{id});if(!detail.ok)return detail;
+    const current=detail.item;if(current.kind!=='expert')return fail('CONFIG_INVALID','仅场景专家支持一键更新');
+    const listed=await remote(actor,'list',{summary:true});if(!listed.ok)return listed;
+    const newer=[...listed.items].filter(x=>x.skillId===current.skillId&&x.status==='published'&&compareSkillVersions(x.version,local.version)>0).sort((a,b)=>compareSkillVersions(b.version,a.version))[0];
+    const targetId=newer?.id??id;
+    const membersBefore=db.prepare('SELECT member FROM local_skill_members WHERE account=? AND expert=?').all(account(actor),id).map(r=>r.member);
+    const result=await install(actor,targetId);
+    if(!result.ok)return result;
+    return {ok:true,message:newer?'场景包已更新到 v'+newer.version+'，成员按锁定版本同步':'已按当前场景包同步成员',updatedTo:targetId,previousMembers:membersBefore,installed:result.installed};
+  }
   function recordResult(messageId,{content,state,mode,artifact,artifactError,records}){
     const row=db.prepare('SELECT body FROM skill_run_snapshots WHERE message=?').get(messageId);if(!row)return null;
     const snap=JSON.parse(row.body);let result=checkSkillOutput(snap.sections,content);
@@ -143,7 +255,20 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
       db.prepare('DELETE FROM skill_bindings WHERE chat=?').run(input.chatId);db.prepare('DELETE FROM chat_skills WHERE chat=?').run(input.chatId);return {ok:true};
     }
     if(method==='market.check'){
-      const resolved=await remote(actor,'resolve',{id:input.id,trial:input.trial});if(!resolved.ok)return resolved;const snapshot=await remote(actor,'list',{summary:true});return {ok:true,readiness:readiness(resolved.resources,snapshot)};
+      if(isInternalSkillId(input.id)){const item=getInternalSkill(input.id);if(!item)return fail('NOT_FOUND','没有这个内部技能');return {ok:true,readiness:{checks:[],canUse:true,ready:true,checkedAt:Date.now()}};}
+      const resolved=await remote(actor,'resolve',{id:input.id,trial:input.trial});if(!resolved.ok)return resolved;
+      if(resolved.item.kind==='expert')return expertReadiness(actor,input.id);
+      const snapshot=status(actor,await remote(actor,'list',{summary:true}));return {ok:true,readiness:readiness(resolved.resources,snapshot)};
+    }
+    if(method==='market.record-probe'){
+      if(typeof input.id!=='string'||!input.id||!input.probe||typeof input.probe!=='object')return fail('CONFIG_INVALID','探测结果无效');
+      const probe=input.probe;saveProbe(actor,input.id,probe);
+      if(input.id!=='dreamina'&&input.id!=='feishu'&&!String(input.id).startsWith('channel-')){
+        const statusText=statusLabel(probe);
+        const saved=await remote(actor,'connector-probe-result',{id:input.id,status:statusText,probe});
+        if(!saved.ok)return saved;
+      }
+      return {ok:true,message:probe.message||statusLabel(probe),probe,connector:input.id};
     }
     if(method==='market.operations')return {ok:true,operations:db.prepare('SELECT id,release,state,message,updated FROM skill_operations WHERE account=? ORDER BY updated DESC LIMIT 30').all(account(actor))};
     if(method==='market.trials'){
@@ -157,7 +282,16 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
       const report=reports.find(r=>{const s=JSON.parse(r.body);return s.id===params.id&&s.account===account(actor);});
       if(report){const snap=JSON.parse(report.body),result=JSON.parse(report.result);params.evidence={digest:snap.resources[0].digest,status:result.status,mode:result.mode,runRef:report.message,checkedAt:result.checkedAt};}
     }
-    if(action==='catalog'&&params.scope==='mine')params.preferredIds=localState(actor).filter(r=>r.current).map(r=>r.release);
+    if(action==='catalog'&&params.scope==='internal')return {...internalCatalog(params),localInstalls:localState(actor)};
+    if(action==='detail'&&isInternalSkillId(params.id))return internalDetail(params.id);
+    if(action==='update-expert')return updateExpert(actor,params.id);
+    if(action==='catalog'&&params.scope==='mine'){
+      // 「我的技能」仅本机已装的非内核技能；preferredIds 用于同技能多版本中选中本机当前版。
+      const locals=localState(actor).filter(r=>r.valid&&!isInternalSkillId(r.release)&&!String(r.skill).startsWith('kernel:'));
+      params.localReleaseIds=locals.map(r=>r.release);
+      params.preferredIds=locals.filter(r=>r.current).map(r=>r.release);
+      if(!params.kind)params.kind='skill';
+    }
     if(action==='install')return install(actor,params.id);
     if(action==='uninstall'){
       const result=await remote(actor,action,params);if(!result.ok)return result;const a=account(actor);

@@ -16,6 +16,37 @@ test("coalesceSaved：已写出空串不回落", () => {
   assert.equal(coalesceSaved(undefined, "/env/path"), "/env/path");
 });
 
+test("包内内核时不回填开发检出路径，无效路径也可保存", () => {
+  const root = mkdtempSync(join(tmpdir(), "cpclaw-settings-bundle-"));
+  const desktopDir = join(root, "apps", "desktop");
+  const harnessDir = join(root, "apps", "harness");
+  const dataDir = join(root, "data");
+  mkdirSync(desktopDir, { recursive: true });
+  mkdirSync(harnessDir, { recursive: true });
+  mkdirSync(dataDir);
+  writeFileSync(join(harnessDir, "manifest.json"), JSON.stringify({ version: "0.1.6-alpha.2" }));
+
+  const view = getDesktopSettingsView(dataDir, desktopDir, {
+    appVersion: "0.0.31",
+    env: { CPCLAW_REPORT_ENGINE: "harness" },
+  });
+  assert.equal(view.ok, true);
+  assert.equal(view.harnessRoot, "");
+  assert.equal(view.bundled, true);
+  assert.equal(view.kernel.source, "bundle");
+  assert.equal(view.kernel.ready, true);
+
+  const saved = saveDesktopSettings(dataDir, desktopDir, {
+    reportEngine: "harness",
+    harnessRoot: "/path/to/deepseek-harness",
+    reportModelMode: "real",
+    appVersion: "0.0.31",
+  }, { env: {} });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.harnessRoot, "/path/to/deepseek-harness");
+  assert.equal(saved.kernel.source, "bundle");
+});
+
 test("首次无文件时视图回落 env，不写出设置文件", () => {
   const root = mkdtempSync(join(tmpdir(), "cpclaw-settings-"));
   const desktopDir = join(root, "desktop");

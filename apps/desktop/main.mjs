@@ -136,7 +136,14 @@ ipcMain.handle("workspace.call", async (_event, call) => {
   if (['account.login', 'account.logout'].includes(call.method)) extensionHost.clearContext();
   if (['chat.history', 'chat.send', 'chat.diagnose', 'chat.diagnoseRepair'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
   const result = await workspaceClient.request({ method: call.method, input: call.input, actorId });
-  if (call.method === 'market.probe' && result.code === 'LOCAL_EXECUTION_REQUIRED') return extensionHost.probeConnector(result.localExecution, actorId);
+  if (call.method === 'market.probe' && result.code === 'LOCAL_EXECUTION_REQUIRED') {
+    const probed = await extensionHost.probeConnector(result.localExecution, actorId);
+    if (probed?.probe && probed.connectorId) {
+      const recorded = await workspaceClient.request({ method: 'market.record-probe', input: { id: probed.connectorId, probe: probed.probe }, actorId });
+      return { ...probed, ...(recorded?.ok ? { recorded: true } : { recorded: false, recordMessage: recorded?.message }) };
+    }
+    return probed;
+  }
   if (call.method === 'chat.create' && result.ok) extensionHost.setContext(actorId, result.chatId);
   if (call.method === 'chat.history' && !result.ok) extensionHost.clearContext();
   return result;

@@ -36,6 +36,12 @@ test('市场：空目录、组织隔离、审核、撤回、持久化与真实�
   assert.equal((await fetch(base+'/v1/market',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
   assert.ok((await request('account.login',{platformUrl:base,employeeId:'employee-a',password:'fixture-employee-a'})).ok);
   const page=await request('market.page');assert.ok(page.ok);assert.match(page.html,/技能创作/);
+  assert.match(page.html,/内部技能/);
+  assert.match(page.html,/技能市场/);
+  assert.match(page.html,/我的技能/);
+  assert.doesNotMatch(page.html,/内置技能/);
+  assert.doesNotMatch(page.html,/技能广场/);
+  assert.doesNotMatch(page.html,/我的技能库/);
   assert.match(page.html,/async function load\(fn\)/);
   assert.match(page.html,/button\(label,\(\)=>switchSection\(key\),false,false\)/);
   assert.match(page.html,/正在加载…/);

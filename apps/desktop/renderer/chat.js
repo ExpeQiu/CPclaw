@@ -314,7 +314,7 @@ async function sendChat(retry = false) {
   }
 }
 window.cpclaw.onChatEvent(event => {
-  if (event.actorId !== chatAccount || event.channel==='market') return;
+  if (event.actorId !== chatAccount || event.channel==='market' || event.channel==='project-wiki') return;
   if (event.type === "start") runningChatId = event.chatId;
   if (event.type === "finish") runningChatId = "";
   if (currentChatId !== event.chatId) { renderChatList(); renderComposer(); return; }
@@ -349,7 +349,7 @@ async function loadAccount() {
   window.clearConversationPermission?.();
   const result = await chatCall("account.status");
   if (!result.ok) throw new Error(result.message);
-  if(chatAccount!==result.employeeId){window.clearMarket?.();window.clearTaskIssues?.();}
+  if(chatAccount!==result.employeeId){window.clearMarket?.();window.clearTaskIssues?.();window.clearProjectWiki?.();}
   chatAccount = result.employeeId;
   if(typeof clearKnowledge === "function")clearKnowledge();
   if(typeof refreshQuickRail==="function")refreshQuickRail();

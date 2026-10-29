@@ -59,6 +59,26 @@ test('旧企业 API 和新市场共享发布模型，发布后修订产生下一
  const pending=f.call('admin','catalog',{scope:'review'}).items[0];assert.equal(pending.version,'1.0.1');assert.ok(f.call('admin','review',{id:pending.id,decision:'approve'}).ok);assert.equal(f.app.listAvailableSkills(f.tokens['employee-a']).skills.length,2);
 }finally{f.close();}});
 
+test('连接器探测结果可落盘；改目标后状态重置；可查询依赖技能',()=>{const f=fixture();try{
+ const saved=f.call('employee-a','connector-save',{title:'演示 CLI',type:'CLI',target:process.execPath});assert.ok(saved.ok);assert.equal(saved.connector.status,'未检测');
+ const probed=f.call('employee-a','connector-probe-result',{id:saved.connector.id,status:'程序可用 · 刚才',probe:{layer:'binary_ok',message:'版本通过',checkedAt:Date.now(),capabilities:['--version']}});assert.ok(probed.ok);assert.equal(probed.connector.probe.layer,'binary_ok');
+ const keep=f.call('employee-a','connector-save',{id:saved.connector.id,title:'演示 CLI',type:'CLI',target:process.execPath,enabled:true});assert.ok(keep.ok);assert.equal(keep.connector.probe.layer,'binary_ok');
+ const reset=f.call('employee-a','connector-save',{id:saved.connector.id,title:'演示 CLI',type:'CLI',target:'/usr/bin/true',enabled:true});assert.ok(reset.ok);assert.equal(reset.connector.status,'未检测');assert.equal(reset.connector.probe,null);
+ const skill=create(f,'employee-a',{dependencies:[{service:saved.connector.id,title:'演示 CLI',required:true,type:'CLI'}]});publish(f,skill);
+ assert.equal(f.call('employee-a','connector-dependents',{id:saved.connector.id}).total,1);
+}finally{f.close();}});
+
+test('我的技能仅统计安装偏好或本机制品，不含个人可用；内部目录由桌面提供',()=>{const f=fixture();try{
+ const x=create(f);assert.ok(f.call('employee-a','personal',{id:x.id}).ok);
+ assert.equal(f.call('employee-a','catalog',{scope:'mine'}).total,0,'个人可用不进我的技能');
+ assert.ok(f.call('employee-a','install',{id:x.id}).ok);
+ assert.equal(f.call('employee-a','catalog',{scope:'mine'}).total,1);
+ assert.equal(f.call('employee-a','catalog',{scope:'mine',localReleaseIds:[]}).total,0,'桌面无本机安装时为空');
+ assert.equal(f.call('employee-a','catalog',{scope:'mine',localReleaseIds:[x.id]}).total,1);
+ assert.equal(f.call('employee-a','catalog',{scope:'internal'}).total,0);
+ publish(f,x);assert.ok(f.call('employee-a','catalog',{scope:'market'}).items.some(i=>i.id===x.id));
+}finally{f.close();}});
+
 test('上传的 SKILL.md 入口解析、文件清单和上下文限制不能被绕过',()=>{const f=fixture();try{
  const x=create(f,'employee-a',{source:'upload',body:JSON.stringify({files:[{path:'demo/SKILL.md',body:'# 实际入口\n按材料工作。'},{path:'demo/references/example.md',body:'参考材料'}]})});assert.ok(f.call('employee-a','personal',{id:x.id}).ok);const resolved=f.call('employee-a','resolve',{id:x.id});assert.ok(resolved.ok);assert.equal(skillInstruction(resolved.item),'# 实际入口\n按材料工作。');assert.equal(JSON.parse(resolved.resources[0].packageBody).files.length,2);
  assert.equal(f.call('employee-a','save',{...draft,source:'upload',body:JSON.stringify({files:[{path:'../SKILL.md',body:'bad'}]})}).ok,false);

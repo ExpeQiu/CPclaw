@@ -281,6 +281,96 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
     if (typeof connector?.target !== 'string' || !isAbsolute(connector.target)) return { ok: false, message: '本机 CLI 检测需要程序的完整绝对路径。' };
     executionPending = true;
     try {
+      if (connector.builtin === true && connector.id === 'feishu') {
+        const { summarizeFeishuAuth } = await import('./connector-health.mjs');
+        if (!existsSync(connector.target)) {
+          const probe = summarizeFeishuAuth({ ok: false, message: '未找到 lark-cli' });
+          return { ok: false, message: probe.message, probe, connectorId: 'feishu' };
+        }
+        const getPlan = () => {
+          const executable = realpathSync(connector.target), cwd = homedir();
+          const description = {
+            app: '飞书 CLI',
+            purpose: '检测飞书 CLI 版本与 auth status（只读，不发起登录）',
+            cwd,
+            commands: [
+              [executable, '--version'],
+              [executable, 'auth', 'status', '--json'],
+            ],
+            readOnly: true,
+          };
+          return { ...description, fingerprint: createHash('sha256').update(JSON.stringify(description)).update(readFileSync(executable)).digest('hex') };
+        };
+        connectorAuthorization = createCommandAuthorization({
+          getContext: () => ({ actorId: getActor(), chatId: '' }), getPlan, requestApproval,
+          execute: async ({ beforeExecute, signal }) => {
+            beforeExecute();
+            const plan = getPlan();
+            const { stdout: versionOut } = await promisify(execFile)(plan.commands[0][0], ['--version'], { shell: false, cwd: plan.cwd, signal, timeout: 8000, maxBuffer: 4096, windowsHide: true });
+            let status;
+            try {
+              const { stdout } = await promisify(execFile)(plan.commands[0][0], ['auth', 'status', '--json'], { shell: false, cwd: plan.cwd, signal, timeout: 12000, maxBuffer: 256 * 1024, windowsHide: true });
+              status = JSON.parse(stdout);
+            } catch (error) {
+              const probe = summarizeFeishuAuth({ ok: false, version: versionOut.trim(), message: error instanceof Error ? error.message : 'auth status 失败' });
+              return { ok: false, message: probe.message, probe, connectorId: 'feishu' };
+            }
+            const probe = summarizeFeishuAuth({ ok: true, version: versionOut.trim(), status });
+            return { ok: probe.layer === 'ready' || probe.layer === 'auth_ok', message: probe.message, probe, connectorId: 'feishu' };
+          },
+        });
+        return await connectorAuthorization.run();
+      }
+      if (connector.builtin === true && connector.id === 'dreamina') {
+        const { summarizeDreaminaDiscover } = await import('./connector-health.mjs');
+        if (!existsSync(connector.target)) {
+          const probe = summarizeDreaminaDiscover({ ok: false, message: '未找到即梦 CLI，请先完成获准安装。' });
+          return { ok: false, message: probe.message, probe, connectorId: 'dreamina' };
+        }
+        const getPlan = () => {
+          const executable = realpathSync(connector.target), cwd = homedir();
+          const description = {
+            app: '即梦画布',
+            purpose: '检测即梦程序、登录状态与能力目录（只读）',
+            cwd,
+            commands: [
+              [executable, '--non-interactive', '--format', 'json', 'version'],
+              [executable, '--non-interactive', '--format', 'json', 'schema'],
+              [executable, '--non-interactive', '--format', 'json', 'auth', 'status'],
+            ],
+            readOnly: true,
+          };
+          return { ...description, fingerprint: createHash('sha256').update(JSON.stringify(description)).update(readFileSync(executable)).digest('hex') };
+        };
+        connectorAuthorization = createCommandAuthorization({
+          getContext: () => ({ actorId: getActor(), chatId: '' }), getPlan, requestApproval,
+          execute: async ({ beforeExecute, signal }) => {
+            beforeExecute();
+            const plan = getPlan();
+            const run = async (args) => {
+              const { stdout } = await promisify(execFile)(plan.commands[0][0], ['--non-interactive', '--format', 'json', ...args], { shell: false, cwd: plan.cwd, signal, timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true });
+              try { return JSON.parse(stdout); } catch { return { ok: false, output: stdout.slice(0, 2000) }; }
+            };
+            const version = await run(['version']);
+            const schema = await run(['schema']);
+            const auth = await run(['auth', 'status']);
+            const commands = [];
+            function visit(c, path) {
+              const next = [...path, c.name];
+              commands.push({ command: next });
+              for (const child of c.subcommands ?? []) visit(child, next);
+            }
+            for (const c of schema?.data?.subcommands ?? []) visit(c, []);
+            const result = (!schema.ok || !auth.ok || !auth.data?.loggedIn)
+              ? { ok: false, version, auth, commands: commands.filter((c) => c.command[0] === 'auth'), message: '请先完成即梦登录（拓展面板或对话中授权），再重新检测。' }
+              : { ok: true, version, auth, commands, message: '即梦程序与登录检查通过' };
+            const probe = summarizeDreaminaDiscover(result);
+            return { ok: result.ok, message: probe.message, probe, connectorId: 'dreamina' };
+          },
+        });
+        return await connectorAuthorization.run();
+      }
+      const { summarizeCliVersionProbe } = await import('./connector-health.mjs');
       const getPlan = () => {
         const executable = realpathSync(connector.target), cwd = homedir();
         const description = { app: connector.title || 'CLI 连接器', purpose: '检测本机连接器程序版本', cwd, commands: [[executable, '--version']], readOnly: false };
@@ -292,11 +382,16 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
           beforeExecute();
           const plan = getPlan();
           const { stdout } = await promisify(execFile)(plan.commands[0][0], ['--version'], { shell: false, cwd: plan.cwd, signal, timeout: 5000, maxBuffer: 4096, windowsHide: true });
-          return { ok: true, message: '程序版本检测通过：' + stdout.trim().slice(0, 200) + '（未验证业务操作）' };
+          const probe = summarizeCliVersionProbe({ ok: true, stdout });
+          return { ok: true, message: probe.message, probe, connectorId: connector.id };
         },
       });
       return await connectorAuthorization.run();
-    } catch { return { ok: false, message: '连接器程序检查失败，请检查路径与安装。' }; }
+    } catch (error) {
+      const { summarizeCliVersionProbe } = await import('./connector-health.mjs');
+      const probe = summarizeCliVersionProbe({ ok: false, message: error instanceof Error ? error.message : '连接器程序检查失败，请检查路径与安装。' });
+      return { ok: false, message: probe.message, probe, connectorId: connector.id || 'dreamina' };
+    }
     finally { connectorAuthorization = undefined; executionPending = false; }
   }
   return { setContext, probeConnector, executeService, clearContext: () => { if(context.actorId)permissions.clearActor(context.actorId);context = { actorId: null, chatId: '' }; serviceController?.abort(); runtime.clear(); authorization.revoke(); connectorAuthorization?.revoke(); } };

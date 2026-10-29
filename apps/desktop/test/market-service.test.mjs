@@ -85,6 +85,35 @@ test('共享提交附带当前修订的宿主试用摘要，Mock 不冒充真实
  const detail=f.market('admin','detail',{id:x.id});assert.equal(detail.submissionEvidence.mode,'mock');assert.equal(detail.submissionEvidence.digest,x.digest);assert.equal(detail.submissionEvidence.source,'author-host-report');assert.equal(detail.submissionEvidence.status,'passed');
 }finally{f.close();}});
 
+test('连接器列表含内置即梦；探测结果落盘；场景包就绪分态',async t=>{const f=setup(t);try{
+ const listed=await f.call('market.call',{action:'list'});assert.ok(listed.connectors.some(c=>c.id==='dreamina'&&c.builtin));
+ assert.ok(listed.connectors.some(c=>c.id==='feishu'&&c.kind==='service'));
+ assert.ok(listed.connectors.some(c=>c.id==='channel-feishu-bot'&&c.planned));
+ const feishuProbe=await f.call('market.record-probe',{id:'feishu',probe:{layer:'auth_required',message:'需登录',checkedAt:Date.now(),capabilities:['auth status']}});assert.ok(feishuProbe.ok,feishuProbe.message);
+ const cli=await f.call('market.call',{action:'connector-save',input:{title:'本机 Node',type:'CLI',target:process.execPath}});assert.ok(cli.ok);
+ const recorded=await f.call('market.record-probe',{id:cli.connector.id,probe:{layer:'binary_ok',message:'版本通过',checkedAt:Date.now(),capabilities:['--version']}});assert.ok(recorded.ok,recorded.message);
+ const again=await f.call('market.call',{action:'list'});assert.equal(again.connectors.find(c=>c.id===cli.connector.id).probe.layer,'binary_ok');
+ const member=f.save({title:'依赖成员',dependencies:[{service:'dreamina',title:'即梦画布',required:true,type:'CLI'}]});f.publish(member);
+ const expert=f.market('admin','save',{...baseDraft,title:'即梦场景包',kind:'expert',members:[member.id]});assert.ok(expert.ok);f.market('admin','submit',{id:expert.item.id});f.market('admin','review',{id:expert.item.id,decision:'approve'});
+ assert.ok((await f.call('market.call',{action:'install',input:{id:expert.item.id}})).ok);
+ const ready=await f.call('market.check',{id:expert.item.id});assert.ok(ready.ok,ready.message);assert.equal(ready.package.installed,true);assert.ok(ready.connectors);assert.equal(ready.task.completed,false);
+}finally{f.close();}});
+
+test('内部技能可直接选用且不计入我的技能；场景成员标注所属场景包',async t=>{const f=setup(t);try{
+ const internal=await f.call('market.call',{action:'catalog',input:{scope:'internal'}});assert.ok(internal.ok);assert.ok(internal.total>=2);assert.ok(internal.items.every(x=>x.source==='internal'));
+ const skill=internal.items[0];const used=await f.call('market.use',{id:skill.id,values:{goal:'澄清试点目标'}});assert.ok(used.ok,used.message);
+ assert.equal((await f.call('chat.send',{chatId:used.chatId,requestId:'internal-skill',text:'开始'})).state,'done');
+ assert.match(f.modelRequests.at(-1).messages.at(-1).content,/澄清任务与材料|核对产物与回执/);
+ const mine=await f.call('market.call',{action:'catalog',input:{scope:'mine'}});assert.ok(mine.ok);assert.equal(mine.total,0);assert.ok(!mine.items.some(x=>x.id===skill.id));
+ const member=f.save({title:'场景成员甲'});f.publish(member);
+ const expert=f.market('admin','save',{...baseDraft,title:'办公助手包',kind:'expert',members:[member.id]});assert.ok(expert.ok);f.market('admin','submit',{id:expert.item.id});f.market('admin','review',{id:expert.item.id,decision:'approve'});
+ assert.ok((await f.call('market.call',{action:'install',input:{id:expert.item.id}})).ok);
+ const mineAfter=await f.call('market.call',{action:'catalog',input:{scope:'mine'}});
+ const listed=mineAfter.items.find(x=>x.id===member.id);assert.ok(listed,'场景成员应进入我的技能');
+ assert.deepEqual(listed.expertPackages,['办公助手包']);
+ const updated=await f.call('market.call',{action:'update-expert',input:{id:expert.item.id}});assert.ok(updated.ok,updated.message);
+}finally{f.close();}});
+
 test('技能新聊天继承明确选定的项目，发送时读取真实材料',async t=>{const f=setup(t),folder=mkdtempSync('/tmp/cpclaw-market-material-');try{
  writeFileSync(join(folder,'source.md'),'# 合成试点材料\n10 人参与，8 人完成，失败原因尚未提供。');const project=await f.call('project.create',{folder});assert.ok(project.ok,project.message);
  const x=f.save({inputs:[{name:'materials',label:'材料',required:true,example:'选择项目文件'}]});f.publish(x);await f.call('market.call',{action:'install',input:{id:x.id}});
