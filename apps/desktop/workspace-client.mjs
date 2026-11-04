@@ -1,3 +1,4 @@
+import {runtimeEnv} from './runtime-env.mjs';
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { existsSync, readFileSync } from "node:fs";
@@ -43,7 +44,7 @@ export function createWorkspaceClient(dataDir, desktopDir, { onEvent = () => {},
       return child;
     }
     // 使用独立 Node（含 node:sqlite）；安装包提供内置运行时，开发模式使用 PATH。
-    const workerEnv = { ...process.env, CPCLAW_DATA_DIR: dataDir };
+    const workerEnv = { ...runtimeEnv(), CPCLAW_DATA_DIR: dataDir };
     delete workerEnv.MINIMAX_API_KEY;
     delete workerEnv.MINIMAX_CODING_API_KEY;
     const nodeArgs = [];

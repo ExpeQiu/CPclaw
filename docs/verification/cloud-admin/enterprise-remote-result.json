@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "base": "http://47.113.225.93:3928",
+  "htmlSha256": "ee20053ac469823402f8a51811218ec88c3b8149baee7a7c31da96e23d3f0ef7",
+  "mode": "real",
+  "checks": [
+    "deployed HTML matches local build",
+    "external health and root redirect",
+    "admin reads all business management modules",
+    "knowledge API and recovery schema aligned",
+    "session refresh",
+    "logout revokes session",
+    "anonymous and employee management access denied"
+  ],
+  "finishedAt": "2026-10-29T16:22:39.813Z"
+}

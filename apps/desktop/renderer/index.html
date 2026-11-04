@@ -58,11 +58,27 @@
         <p id="settings-kernel-hint" class="muted">安装包优先使用包内内核；开发模式才使用上方检出路径。保存后工作区进程会按新配置重启。</p>
         <p id="settings-feedback" role="status" class="muted"></p>
         <hr>
-        <h2>诊断</h2>
-        <p class="muted">检查运行环境，导出结果以便排查问题。</p>
-        <label class="checkbox"><input id="diag-extra" type="checkbox"> 包含同步元数据</label>
-        <div class="button-row"><button id="doctor">运行诊断</button><button id="doctor-export">导出诊断包</button></div>
-        <pre id="doctor-out">尚未运行诊断</pre>
+        <h2>授权自学习</h2>
+        <p class="muted">默认关闭。只从已验收的平台内任务提交摘要，不采集屏幕、键盘或其他应用。未审核的内容其他员工看不到。</p>
+        <label class="checkbox"><input id="learning-enabled" type="checkbox">允许本地提炼并自动提交</label>
+        <label>学习预算（条）<input id="learning-budget" type="number" min="0" max="100" value="0"></label>
+        <div class="button-row"><button id="learning-save" type="button">保存学习授权</button><button id="learning-pause" type="button">暂停 / 恢复</button></div>
+        <p id="learning-feedback" role="status" class="muted"></p>
+        <h3>正式联调仍缺的输入</h3>
+        <ul id="formal-tracks"></ul>
+        <hr>
+        <section id="doctor-center" aria-label="诊断与修复">
+          <h2>诊断与修复</h2>
+          <p class="muted">检查 APP、工作进程与内核；修复后重新验证。</p>
+          <div class="button-row"><button id="doctor" class="primary">全面检查</button><button id="doctor-repair">修复运行环境</button></div>
+          <div id="doctor-checks" class="doctor-checks" aria-live="polite"></div>
+          <details><summary>快捷操作</summary><div id="doctor-shortcuts" class="doctor-shortcuts"></div></details>
+          <label class="checkbox"><input id="diag-extra" type="checkbox"> 包含同步元数据</label>
+          <p class="muted doctor-privacy">诊断包包含环境状态和近期脱敏异常日志，不包含对话正文、工具参数或登录凭证。</p>
+          <div class="button-row"><button id="doctor-export">导出诊断包</button><button id="doctor-upload">上传到云端</button></div>
+          <p id="doctor-out" role="status" aria-live="polite">尚未运行诊断</p>
+          <div id="doctor-cloud" class="doctor-cloud"></div>
+        </section>
         <details><summary>受理接口检查</summary><button id="send">发送受理请求</button></details>
       </section>
       <section id="panel-documents" class="document-workspace" hidden>
@@ -116,4 +132,4 @@
     <p class="muted">授权可随时在自动工作流撤销；切换账号或对话后失效。</p>
     <div class="button-row"><button id="service-approval-deny" type="button">拒绝</button><button id="service-approval-confirm" type="submit" class="primary">授权并继续</button></div>
   </form>
-</dialog><dialog id="diagnostics-dialog" class="service-approval" aria-labelledby="diagnostics-title"><div class="diagnostics-heading"><h2 id="diagnostics-title">对话自诊断</h2><div class="diagnostics-heading-actions"><button id="diagnostics-repair" type="button" class="primary" hidden>执行修复</button><button id="diagnostics-close" type="button">关闭</button></div></div><div id="diagnostics-body" role="status" aria-live="polite"></div></dialog><section id="knowledge-overlay" class="market-overlay knowledge-overlay" hidden aria-label="知识库"><button type="button" id="knowledge-overlay-close">关闭知识库 ×</button><div class="knowledge-overlay-body"><h1>知识库</h1><p class="muted">关联本地目录或 CPclaw 平台 Wiki，供对话检索与文档生成引用。</p><div class="knowledge-section"><h2>关联 企业知识库（wiki）</h2><p class="muted">关联本地目录或 CPclaw 平台企业知识库。</p><button id="knowledge-enterprise" type="button">＋ 关联知识库</button><div id="knowledge-enterprise-list"></div></div><hr><div class="knowledge-section"><h2>关联 个人知识库（wiki）</h2><p class="muted">关联个人目录或平台 Wiki，仅供本人使用。</p><button id="knowledge-personal" type="button">＋ 关联知识库</button><div id="knowledge-personal-list"></div></div><p id="knowledge-feedback" role="status" class="muted"></p></div></section><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./settings.js"></script><script src="./diagnostics.js"></script><script src="./task-issues.js"></script><script src="./projects.js"></script><script src="./project-wiki.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./permissions.js"></script><script src="./composer-model.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>
+</dialog><dialog id="diagnostics-dialog" class="service-approval" aria-labelledby="diagnostics-title"><div class="diagnostics-heading"><h2 id="diagnostics-title">对话自诊断</h2><div class="diagnostics-heading-actions"><button id="diagnostics-repair" type="button" class="primary" hidden>执行修复</button><button id="diagnostics-close" type="button">关闭</button></div></div><div id="diagnostics-body" role="status" aria-live="polite"></div></dialog><section id="knowledge-overlay" class="market-overlay knowledge-overlay" hidden aria-label="知识库"><button type="button" id="knowledge-overlay-close">关闭知识库 ×</button><div class="knowledge-overlay-body"><h1>知识库</h1><p class="muted">关联本地目录或 CPclaw 平台 Wiki，供对话检索与文档生成引用。</p><div class="knowledge-section"><h2>关联 企业知识库（wiki）</h2><p class="muted">关联本地目录或 CPclaw 平台企业知识库。</p><button id="knowledge-enterprise" type="button">＋ 关联知识库</button><div id="knowledge-enterprise-list"></div></div><hr><div class="knowledge-section"><h2>关联 个人知识库（wiki）</h2><p class="muted">关联个人目录或平台 Wiki，仅供本人使用。</p><button id="knowledge-personal" type="button">＋ 关联知识库</button><div id="knowledge-personal-list"></div></div><p id="knowledge-feedback" role="status" class="muted"></p></div></section><dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-dialog-title"><h2 id="knowledge-dialog-title">关联知识库</h2><div id="knowledge-dialog-body"></div><p id="knowledge-dialog-feedback" role="status"></p><button id="knowledge-dialog-close">关闭</button></dialog><dialog id="move-chat-dialog"><form method="dialog"><h2>移动聊天</h2><label>所属项目<select id="move-chat-project"></select></label><div class="button-row"><button value="cancel">取消</button><button id="move-chat-confirm" type="button" class="primary">移动</button></div><p id="move-chat-feedback" role="status"></p></form></dialog><script src="./markdown.js"></script><script src="./renderer.js"></script><script src="./documents.js"></script><script src="./chat.js"></script><script src="./settings.js"></script><script src="./doctor-center.js"></script><script src="./diagnostics.js"></script><script src="./task-issues.js"></script><script src="./projects.js"></script><script src="./project-wiki.js"></script><script src="./market.js"></script><script src="./extensions.js"></script><script src="./permissions.js"></script><script src="./composer-model.js"></script><script src="./quick-rail.js"></script><script src="./pane-resize.js"></script><script src="./knowledge.js"></script></body></html>

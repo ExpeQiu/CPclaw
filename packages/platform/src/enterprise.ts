@@ -84,7 +84,7 @@ export type WikiPageView = {
 export type LearningCandidateView = {
   candidateId: string;
   kind: "experience" | "memory" | "skill";
-  status: "pending" | "published" | "rejected" | "superseded";
+  status: "pending" | "published" | "rejected" | "superseded" | "withdrawn";
   version: number;
   authorId: string;
 };
@@ -287,6 +287,14 @@ function withTx<T>(db: DatabaseSync, fn: () => T): T {
 
 export function ensureEnterpriseSchema(db: DatabaseSync): void {
   db.exec(ENTERPRISE_SCHEMA);
+  const columns = db.prepare("PRAGMA table_info(org_resources)").all();
+  const names = columns.map((row) => {
+    const record = rowOf(row);
+    return record === undefined ? "" : textOf(record, "name") ?? "";
+  });
+  if (!names.includes("audience")) {
+    db.exec("ALTER TABLE org_resources ADD COLUMN audience TEXT");
+  }
 }
 
 export function seedKnowledgeAcl(db: DatabaseSync): void {
@@ -397,7 +405,7 @@ export type EnterpriseApi = {
   ): { ok: true; candidate: LearningCandidateView } | PlatformFailure;
   reviewLearningCandidate(
     actor: Principal,
-    input: { candidateId: string; decision: "approve" | "reject" },
+    input: { candidateId: string; decision: "approve" | "reject"; members?: string[] },
   ): { ok: true; candidate: LearningCandidateView; resourceId?: string } | PlatformFailure;
   reviseLearningCandidate(
     actor: Principal,
@@ -1134,6 +1142,31 @@ export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, au
       if (input.kind !== "experience" && input.kind !== "memory" && input.kind !== "skill") {
         return failure("CONFIG_INVALID", "候选类型不支持");
       }
+      if (input.sourceTaskId !== undefined) {
+        const prior = rowOf(
+          db
+            .prepare(
+              "SELECT candidate_id, kind, status, version, author_id FROM learning_candidates WHERE author_id = ? AND source_task_id = ? AND status = 'pending'",
+            )
+            .get(actor.employeeId, input.sourceTaskId),
+        );
+        if (prior !== undefined) {
+          const kind = textOf(prior, "kind");
+          const status = textOf(prior, "status");
+          const candidateId = textOf(prior, "candidate_id");
+          const version = numberOf(prior, "version");
+          const authorId = textOf(prior, "author_id");
+          if (
+            (kind === "experience" || kind === "memory" || kind === "skill") &&
+            (status === "pending" || status === "published" || status === "rejected" || status === "superseded" || status === "withdrawn") &&
+            candidateId !== undefined &&
+            version !== undefined &&
+            authorId !== undefined
+          ) {
+            return { ok: true, candidate: { candidateId, kind, status, version, authorId } };
+          }
+        }
+      }
       const candidateId = `lc-${randomUUID().replaceAll("-", "")}`;
       withTx(db, () => {
         db.prepare(
@@ -1234,14 +1267,29 @@ export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, au
           candidate: { candidateId: input.candidateId, kind, status: "rejected", version, authorId },
         };
       }
+      let audience: string | null = null;
+      if (input.members !== undefined) {
+        if (input.members.some((member) => !idOk(member))) {
+          return failure("CONFIG_INVALID", "下发成员编号无效");
+        }
+        for (const member of input.members) {
+          const employee = rowOf(
+            db.prepare("SELECT employee_id FROM employees WHERE employee_id = ? AND org_id = ? AND status = 'active'").get(member, actor.orgId),
+          );
+          if (employee === undefined) {
+            return failure("CONFIG_INVALID", "下发成员必须是本组织有效员工");
+          }
+        }
+        audience = JSON.stringify([...new Set(input.members)]);
+      }
       const resourceId = `res-${randomUUID().replaceAll("-", "")}`;
       withTx(db, () => {
         db.prepare("UPDATE learning_candidates SET status = 'published' WHERE candidate_id = ?").run(input.candidateId);
         db.prepare(
           `INSERT INTO org_resources (
-            resource_id, org_id, kind, title, body, version, status, candidate_id, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-        ).run(resourceId, actor.orgId, kind, title, body, version, input.candidateId, config.now());
+            resource_id, org_id, kind, title, body, version, status, candidate_id, created_at, audience
+          ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+        ).run(resourceId, actor.orgId, kind, title, body, version, input.candidateId, config.now(), audience);
         audit(actor.orgId, actor.employeeId, "learning_approve", input.candidateId);
       });
       return {
@@ -1254,7 +1302,7 @@ export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, au
     listOrgResources(actor) {
       const rows = db
         .prepare(
-          "SELECT resource_id, kind, title, version, status FROM org_resources WHERE org_id = ? AND status = 'active'",
+          "SELECT resource_id, kind, title, version, status, audience FROM org_resources WHERE org_id = ? AND status = 'active'",
         )
         .all(actor.orgId);
       const resources: OrgResourceView[] = [];
@@ -1274,6 +1322,21 @@ export function createEnterpriseApi(db: DatabaseSync, config: PlatformConfig, au
           version === undefined
         ) {
           continue;
+        }
+        const audience = textOf(row, "audience");
+        if (audience !== undefined) {
+          let members: string[] = [];
+          try {
+            const parsed: unknown = JSON.parse(audience);
+            if (Array.isArray(parsed)) {
+              members = parsed.filter((item): item is string => typeof item === "string");
+            }
+          } catch {
+            members = [];
+          }
+          if (!members.includes(actor.employeeId)) {
+            continue;
+          }
         }
         resources.push({ resourceId, kind, title, version, status: "active" });
       }

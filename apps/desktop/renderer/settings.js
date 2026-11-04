@@ -51,7 +51,53 @@ async function loadDesktopSettings() {
   }
 }
 
-window.loadDesktopSettings = loadDesktopSettings;
+async function loadLearningGrant() {
+  const feedback = settingsById("learning-feedback");
+  if (!feedback) return;
+  try {
+    const result = await chatCall("learning.grant");
+    if (!result.ok) throw new Error(result.message);
+    settingsById("learning-enabled").checked = result.grant.enabled === true && result.grant.autoSubmit === true;
+    settingsById("learning-budget").value = String(result.grant.budget ?? 0);
+    settingsById("learning-pause").textContent = result.grant.paused ? "恢复学习" : "暂停学习";
+    settingsById("learning-pause").dataset.paused = result.grant.paused ? "1" : "0";
+    const tracks = await chatCall("formal.tracks");
+    const list = settingsById("formal-tracks");
+    list.replaceChildren();
+    for (const track of tracks.tracks ?? []) {
+      if (track.open) continue;
+      const item = document.createElement("li");
+      item.textContent = track.missing;
+      list.append(item);
+    }
+    if (!list.children.length) list.append(Object.assign(document.createElement("li"), { textContent: "除自动更新外，正式输入已登记。自动更新仍不在首期。" }));
+  } catch (error) {
+    feedback.textContent = error instanceof Error ? error.message : "无法读取学习授权";
+  }
+}
+
+settingsById("learning-save")?.addEventListener("click", async () => {
+  const feedback = settingsById("learning-feedback");
+  const budget = Number(settingsById("learning-budget").value);
+  const enabled = settingsById("learning-enabled").checked;
+  const result = await chatCall("learning.grant", { save: true, enabled, autoSubmit: enabled, paused: false, budget: Number.isInteger(budget) ? budget : 0, kinds: ["experience"], includeHistory: false });
+  feedback.textContent = result.ok ? (enabled ? "已开启授权自学习" : "学习授权已关闭") : result.message;
+  if (result.ok) await loadLearningGrant();
+});
+
+settingsById("learning-pause")?.addEventListener("click", async () => {
+  const current = await chatCall("learning.grant");
+  if (!current.ok) return;
+  const paused = current.grant.paused !== true;
+  const result = await chatCall("learning.grant", { save: true, ...current.grant, paused });
+  settingsById("learning-feedback").textContent = result.ok ? (paused ? "已暂停学习" : "已恢复学习") : result.message;
+  if (result.ok) await loadLearningGrant();
+});
+
+window.loadDesktopSettings = async () => {
+  await loadDesktopSettings();
+  await loadLearningGrant();
+};
 window.fillSettingsForm = fillSettingsForm;
 
 function settingsPayload() {

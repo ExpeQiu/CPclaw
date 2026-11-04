@@ -1,3 +1,4 @@
+import {runtimeEnv} from './runtime-env.mjs';
 import { registerExtensionHost } from './extension-host.mjs';
 import { performKnowledgeAction } from './knowledge-actions.mjs';
 import { performProjectAction } from './project-actions.mjs';
@@ -28,6 +29,7 @@ mkdirSync(dataDir, { recursive: true });
 if (app.isPackaged) {
   process.env.CPCLAW_NODE_BINARY = join(process.resourcesPath, "runtime", "bin", "node");
 }
+process.env.PATH = runtimeEnv().PATH;
 process.env.CPCLAW_DATA_DIR = dataDir;
 app.setPath("userData", dataDir);
 applyDesktopSettingsToProcessEnv(dataDir, here);
@@ -80,13 +82,36 @@ ipcMain.handle("runtime.status", () => {
   return status;
 });
 
-ipcMain.handle("runtime.restartWorker", () => {
-  restartWorkspace("diagnose_repair");
-  const status = resolveKernelStatus(here);
-  desktopLog(dataDir, "cpclaw-desktop-host", "info", "workspace_restart", "诊断修复已重启工作区进程", {
-    ready: Boolean(status.ready),
-  });
-  return { ok: true, kernel: status, message: "已重启工作区进程并刷新内核状态" };
+async function repairRuntime() {
+  const preflight=await workspaceClient.request({method:'doctor.preflight',actorId:currentActor()??'local-doctor',input:{reserve:true}});
+  if(!preflight.ok||preflight.busy)return {ok:false,code:'SLOT_BUSY',message:'请先停止或等待当前任务完成，再修复运行环境。'};
+  process.env.PATH=runtimeEnv().PATH;
+  restartWorkspace('diagnose_repair');
+  const kernel=resolveKernelStatus(here);
+  const check=await workspaceClient.request({method:'doctor.run',actorId:currentActor()??'local-doctor',input:{}});
+  const verified=Boolean(check.ok&&kernel.ready);
+  desktopLog(dataDir,'cpclaw-desktop-host',verified?'info':'warn','workspace_restart','工作区重启后已复核',{ready:verified});
+  return {ok:verified,verified,kernel,message:verified?'工作进程与内核检查通过；未调用真实模型。':'工作区已重启，内核仍不可用，请检查内核配置。'};
+}
+ipcMain.handle('runtime.restartWorker',repairRuntime);
+
+ipcMain.handle('doctor.action',async(_event,input={})=>{
+  const actor=currentActor()??'local-doctor';
+  const action=input.action;
+  if(action==='repair')return repairRuntime();
+  if(action==='logs'||action==='data'){
+    const path=action==='logs'?join(dataDir,'logs'):dataDir;mkdirSync(path,{recursive:true});
+    const error=await shell.openPath(path);return error?{ok:false,message:error}:{ok:true,message:'已打开目录'};
+  }
+  if(action==='kernel')return {ok:true,kernel:resolveKernelStatus(here)};
+  if(action==='probe')return probePlatformConnection(getDesktopSettingsView(dataDir,here).platformUrl||'');
+  if(!['check','export','upload','status','file'].includes(action))return {ok:false,code:'SCHEMA_INVALID',message:'未知诊断操作'};
+  const k=resolveKernelStatus(here);
+  const result=await workspaceClient.request({method:'doctor.center',actorId:actor,input:{action,chatId:typeof input.chatId==='string'?input.chatId:'',includeExtra:input.includeExtra===true,
+    host:{packaged:app.isPackaged,version:appVersion(),kernel:{ready:k.ready,name:k.name,source:k.source,version:k.version},systemPathReady:['/usr/bin','/bin','/usr/sbin','/sbin'].every(p=>(process.env.PATH||'').split(':').includes(p))}}});
+  if(actor!==(currentActor()??'local-doctor'))return {ok:false,message:'账号已变化，请重新操作'};
+  if(action==='file'&&result.ok){shell.showItemInFolder(result.path);return {ok:true,message:'已定位诊断包'};}
+  return result;
 });
 
 ipcMain.handle("ui.log", (_event, input) => {
@@ -132,7 +157,7 @@ ipcMain.handle("workspace.call", async (_event, call) => {
   if (typeof call !== "object" || call === null || typeof call.method !== "string") {
     return { ok: false, code: "SCHEMA_INVALID", message: "命令不符合形状" };
   }
-  if (actorId === null && !["account.status", "account.login", "account.logout"].includes(call.method)) return { ok: false, code: "AUTH_REQUIRED", message: "请先在设置中登录平台" };
+  if (actorId === null && !["account.status", "account.login", "account.logout", "formal.tracks", "learning.grant"].includes(call.method)) return { ok: false, code: "AUTH_REQUIRED", message: "请先在设置中登录平台" };
   if (['account.login', 'account.logout'].includes(call.method)) extensionHost.clearContext();
   if (['chat.history', 'chat.send', 'chat.diagnose', 'chat.diagnoseRepair'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
   const result = await workspaceClient.request({ method: call.method, input: call.input, actorId });
@@ -217,8 +242,10 @@ async function createWindow() {
     const result = await workspaceClient.request({ method: "doctor.run", actorId: "package-check", input: {} });
     if (!result.ok) throw new Error(result.message);
     const ui = await window.webContents.executeJavaScript(`({ title: document.title, tasks: Boolean(document.getElementById("tasks")), bridge: typeof window.cpclaw.workspace === "function" })`);
-    const ok = ui.tasks && ui.bridge;
-    process.stdout.write(`${JSON.stringify({ packaged: app.isPackaged, worker: result.ok, ui, dataDir })}\n`);
+    const center = await window.webContents.executeJavaScript("window.cpclaw.doctorAction({action:'check'})");
+    const repair = await window.webContents.executeJavaScript("window.cpclaw.doctorAction({action:'repair'})");
+    const ok = ui.tasks && ui.bridge && center.ok && repair.verified;
+    process.stdout.write(`${JSON.stringify({ packaged: app.isPackaged, worker: result.ok, ui, doctorCenter:center.ok, runtimeRepair:repair.verified, dataDir })}\n`);
     app.exit(ok ? 0 : 1);
     return;
   }

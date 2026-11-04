@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {createChatService} from '../chat-service.mjs';
 import {writeAccountSession} from '@cpclaw/desktop-host/account-session';
 
-test('one Harness loop chooses the local tool by default and can route to another discovered service',async t=>{
+for(const warning of [null,{code:'HARNESS_CLEANUP_UNKNOWN',message:'fixture'}]) test(`Harness routing preserves answers with cleanup warning=${Boolean(warning)}`,async t=>{
  const root=mkdtempSync('/tmp/cpclaw-harness-routing-'),actor='routing-user',calls=[];
  writeAccountSession(root,{schemaVersion:1,employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh-token'},{makeCurrent:true});
  writeFileSync(join(root,'desktop-connection.json'),JSON.stringify({platformUrl:'https://fixture.invalid'}));
@@ -22,13 +22,16 @@ test('one Harness loop chooses the local tool by default and can route to anothe
   await input.service.execute(JSON.stringify({action:'terminal',command:'pwd'}));
   await input.service.execute(JSON.stringify({serviceId:'dreamina',action:'discover'}));
   const denied=JSON.parse(await input.service.execute(JSON.stringify({serviceId:'unknown-service',action:'discover'})));assert.equal(denied.ok,false);
-  return {finalResponse:'已完成真实工具检查'};
+  return {finalResponse:'已完成真实工具检查',...(warning?{cleanupWarning:warning}:{})};
  }});
  try{
   const {chatId}=await service.dispatch('chat.create',actor,{});
   const result=await service.dispatch('chat.send',actor,{chatId,requestId:'routing-test',text:'检查当前环境，然后检查即梦'});
   assert.equal(result.state,'done');assert.equal(loops,1);assert.deepEqual(calls.map(c=>c.service.id),['local-terminal','local-terminal','dreamina']);
   assert(calls.every(c=>c.actorId===actor&&c.chatId===chatId&&c.taskId&&c.workingDirectory));
-  const history=await service.dispatch('chat.history',actor,{chatId});assert.deepEqual(history.serviceSteps.map(s=>s.service.id),['local-terminal','local-terminal','dreamina']);
+  const history=await service.dispatch('chat.history',actor,{chatId});
+  const reply=history.messages.filter(m=>m.role==='assistant').at(-1);assert.equal(reply.state,'done');assert.match(reply.content,/已完成真实工具检查/);
+  if(warning)assert.match(reply.content,/退出状态尚未确认.*回复已保留/);
+  assert.deepEqual(history.serviceSteps.map(s=>s.service.id),['local-terminal','local-terminal','dreamina']);
  }finally{service.stop();rmSync(root,{recursive:true,force:true});}
 });

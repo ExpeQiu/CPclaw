@@ -1,3 +1,5 @@
+import { LoginGuard } from './login-guard.js';
+import { uploadDiagnostic } from "./diagnostics.js";
 import { marketPage } from "./market-page.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { PlatformConfig } from "./config.js";
@@ -8,6 +10,7 @@ import { platformLog } from "./log.js";
 import { completeHarness, generateReport, streamChat, type ChatMessage, type ServiceContext, type DocumentContext, type RealGatewayConfig, type ReportInput } from "@cpclaw/model-gateway";
 import { checkReport, SERVICE_TYPES, invalidCatalogReason } from "@cpclaw/contracts";
 
+const loginGuards = new WeakMap<PlatformApp, LoginGuard>();
 const MAX_BODY = 16_384;
 /** 平台接受的应用服务类型白名单；桌面端按此裁剪服务目录，避免整轮对话被 400 拒绝。 */
 const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
@@ -223,17 +226,23 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       });
       return;
     }
+    if (req.method === "GET" && path === "/") {
+      res.writeHead(302, { location: "/admin", "cache-control": "no-store" });
+      res.end();
+      return;
+    }
     if (req.method === "GET" && (path === "/admin" || path === "/market")) {
       const html = path === "/market" ? marketPage() : adminPage();
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
         "content-length": Buffer.byteLength(html),
+        ...(path === "/admin" ? { "x-frame-options": "DENY", "x-content-type-options": "nosniff", "referrer-policy": "same-origin" } : {}),
       });
       res.end(html);
       return;
     }
-    const body = req.method === "POST" ? objectOf(await readBody(req, path === "/v1/harness/completions" || path === "/v1/chat/stream" || path === "/v1/market" || path === "/v1/knowledge" ? 262_144 : MAX_BODY)) : {};
+    const body = req.method === "POST" ? objectOf(await readBody(req, path === "/v1/diagnostics" ? 524_288 : path === "/v1/harness/completions" || path === "/v1/chat/stream" || path === "/v1/market" || path === "/v1/knowledge" ? 262_144 : MAX_BODY)) : {};
     if (body === undefined) {
       sendFailure(res, { ok: false, code: "CONFIG_INVALID", message: "请求体必须是 JSON 对象" });
       return;
@@ -247,7 +256,17 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         sendFailure(res, { ok: false, code: "CONFIG_INVALID", message: "登录需要员工编号、口令和设备名" });
         return;
       }
+      let guard = loginGuards.get(app);
+      if (!guard) { guard = new LoginGuard(); loginGuards.set(app, guard); }
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      const retryAfter = guard.retryAfter(ip, employeeId);
+      if (retryAfter) {
+        res.setHeader('retry-after', String(retryAfter));
+        sendJson(res, 429, {ok:false, code:'RATE_LIMITED', message:'登录失败次数过多，请稍后重试', retryAfter});
+        return;
+      }
       const result = app.login({ employeeId, password, deviceLabel });
+      guard.record(ip, employeeId, result.ok);
       if (!result.ok) {
         sendFailure(res, result);
         return;
@@ -273,8 +292,29 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       sendFailure(res, { ok: false, code: "AUTH_REQUIRED", message: "未登录" });
       return;
     }
+    if (req.method === 'POST' && path === '/v1/diagnostics') {
+      const result=uploadDiagnostic(app,token,body.content,body.idempotencyKey);
+      if(!result.ok){sendFailure(res,result);return;}
+      sendJson(res,200,result);return;
+    }
+    const diagnosticPath=/^\/v1\/diagnostics\/(upl-[a-f0-9]+)(\/content)?$/.exec(path);
+    if(req.method==='GET'&&diagnosticPath){
+      const result=app.getUpload(token,diagnosticPath[1]!);
+      if(!result.ok){sendFailure(res,result);return;}
+      if(diagnosticPath[2]&&result.upload.fileId){
+        const file=app.readPrivateFile(token,result.upload.fileId);
+        if(!file.ok){sendFailure(res,file);return;}
+        sendJson(res,200,{...result,content:file.body});return;
+      }
+      sendJson(res,200,result);return;
+    }
     if (req.method === "POST" && path === "/v1/knowledge") {
       const result = app.knowledge(token, String(body.action ?? 'list'), objectOf(body.input) ?? {});
+      if (!result.ok) { sendFailure(res, result); return; }
+      sendJson(res, 200, result); return;
+    }
+    if (req.method === "POST" && path === "/v1/learning") {
+      const result = app.learning(token, String(body.action ?? "published"), objectOf(body.input) ?? {});
       if (!result.ok) { sendFailure(res, result); return; }
       sendJson(res, 200, result); return;
     }
@@ -517,6 +557,12 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       const { ok: invokedOk, ...invoked } = result;
       void invokedOk;
       sendJson(res, 200, { schemaVersion: 1, ...invoked });
+      return;
+    }
+    if (req.method === "POST" && path === "/v1/admin/manage") {
+      const result = app.admin(token, String(body.action ?? ""), objectOf(body.input) ?? {});
+      if (!result.ok) { sendFailure(res, result); return; }
+      sendJson(res, 200, result);
       return;
     }
     if (req.method === "GET" && path === "/v1/admin/employees") {

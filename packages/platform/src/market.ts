@@ -1,3 +1,4 @@
+import { ensureConnectorPolicySchema } from './connector-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { checkSkill, compareSkillVersions, readSkillMetadata, skillFiles, skillInstruction, skillPackage, skillVersionPattern } from '@cpclaw/contracts';
@@ -25,6 +26,7 @@ export function createMarket(db: DatabaseSync, now: () => number) {
     if(!db.prepare('SELECT name FROM sqlite_master WHERE type=\'table\' AND name=?').get(table))throw Error('技能市场需要企业资源 schema');
     if(!db.prepare(`PRAGMA table_info(${table})`).all().some(c=>c.name===column))db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+  ensureConnectorPolicySchema(db);
   const tx=<T>(fn:()=>T):T=>{db.exec('BEGIN IMMEDIATE');try{const v=fn();db.exec('COMMIT');return v;}catch(e){db.exec('ROLLBACK');throw e;}};
   const save=(org:string,item:MarketItem)=>db.prepare('INSERT INTO market_items VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(item.id,org,item.owner,JSON.stringify(item));
   const key=(org:string,id:string)=>hash(org).slice(0,16)+':'+id;
@@ -70,7 +72,7 @@ export function createMarket(db: DatabaseSync, now: () => number) {
     let item=visible.find(x=>x.id===input.id);
     const owned=(x:MarketItem)=>x.owner===actor.employeeId;
     const accessible=(x:MarketItem,existing=false)=>x.status==='published'||(owned(x)&&x.personalAvailable&&x.status!=='withdrawn')||(existing&&x.status==='retired'&&installedIds.has(x.id));
-    const connectors=()=>db.prepare('SELECT payload FROM market_connectors WHERE org=? AND employee=?').all(actor.orgId,actor.employeeId).map(r=>JSON.parse(String(r.payload)) as Record<string,unknown>);
+    const connectors=():Record<string,unknown>[]=>db.prepare('SELECT payload FROM market_connectors WHERE org=? AND employee=?').all(actor.orgId,actor.employeeId).map(r=>{const c=JSON.parse(String(r.payload)) as Record<string,unknown>;const blocked=db.prepare('SELECT blocked FROM org_connector_controls WHERE org=? AND id=?').get(actor.orgId,String(c.id))?.blocked===1;return {...c,ownerEnabled:c.enabled!==false,adminBlocked:blocked,enabled:c.enabled!==false&&!blocked};});
     const summary=(x:MarketItem)=>{const {body,...meta}=x;return {...meta,owned:owned(x),checks:checkSkill(x),entryLength:(()=>{try{return skillInstruction(x).length;}catch{return 0;}})()};};
     const full=(x:MarketItem)=>({...x,owned:owned(x),checks:checkSkill(x)});
     const resolve=(x:MarketItem,trial=false):MarketResult=>{
@@ -193,15 +195,15 @@ export function createMarket(db: DatabaseSync, now: () => number) {
       const old=connectors().find(c=>c.id===input.id);if(input.id&&!old)return fail('连接器不存在');
       const targetChanged=!old||old.target!==target||old.type!==type;
       const c={id:old?.id??randomUUID(),title:title.trim(),type,target,enabled:input.enabled!==false,status:targetChanged?'未检测':(old?.status??'未检测'),probe:targetChanged?null:(old?.probe??null),kind:old?.kind??'service',revision:Number(old?.revision??0)+1,updated:now()};
-      db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(c.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:c};
+      db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(c.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:connectors().find(x=>x.id===c.id)};
     }
     if(action==='connector-probe-result'){
       const old=connectors().find(c=>c.id===input.id);if(!old)return fail('连接器不存在','NOT_FOUND');
       if(typeof input.status!=='string'||input.status.length>200||!input.probe||typeof input.probe!=='object')return fail('探测结果无效');
       const probe=input.probe as Record<string,unknown>;
       if(typeof probe.layer!=='string'||probe.layer.length>40||typeof probe.message!=='string'||probe.message.length>1000)return fail('探测分层无效');
-      const c={...old,status:input.status,probe:{layer:String(probe.layer),message:String(probe.message),checkedAt:Number(probe.checkedAt)||now(),capabilities:Array.isArray(probe.capabilities)?probe.capabilities.filter((x):x is string=>typeof x==='string').slice(0,40):[],auth:typeof probe.auth==='string'?probe.auth:undefined,version:typeof probe.version==='string'?probe.version.slice(0,80):undefined},updated:now()};
-      db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(old.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:c};
+      const c={...old,enabled:old.ownerEnabled!==false,status:input.status,probe:{layer:String(probe.layer),message:String(probe.message),checkedAt:Number(probe.checkedAt)||now(),capabilities:Array.isArray(probe.capabilities)?probe.capabilities.filter((x):x is string=>typeof x==='string').slice(0,40):[],auth:typeof probe.auth==='string'?probe.auth:undefined,version:typeof probe.version==='string'?probe.version.slice(0,80):undefined},updated:now()};
+      db.prepare('INSERT OR REPLACE INTO market_connectors VALUES(?,?,?,?)').run(String(old.id),actor.orgId,actor.employeeId,JSON.stringify(c));return {ok:true,connector:connectors().find(x=>x.id===old.id)};
     }
     if(action==='connector-dependents'){
       const id=String(input.id||'');const c=connectors().find(x=>x.id===id);if(!c)return fail('连接器不存在','NOT_FOUND');

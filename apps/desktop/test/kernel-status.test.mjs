@@ -25,7 +25,7 @@ test("开发检出路径可用时显示目录名", () => {
   const checkout = join(root, "deepseek-harness");
   mkdirSync(desktopDir);
   mkdirSync(checkout);
-  writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh-root", version: "0.1.6-alpha.2" }));
+  writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: "workspace-root", version: "0.1.6-alpha.2" }));
   const status = resolveKernelStatus(desktopDir, {
     CPCLAW_REPORT_ENGINE: "harness",
     CPCLAW_HARNESS_ROOT: checkout,

@@ -935,3 +935,6 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 /* 技能市场在窄窗口保留快捷栏，使用完整工作区。 */
 @media(max-width:800px){.market-overlay{inset:8px 8px 8px calc(var(--quick-rail-width) + 8px)}}
+
+/* 设置中的诊断与修复入口 */
+#doctor-center h2{margin-top:0}.doctor-checks{display:grid;gap:7px;margin:12px 0}.doctor-check{display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px;padding:8px 10px;border:1px solid var(--line,#dfe4da);border-radius:8px;font-size:12px;overflow-wrap:anywhere}.doctor-check span{color:#68745f}.doctor-fail{border-left:3px solid #b96b41}.doctor-warn{border-left:3px solid #b89a54}.doctor-ok{border-left:3px solid #6d8a62}.doctor-shortcuts{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.doctor-privacy{font-size:12px}.doctor-cloud code{display:block;font-size:11px;overflow-wrap:anywhere}#doctor-out{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}

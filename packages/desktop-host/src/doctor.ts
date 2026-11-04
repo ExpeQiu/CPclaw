@@ -45,6 +45,12 @@ export type DoctorInput = {
   grantedDirectories?: readonly string[];
   /** CLI/MCP 是否已选定。未定则 skipped。 */
   connectorConfigured?: boolean;
+  /** 已登记的首个 CLI。未登记时不把内置服务调用当成 P2-04 通过。 */
+  firstCli?: string;
+  /** 已登记的首个 MCP。 */
+  firstMcp?: string;
+  /** 飞书与企微回调都已在测试应用上验证。 */
+  imCallbackVerified?: boolean;
   /** IM 渠道是否已配对。 */
   imPaired?: boolean;
   appVersion?: string;
@@ -136,13 +142,27 @@ function checkModel(input: DoctorInput): DoctorCheck {
   };
 }
 
+function namedConnector(value: string | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function checkConnector(input: DoctorInput): DoctorCheck {
-  if (input.connectorConfigured === undefined) {
+  const cli = namedConnector(input.firstCli);
+  const mcp = namedConnector(input.firstMcp);
+  if (input.connectorConfigured === undefined && (cli.length === 0 || mcp.length === 0)) {
     return {
       id: "cli_mcp",
       status: "skipped",
       summary: "首个 CLI/MCP 尚未选定（P2-04 受阻）",
-      suggestion: "选定可验证程序与许可证后再检查",
+      suggestion: "选定可验证程序与许可证后再检查；飞书 CLI 与即梦不能代替这一项",
+    };
+  }
+  if (cli.length > 0 && mcp.length > 0 && input.connectorConfigured !== false) {
+    return {
+      id: "cli_mcp",
+      status: "ok",
+      summary: `已登记 CLI ${cli} 与 MCP ${mcp}`,
+      suggestion: "仍需按连接器逐项验收实际调用，诊断不会代为执行",
     };
   }
   if (!input.connectorConfigured) {
@@ -162,11 +182,19 @@ function checkConnector(input: DoctorInput): DoctorCheck {
 }
 
 function checkIm(input: DoctorInput): DoctorCheck {
+  if (input.imCallbackVerified !== true) {
+    return {
+      id: "im",
+      status: "skipped",
+      summary: "飞书/企微测试应用或回调未验证（Q11）",
+      suggestion: "两渠道分别验收；离线不补执行。Mock 闭环不能代替正式应用",
+    };
+  }
   if (input.imPaired === undefined) {
     return {
       id: "im",
       status: "skipped",
-      summary: "飞书/企微测试应用未确认（Q11）",
+      summary: "回调已标记验证，但当前设备未声明配对",
       suggestion: "正式渠道联调前保持 Mock；诊断不自动配对",
     };
   }

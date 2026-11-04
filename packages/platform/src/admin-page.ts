@@ -1,107 +1,109 @@
 export function adminPage(): string {
   return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>CPclaw 管理</title>
-  <style>
-    body { font-family: sans-serif; margin: 2rem; max-width: 40rem; }
-    label { display: block; margin: 0.75rem 0; }
-    button { margin-right: 0.5rem; }
-    li { margin: 0.4rem 0; }
-  </style>
-</head>
-<body>
-  <h1>CPclaw 管理</h1><p><a href="/market">技能市场与审核管理</a></p>
-  <form id="login-form">
-    <label>员工编号 <input id="employee-id" name="employeeId" autocomplete="username" required></label>
-    <label>口令 <input id="password" name="password" type="password" autocomplete="current-password" required></label>
-    <button type="submit" id="login">登录</button>
-  </form>
-  <p id="session-result"></p>
-  <section id="admin-panel" hidden>
-    <h2>本组织员工</h2>
-    <ul id="employees"></ul>
-    <button type="button" id="backup">备份</button>
-    <p id="provider"></p>
-  </section>
-  <script>
-    let accessToken = "";
-    const result = document.querySelector("#session-result");
-    const panel = document.querySelector("#admin-panel");
-    const list = document.querySelector("#employees");
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CPclaw 云端管理</title>
+<style>
+:root{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202b3b;background:#f5f7fb;accent-color:#365fe7}*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button,a.link{cursor:pointer;border:1px solid #dce2ee;background:white;border-radius:7px;padding:7px 12px;color:#26344b;text-decoration:none}button:hover,a.link:hover{background:#edf2ff}button:disabled{opacity:.5;cursor:default}.primary{background:#365fe7;color:white;border-color:#365fe7}.danger{color:#b42334}input,select,textarea{border:1px solid #d8dfeb;border-radius:7px;padding:9px;background:white;max-width:100%}label{display:grid;gap:5px;margin:12px 0}h1,h2,h3,p{margin:0 0 12px}h1{font-size:25px}h2{font-size:21px}h3{font-size:16px}small,.muted{color:#748095}.login{max-width:430px;margin:12vh auto;padding:30px}.card{min-width:0;background:white;border:1px solid #e3e8f1;border-radius:12px;padding:22px;margin-bottom:18px}.shell{display:grid;grid-template-columns:216px minmax(0,1fr);min-height:100vh}aside{min-width:0;background:#fff;border-right:1px solid #e3e8f1;padding:26px 16px}aside strong{display:block;padding:0 12px 24px;font-size:18px}nav{display:grid;gap:6px}nav button{text-align:left;border:0;background:transparent;padding:11px 14px}nav button[aria-current=page]{background:#edf2ff;color:#3158cf;font-weight:600}main{min-width:0;padding:30px 36px;max-width:1550px;width:100%;margin:0 auto}header,.row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}header{margin-bottom:24px}.actions{display:flex;gap:8px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.stat b{display:block;font-size:29px;font-weight:600}.stat span{color:#748095}.scroll{overflow:auto}td{max-width:450px;white-space:normal;overflow-wrap:anywhere}form .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #edf0f5;vertical-align:top}th{font-size:12px;color:#748095;background:#fafbfe}td small{display:block}.badge{background:#edf2ff;color:#3158cf;padding:2px 8px;border-radius:20px;font-size:12px}.empty{padding:40px;text-align:center;color:#748095}#notice{position:sticky;top:12px;z-index:2;white-space:pre-wrap}#notice:empty{display:none}.error{color:#a32434;background:#fff2f3}.success{color:#196344;background:#edfbf3}dialog{border:1px solid #dbe2ee;border-radius:14px;padding:24px;width:min(840px,94vw);max-height:85vh;overflow:auto}dialog::backdrop{background:#15203966}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f8fc;padding:16px;max-height:45vh;overflow:auto}form .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}[hidden]{display:none!important}.note{border-left:3px solid #9baff9;padding:10px 14px;background:#f4f6ff;margin-bottom:18px}@media(max-width:900px){.shell{grid-template-columns:minmax(0,1fr)}aside{padding:16px;border-right:0}aside strong{padding:0 0 12px}nav{display:flex;overflow:auto}nav button{white-space:nowrap}main{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}}@media(max-width:500px){form .grid{grid-template-columns:1fr}.login{margin:30px 12px}}
+</style></head><body>
+<section id="login-card" class="login card"><span class="badge">CPclaw CONTROL CENTER</span><h1 style="margin-top:16px">云端管理</h1><p class="muted">使用本组织管理员账号登录</p><form id="login-form"><label>员工编号<input id="employee-id" autocomplete="username" required></label><label>口令<input id="password" type="password" autocomplete="current-password" required></label><button class="primary" type="submit">登录管理台</button></form><p id="login-error" role="alert"></p></section>
+<div id="shell" class="shell" hidden><aside><strong>CPclaw <small>云端</small></strong><nav aria-label="管理导航"></nav></aside><main><header><div><small id="identity"></small><h1 id="page-title">服务概览</h1></div><div class="actions"><button id="refresh">刷新</button><a class="link" href="/market" target="_blank" rel="noopener">技能市场 ↗</a><button id="logout">退出登录</button></div></header><div id="notice" class="card" role="status" aria-live="polite"></div><div id="content"></div><p class="muted" id="updated"></p></main></div>
+<dialog id="dialog"><div class="row"><h2 id="dialog-title"></h2><button id="close-dialog" aria-label="关闭">关闭</button></div><div id="dialog-body"></div></dialog>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),content=$('content');
+const tabs={overview:'服务概览',employees:'员工与权限',sessions:'设备会话',quota:'配额与用量',provider:'模型状态',skills:'技能审核',knowledge:'企业知识库',connectors:'应用连接器',usage:'模型用量台账',learning:'企业学习与发布',uploads:'上传与同步',integrations:'渠道与设备',catalog:'桌面管理对照',audit:'操作审计',backups:'数据备份',diagnostics:'诊断包'};
+let token='',refreshToken='',identity=null,section='overview',employees=[],busy=false,refreshing=null;
+const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
+function message(text,error=false){$('notice').textContent=text;$('notice').className='card '+(error?'error':'success');}
+function clearSession(){token='';refreshToken='';identity=null;employees=[];content.replaceChildren();$('dialog').close();$('dialog-body').replaceChildren();$('shell').hidden=true;$('login-card').hidden=false;$('password').value='';}
+async function api(path,options={},retry=true){
+ const response=await fetch(path,{...options,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})}});
+ let body;try{body=await response.json();}catch{throw Error('服务返回异常，请稍后刷新');}
+ if(!response.ok&&body.code==='AUTH_REQUIRED'&&refreshToken&&retry){
+  if(!refreshing)refreshing=(async()=>{const r=await fetch('/v1/session/refresh',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({refreshToken})});const v=await r.json();if(!r.ok)throw Error(v.message||'登录已过期');token=v.accessToken;refreshToken=v.refreshToken;})().finally(()=>{refreshing=null;});
+  try{await refreshing;}catch(e){clearSession();$('login-error').textContent=e.message;throw e;}
+  return api(path,options,false);
+ }
+ if(!response.ok){if(['AUTH_REQUIRED','SESSION_REVOKED'].includes(body.code)){clearSession();$('login-error').textContent=body.message;}throw Error(body.message||'请求失败');}return body;
+}
+const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
+const manage=(action,input={})=>post('/v1/admin/manage',{action,input});
+const market=(action,input={})=>post('/v1/market',{action,input});
+async function run(fn){if(busy)return;busy=true;document.body.setAttribute('aria-busy','true');try{await fn();}catch(e){if(identity){message(e.message,true);if($('dialog').open){let error=$('dialog-error');if(!error){error=node('p',undefined,'error');error.id='dialog-error';error.setAttribute('role','alert');$('dialog-body').prepend(error);}error.textContent=e.message;}}else $('login-error').textContent=e.message;}finally{busy=false;document.body.removeAttribute('aria-busy');}}
+function button(label,fn,cls=''){const b=node('button',label,cls);b.type='button';b.onclick=()=>run(fn);return b;}
+function card(title){const e=node('section',undefined,'card');if(title)e.append(node('h2',title));content.append(e);return e;}
+function table(parent,headers,rows){if(!rows.length){parent.append(node('p','暂无记录','empty'));return;}const wrap=node('div',undefined,'scroll'),t=node('table'),head=node('tr');for(const h of headers)head.append(node('th',h));const thead=node('thead');thead.append(head);t.append(thead);const body=node('tbody');for(const row of rows){const tr=node('tr');for(const value of row){const td=node('td');td.append(value instanceof Node?value:document.createTextNode(String(value??'—')));tr.append(td);}body.append(tr);}t.append(body);wrap.append(t);parent.append(wrap);}
+const actions=(...buttons)=>{const e=node('div',undefined,'actions');e.append(...buttons);return e;};
+const fmt=n=>Number(n||0).toLocaleString('zh-CN'),date=v=>v?new Date(v).toLocaleString('zh-CN'):'—';
+const role=v=>v==='admin'?'管理员':'员工',status=v=>({active:'正常',disabled:'已停用',revoked:'已撤销',logged_out:'已退出',pending:'待审核',published:'已发布',rejected:'待修订',draft:'草稿',personal:'个人可用',retired:'已下架',withdrawn:'紧急停用'}[v]||v);
+function dialog(title,element){$('dialog-title').textContent=title;$('dialog-body').replaceChildren(element);$('dialog').showModal();}
+async function mutate(path,body,text){await post(path,body);await render();message(text);}
+function field(form,label,id,value='',type='text'){const l=node('label',label),e=node('input');e.id=id;e.name=id;e.type=type;e.value=value;l.append(e);form.append(l);return e;}
+function employeeEditor(employee){const form=node('form'),grid=node('div',undefined,'grid');form.append(grid);const id=field(grid,'员工编号（小写字母开头，可含数字和短横线）','edit-id',employee?.employeeId);id.required=true;id.pattern='[a-z](?:[a-z0-9]|-){0,31}';id.disabled=!!employee;const name=field(grid,'姓名','edit-name',employee?.name);name.required=true;name.maxLength=40;const l=node('label','权限角色'),select=node('select');select.append(new Option('员工','employee'),new Option('管理员','admin'));select.value=employee?.role||'employee';l.append(select);grid.append(l);const pw=field(grid,employee?'新口令（留空保留）':'初始口令（8–128 字符）','edit-password','','password');pw.autocomplete='new-password';pw.required=!employee;pw.minLength=8;pw.maxLength=128;form.append(node('p','修改角色或重置口令后，该员工已有会话会被撤销。新增员工默认额度 1,000 Tokens、并发 1，可在配额页调整。','note'));const save=node('button','保存','primary');save.type='submit';form.append(save);form.onsubmit=e=>{e.preventDefault();run(async()=>{const input={employeeId:id.value,name:name.value,role:select.value,...(pw.value?{password:pw.value}:{})};await manage(employee?'employee-update':'employee-create',input);pw.value='';$('dialog').close();await render();message('员工信息已保存');});};dialog(employee?'编辑员工':'新增员工',form);}
+function quotaEditor(employee){const form=node('form');const limit=field(form,'总额度（Tokens，1–1,000,000）','limit',employee.quota.limitTokens,'number');limit.required=true;limit.min=1;limit.max=1000000;limit.step=1;const concurrent=field(form,'并发上限（1–8）','concurrent',employee.quota.concurrentLimit,'number');concurrent.required=true;concurrent.min=1;concurrent.max=8;concurrent.step=1;form.append(node('p','总额度包含已经结算、未结算和已预留用量；调整额度不会清零历史消耗。','note'));const save=node('button','保存配额','primary');save.type='submit';form.append(save);form.onsubmit=e=>{e.preventDefault();run(async()=>{await post('/v1/admin/quota',{employeeId:employee.employeeId,limitTokens:Number(limit.value),concurrentLimit:Number(concurrent.value)});$('dialog').close();await render();message('配额已更新');});};dialog(employee.name+' · 配额',form);}
+async function skillDetail(item){const r=await market('detail',{id:item.id}),x=r.item,body=node('div');body.append(node('p',x.title+' · '+x.version+' · '+status(x.status)),node('p',x.description),node('h3','技能内容'),node('pre',x.body),node('h3','检查与提交证据'),node('pre',JSON.stringify({checks:x.checks,evidence:r.submissionEvidence,feedback:r.feedback},null,2)));const note=node('textarea');note.rows=3;note.style.width='100%';note.placeholder='审核意见；驳回时必填';note.setAttribute('aria-label','审核意见');body.append(note);const act=actions();
+ if(x.status==='pending')for(const [decision,label]of [['approve','通过并发布'],['reject','驳回修订']])act.append(button(label,async()=>{if(decision==='reject'&&!note.value.trim())throw Error('请填写修订意见');if(!confirm('确认'+label+'「'+x.title+'」？'))return;await market('review',{id:x.id,digest:x.digest,decision,note:note.value});$('dialog').close();await render();message('审核结果已保存');},decision==='approve'?'primary':''));
+ if(['published','retired'].includes(x.status))for(const [action,label]of (x.status==='published'?[['retire','下架'],['withdraw','紧急停用']]:[['withdraw','紧急停用']]))act.append(button(label,async()=>{if(!confirm('确认'+label+'「'+x.title+'」？'))return;await market(action,{id:x.id,note:note.value});$('dialog').close();await render();message('技能状态已更新');},'danger'));
+ body.append(act);dialog('技能详情与审核',body);
+}
+const knowledge=(action,input={})=>post('/v1/knowledge',{action,input});
+const textField=(form,label,value='',multiline=false)=>{const l=node('label',label),e=node(multiline?'textarea':'input');e.value=value;if(multiline)e.rows=12;l.append(e);form.append(l);return e;};
+async function queryGrid(parent,action,columns,{placeholder='搜索员工编号',filters=false}={}){
+ const form=node('form'),bar=node('div',undefined,'actions'),search=node('input');search.placeholder=placeholder;search.setAttribute('aria-label',placeholder);bar.append(search);const searchButton=node('button','筛选');searchButton.type='submit';bar.append(searchButton);const size=node('select');size.setAttribute('aria-label','每页数量');for(const n of [25,50,100])size.append(new Option(n+' 条 / 页',n));bar.append(size);form.append(bar);parent.append(form);
+ let actor,operation,from,to;if(filters){const grid=node('div',undefined,'grid');actor=textField(grid,'操作者编号');operation=textField(grid,'操作名称');from=textField(grid,'开始时间');from.type='datetime-local';to=textField(grid,'结束时间');to.type='datetime-local';form.append(grid);}
+ const target=node('div'),pager=node('div',undefined,'row');parent.append(target,pager);let page=1,result=null;
+ async function draw(){const input={page,pageSize:Number(size.value),q:search.value,...(filters?{actor:actor.value,action:operation.value,from:from.value?new Date(from.value).toISOString():'',to:to.value?new Date(to.value).toISOString():''}:{})};result=await manage(action,input);target.replaceChildren();table(target,columns.map(c=>c[0]),result.rows.map(r=>columns.map(c=>c[1](r))));const prev=button('上一页',async()=>{page--;await draw();}),next=button('下一页',async()=>{page++;await draw();});prev.disabled=page<=1;next.disabled=page*result.pageSize>=result.total;pager.replaceChildren(node('small','共 '+fmt(result.total)+' 条 · 第 '+page+' 页'),actions(prev,next,button('导出本页 CSV',async()=>{const safe=v=>{let s=String(v??'');if(/^[\\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};const data=[columns.map(c=>c[0]),...result.rows.map(r=>columns.map(c=>{const v=c[1](r);return v instanceof Node?'':v;}))];const blob=new Blob(['\\ufeff'+data.map(row=>row.map(safe).join(',')).join('\\r\\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=node('a');a.href=url;a.download=action+'-page-'+page+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);})));}
+ form.onsubmit=e=>{e.preventDefault();run(async()=>{page=1;await draw();});};size.onchange=()=>run(async()=>{page=1;await draw();});await draw();
+}
+function libraryEditor(library){const form=node('form'),name=textField(form,'企业知识库名称',library?.name||''),members=textField(form,'可访问的员工编号（逗号分隔；管理员始终可访问）',(library?.members||[]).join(', '));name.required=true;name.maxLength=100;const save=node('button','保存企业库','primary');save.type='submit';form.append(save);form.onsubmit=e=>{e.preventDefault();run(async()=>{await knowledge('save',{...(library?{id:library.id,baseUpdated:library.updated}:{}),scope:'enterprise',name:name.value,members:members.value.split(/[,，\\s]+/).filter(Boolean)});$('dialog').close();await render();message('企业知识库已保存，桌面下次访问时使用新权限');});};dialog(library?'修改企业库名称与权限':'新增企业知识库',form);}
+async function libraryDocuments(id){const r=await knowledge('read',{id}),body=node('div');body.append(node('p',r.library.name+' · '+r.documents.length+' 份文档'),button('新增文档',()=>documentEditor(r.library)));
+ table(body,['文档','修订','状态','更新时间','操作'],r.documents.map(d=>[d.title,d.revision,d.status==='published'?'已发布':d.status==='pending'?'待审核':'未发布',date(d.updated),button('查看与编辑',()=>documentEditor(r.library,d))]));dialog('企业库文档',body);}
+function documentEditor(library,doc){const form=node('form'),title=textField(form,'文档标题',doc?.title||''),body=textField(form,'正文（最多 48000 字符）',doc?.body||'',true);title.required=true;title.maxLength=120;body.required=true;body.maxLength=48000;const save=node('button','保存文档','primary');save.type='submit';form.append(save);if(doc?.status==='pending'){const approve=node('button','通过发布');approve.type='button';approve.onclick=()=>run(async()=>{await knowledge('document-review',{id:library.id,documentId:doc.id,decision:'approve'});await libraryDocuments(library.id);message('已发布，授权成员可以引用');});form.append(approve);}form.onsubmit=e=>{e.preventDefault();run(async()=>{await knowledge('document-save',{id:library.id,...(doc?{documentId:doc.id,revision:doc.revision}:{}),title:title.value,body:body.value});await libraryDocuments(library.id);message('文档已保存。企业文档需审核通过后，成员才能引用；再次修改会重新进入待审。');});};dialog(doc?'编辑企业文档 · 修订 '+doc.revision:'新增企业文档',form);}
+async function reviewDetail(kind,row){const id=kind==='candidate'?row.candidate_id:kind==='wiki'?row.page_id:kind==='original'?row.doc_id:row.resource_id;const r=await manage(kind+'-read',{id,revision:row.revision}),x=r.item,body=node('div');body.append(node('p',x.title+' · '+status(x.status)),node('pre',x.body));if(x.source_doc_ids)body.append(node('p','来源：'+x.source_doc_ids));const act=actions();
+ if(['candidate','wiki'].includes(kind)&&x.status==='pending')for(const [decision,label]of [['approve','通过发布'],['reject','驳回']])act.append(button(label,async()=>{if(!confirm('确认'+label+'「'+x.title+'」？'))return;const input={id,version:x.version,revision:x.revision,decision};if(decision==='approve'&&kind==='candidate'){const raw=prompt('下发员工编号，用逗号分隔。留空则本组织全员可见。','');if(raw===null)return;if(raw.trim())input.members=raw.split(/[,，\\s]+/).filter(Boolean);}await manage(kind==='candidate'?'learning-review':'wiki-review',input);$('dialog').close();await render();message('审核结果已保存');},decision==='approve'?'primary':''));
+ if(kind==='resource'&&x.status==='active')act.append(button('下架资源',async()=>{if(!confirm('下架「'+x.title+'」？'))return;await manage('resource-retire',{id});$('dialog').close();await render();message('资源已下架');},'danger'));
+ if(kind==='original'&&x.status!=='revoked')act.append(button('撤销原文',async()=>{if(!confirm('撤销原文将阻断相关派生 Wiki，确认继续？'))return;await manage('original-revoke',{id});$('dialog').close();await render();message('原文已撤权');},'danger'));body.append(act);dialog('内容审阅',body);
+}
+async function enterpriseSection(){
+ if(section==='knowledge'){const c=card('企业知识库');c.append(node('p','与桌面使用同一权限和文档版本。此处仅维护企业库；个人库和本地目录由本人管理。','note'),button('新增企业知识库',()=>libraryEditor(),'primary'));const r=await knowledge('list');table(c,['知识库','文档数','授权成员','更新时间','操作'],r.libraries.filter(l=>l.scope==='enterprise').map(l=>[l.name,l.count,l.members.join(', ')||'仅管理员',date(l.updated),actions(button('管理文档',()=>libraryDocuments(l.id)),button('名称与权限',()=>libraryEditor(l)))]));}
+ if(section==='connectors'){const c=card('应用连接器治理');c.append(node('p','云端登记的 CLI / MCP 连接器。组织禁用覆盖个人开关，桌面下次获取服务目录时生效；不会终止已在本机执行的进程。本机内置即梦、飞书 CLI、网页与目录驱动仍由桌面授权管理。','note'));await queryGrid(c,'connectors',[['服务',r=>r.title],['所属员工',r=>r.employee],['类型',r=>r.type],['个人开关',r=>r.ownerEnabled?'启用':'关闭'],['组织策略',r=>r.blocked?'已禁用':'允许'],['最近检测',r=>r.probeLayer],['操作',r=>button(r.blocked?'解除组织禁用':'组织禁用',async()=>{if(!confirm((r.blocked?'允许':'禁用')+'连接器「'+r.title+'」？'))return;await manage('connector-control',{id:r.id,blocked:!r.blocked,revision:r.policyRevision});await render();message('组织策略已保存');},r.blocked?'':'danger')]]);}
+ if(section==='usage'){const c=card('模型请求台账');c.append(node('p','展示请求状态和计费 Tokens，不读取聊天正文。未知用量表示尚未取得权威供应商用量。','note'));await queryGrid(c,'usage',[['员工',r=>r.employee_id],['请求',r=>r.request_id],['状态',r=>r.status],['预留',r=>fmt(r.reserved_tokens)],['输入 Tokens',r=>r.input_tokens==null?'未知':fmt(r.input_tokens)],['输出 Tokens',r=>r.output_tokens==null?'未知':fmt(r.output_tokens)],['时间',r=>date(r.created_at)]]);const q=card('增额申请记录');q.append(node('p','当前桌面申请采用已有自动批准规则，本页展示审批结果；额度修改仍在配额页执行。','muted'));await queryGrid(q,'quota-requests',[['员工',r=>r.employee_id],['申请编号',r=>r.request_id],['增额 Tokens',r=>fmt(r.additional_tokens)],['结果',r=>r.status],['时间',r=>date(r.created_at)]]);}
+ if(section==='learning'){const policy=await manage('learning-policy'),c=card('企业学习与资源审核');c.append(node('p','桌面在员工授权后自动提交候选。未审内容不会出现在已发布目录；通过时可指定下发成员。','note'),node('p','学习入口：'+(policy.enabled?'允许提交':'已关闭')),button(policy.enabled?'关闭学习提交':'启用学习提交',async()=>{if(!confirm('确认修改本组织学习提交开关？'))return;await manage('learning-set',{enabled:!policy.enabled});await render();message('学习策略已更新');}));await queryGrid(c,'learning-candidates',[['标题',r=>r.title],['作者',r=>r.author_id],['类型',r=>r.kind],['版本',r=>r.version],['状态',r=>status(r.status)],['操作',r=>button('审阅',()=>reviewDetail('candidate',r))]],{placeholder:'搜索候选标题'});
+ const res=card('企业共享资源');await queryGrid(res,'resources',[['标题',r=>r.title],['类型',r=>r.kind],['版本',r=>r.version],['状态',r=>status(r.status)],['操作',r=>button('查看与处理',()=>reviewDetail('resource',r))]],{placeholder:'搜索资源标题'});
+ const wiki=card('发布 Wiki 修订');await queryGrid(wiki,'wiki-revisions',[['标题',r=>r.title],['修订',r=>r.revision],['作者',r=>r.author_id],['状态',r=>status(r.status)],['操作',r=>button('审阅',()=>reviewDetail('wiki',r))]],{placeholder:'搜索 Wiki 标题'});
+ const originals=card('发布 Wiki 的来源原文');await queryGrid(originals,'originals',[['标题',r=>r.title],['版本',r=>r.version],['授权组',r=>r.acl_group],['状态',r=>status(r.status)],['操作',r=>button('查看与撤权',()=>reviewDetail('original',r))]],{placeholder:'搜索原文标题'});}
+ if(section==='uploads'){const c=card('上传与制品状态');c.append(node('p','展示组织内上传元数据，不提供私人制品正文。诊断包内容请在诊断包页面查看。','note'));await queryGrid(c,'uploads',[['员工',r=>r.employee_id],['上传编号',r=>r.upload_id],['用途',r=>r.purpose],['字节',r=>fmt(r.byte_size)],['状态',r=>status(r.status)],['时间',r=>date(r.created_at)]]);const logs=card('日志同步回执');await queryGrid(logs,'log-receipts',[['员工',r=>r.employee_id],['批次',r=>r.batch_id],['事件数',r=>r.event_count],['起点',r=>r.cursor_from],['终点',r=>r.cursor_to],['时间',r=>date(r.created_at)]]);}
+ if(section==='integrations'){const r=await manage('integrations'),c=card('IM 与远程设备登记');c.append(node('p','预留能力：当前桌面消息渠道未接入。下列记录来自平台已有领域服务；空记录不代表故障，已登记也不代表渠道已验证可用。','note'));table(c,['渠道','安装标识','状态'],r.installations.map(x=>[x.channel,x.installation_id,status(x.status)]));const d=card('远程设备');table(d,['设备','员工','远程开关','登记在线状态','最后心跳'],r.devices.map(x=>[x.device_id,x.employee_id,x.remote_enabled?'启用':'关闭',x.online?'登记在线':'离线',date(x.last_seen_at)]));const bindings=card('身份绑定');table(bindings,['员工','渠道','标识','状态'],r.bindings.map(x=>[x.employee_id,x.channel,x.binding_id,status(x.status)]));const out=card('投递状态');table(out,['编号','渠道','状态','尝试次数','时间'],r.deliveries.map(x=>[x.delivery_id,x.channel,x.status,x.attempts,date(x.created_at)]));}
+ if(section==='catalog'){const r=await manage('catalog'),c=card('桌面与云端管理对照');c.append(node('p','每个模块标明管理归属。个人数据和本机授权继续由桌面管理；预留能力明确标注，不能据此宣称已接入。','note'));table(c,['模块','归属','桌面功能','管理范围','入口'],r.modules.map(m=>[m.title,({cloud:'云端',mixed:'云端 + 本机',local:'本机 / 个人',reserved:'预留'}[m.scope]),m.desktop,m.management,m.page?button('前往',async()=>{section=m.page;await render();}):'桌面管理']));const api=card('接口清单');table(api,['模块','接口'],r.modules.filter(m=>m.endpoints.length).map(m=>[m.title,m.endpoints.join(' · ')]));const ports=card('服务与兼容状态');table(ports,['项目','值'],[['数据库 schema',r.schemaVersion],['恢复兼容上限',r.supportedSchema],...r.ports.map(p=>[p.name,p.value+'（'+p.scope+'）'])]);}
+}
 
-    async function api(path, options) {
-      const headers = { "content-type": "application/json" };
-      if (accessToken) headers.authorization = "Bearer " + accessToken;
-      const response = await fetch(path, { ...options, headers });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.message || "请求失败");
-      return body;
-    }
+async function render(){
+ $('page-title').textContent=tabs[section];for(const b of document.querySelectorAll('nav button'))b.setAttribute('aria-current',b.dataset.tab===section?'page':'false');content.replaceChildren(node('p','正在读取云端数据…','muted'));
+ try{
+ if(['overview','employees','sessions','quota'].includes(section)){const data=await api('/v1/admin/employees');employees=data.employees;}
+ let data;
+ if(section==='overview'||section==='provider')data=await Promise.all([api('/health'),api('/v1/admin/provider')]);
+ if(section==='skills')data=await market('list',{summary:true});
 
-    document.querySelector("#login-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const employeeId = document.querySelector("#employee-id").value;
-      const password = document.querySelector("#password").value;
-      const response = await fetch("/v1/session/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ employeeId, password, deviceLabel: "admin-page", actor: "admin", role: "admin" })
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        result.textContent = body.message;
-        panel.hidden = true;
-        return;
-      }
-      accessToken = body.accessToken;
-      if (body.role !== "admin") {
-        result.textContent = "员工不能调用管理接口";
-        panel.hidden = true;
-        return;
-      }
-      result.textContent = "已登录管理员";
-      panel.hidden = false;
-      await reload();
-    });
-
-    async function reload() {
-      const employees = await api("/v1/admin/employees");
-      const provider = await api("/v1/admin/provider");
-      list.replaceChildren();
-      for (const employee of employees.employees) {
-        const item = document.createElement("li");
-        item.textContent = employee.employeeId + " " + employee.name + " " + employee.role + " " + employee.status;
-        for (const session of employee.sessions) {
-          if (session.status !== "active") continue;
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = "撤销 " + session.deviceLabel;
-          button.dataset.sessionId = session.sessionId;
-          button.addEventListener("click", async () => {
-            await api("/v1/admin/sessions/revoke", {
-              method: "POST",
-              body: JSON.stringify({ sessionId: session.sessionId, actor: "employee-a" })
-            });
-            result.textContent = "已撤销 " + session.deviceLabel;
-            await reload();
-          });
-          item.append(button);
-        }
-        list.append(item);
-      }
-      document.querySelector("#provider").textContent = provider.keyPresent
-        ? "模型 " + provider.model + " 密钥已配置"
-        : "模型 " + provider.model + " 密钥未配置";
-    }
-
-    document.querySelector("#backup").addEventListener("click", async () => {
-      const body = await api("/v1/admin/backup", { method: "POST", body: "{}" });
-      result.textContent = "已备份 " + body.fileName;
-    });
-  </script>
-</body>
-</html>
-`;
+ if(section==='backups')data=await manage('backups');
+ if(section==='diagnostics')data=await manage('diagnostics');
+ content.replaceChildren();
+ if(section==='overview'){
+ const stats=node('div',undefined,'stats');for(const [label,value] of [['本组织员工',employees.length],['正常账号',employees.filter(e=>e.status==='active').length],['活动会话',employees.reduce((n,e)=>n+e.sessions.filter(s=>s.status==='active').length,0)],['已结算 Tokens',fmt(employees.reduce((n,e)=>n+e.quota.settledKnown,0))]]){const c=node('div',undefined,'card stat');c.append(node('span',label),node('b',String(value)));stats.append(c);}content.append(stats);const c=card('云端服务');c.append(node('p','服务正常 · '+(data[0].aiMockMode?'Mock 演示模式':'真实模型模式')),node('p','当前模型：'+data[1].model+' · '+(data[1].keyPresent?'密钥已配置':'密钥未配置')),node('p','左侧选择管理功能。操作将记录到本组织审计；页面只在登录期间持有凭证，关闭或刷新页面后需重新登录。','muted'));
+ }
+ if(section==='employees'){const c=card('员工与权限');c.prepend(button('新增员工',()=>employeeEditor(),'primary'));c.append(node('p','管理员可管理本组织员工、调整角色、重置口令和停用账号。停用会永久撤销访问；如需重新入职，请建立新编号。','note'));const search=node('input');search.placeholder='搜索编号或姓名';search.setAttribute('aria-label','搜索员工');c.append(search);const target=node('div');c.append(target);const draw=()=>{target.replaceChildren();table(target,['员工','角色','状态','操作'],employees.filter(e=>(e.employeeId+' '+e.name).includes(search.value.trim())).map(e=>{const a=actions();if(e.status==='active'){a.append(button('编辑',()=>employeeEditor(e)));if(e.employeeId!==identity.employeeId)a.append(button('停用',async()=>{if(confirm('永久停用 '+e.name+' 并撤销全部设备会话？'))await mutate('/v1/admin/employees/disable',{employeeId:e.employeeId},'员工已停用');},'danger'));}return[e.name+' · '+e.employeeId,role(e.role),status(e.status),a];}));};search.oninput=draw;draw();}
+ if(section==='sessions'){const c=card('设备会话');table(c,['员工','设备','会话编号','状态','操作'],employees.flatMap(e=>e.sessions.map(s=>[e.name,s.deviceLabel,s.sessionId+(s.sessionId===identity.sessionId?'（当前）':''),status(s.status),s.status==='active'?button('撤销',async()=>{if(!confirm('撤销 '+e.name+' 的 '+s.deviceLabel+' 会话？'))return;await post('/v1/admin/sessions/revoke',{sessionId:s.sessionId});if(s.sessionId===identity.sessionId){clearSession();$('login-error').textContent='当前会话已撤销，请重新登录';}else{await render();message('会话已撤销');}},'danger'):'—'])));}
+ if(section==='quota'){const c=card('配额与用量');table(c,['员工','总额度','已结算','未知用量预留','进行中预留','并发使用 / 上限','操作'],employees.map(e=>[e.name,fmt(e.quota.limitTokens),fmt(e.quota.settledKnown),fmt(e.quota.unsettledUnknown),fmt(e.quota.openReserved),e.quota.concurrentInUse+' / '+e.quota.concurrentLimit,button('调整',()=>quotaEditor(e))]));}
+ if(section==='provider'){const c=card('模型状态');table(c,['项目','当前状态'],[['模型',data[1].model],['供应商密钥',data[1].keyPresent?'已配置':'未配置'],['执行模式',data[0].aiMockMode?'Mock':'真实'],['服务',data[0].status]]);c.append(node('p','密钥与模型连接由服务器环境配置管理，本页显示配置状态。配置存在不代表供应商调用一定成功。','note'));}
+ if(section==='skills'){const c=card('技能审核与发布');c.append(node('p','查看提交内容、检查结果和试用证据后通过或驳回；已发布版本可下架或紧急停用。','muted'));const filter=node('select');filter.setAttribute('aria-label','技能状态');for(const [value,label]of [['pending','待审核'],['published','已发布'],['','全部状态']])filter.append(new Option(label,value));c.append(filter);const target=node('div');c.append(target);const draw=()=>{target.replaceChildren();table(target,['名称','版本','作者','状态','操作'],data.items.filter(x=>!filter.value||x.status===filter.value).map(x=>[x.title,x.version,x.owner,status(x.status),button('查看与处理',()=>skillDetail(x))]));};filter.onchange=draw;draw();}
+ if(section==='audit'){const c=card('操作审计');c.append(node('p','按操作者、操作名称、时间与对象筛选，可分页查看和导出当前页。','muted'));await queryGrid(c,'audit-query',[['时间',r=>date(r.at_ms)],['操作者',r=>r.actor_id],['操作',r=>r.action],['对象',r=>r.target]],{placeholder:'搜索操作对象',filters:true});}
+ if(section==='backups'){const c=card('数据备份');c.append(node('p','备份保存于服务器数据目录，下面显示本组织最近 50 次备份回执。数据库包含多个组织，下载和恢复由服务器运维执行；恢复时须同时保留权威撤权台账与文件数据。','note'),button('创建备份',async()=>{const r=await post('/v1/admin/backup',{});await render();message('备份已创建：'+r.fileName+' · '+fmt(r.bytes)+' 字节');},'primary'));table(c,['时间','备份文件','大小','状态'],data.backups.map(b=>[date(b.createdAt),b.fileName,fmt(b.bytes)+' 字节',b.available?'文件存在':'文件已移除']));}
+ if(section==='diagnostics'){const c=card('诊断包');c.append(node('p','仅显示本组织成员主动上传的诊断包，最多最近 100 条。查看会记入审计；其他私人文件不在此展示。','note'));table(c,['上传时间','员工','诊断编号','大小','操作'],data.reports.map(r=>[date(r.createdAt),r.employeeId,r.uploadId,fmt(r.byteSize)+' 字节',button('查看诊断',async()=>{const result=await manage('diagnostic-read',{uploadId:r.uploadId});dialog('诊断包 · '+r.uploadId,node('pre',JSON.stringify(result.report,null,2)));})]));}
+ await enterpriseSection();
+ $('updated').textContent='数据更新时间：'+new Date().toLocaleString('zh-CN');
+ }catch(e){content.replaceChildren(node('p','读取失败，请点击刷新重试。','empty'));$('updated').textContent='';throw e;}
+}
+for(const [id,label]of Object.entries(tabs)){const b=button(label,async()=>{section=id;message('');await render();});b.dataset.tab=id;document.querySelector('nav').append(b);}
+$('login-form').onsubmit=e=>{e.preventDefault();run(async()=>{const r=await post('/v1/session/login',{employeeId:$('employee-id').value,password:$('password').value,deviceLabel:'admin-web'});$('password').value='';token=r.accessToken;refreshToken=r.refreshToken;if(r.role!=='admin'){await post('/v1/session/logout',{});clearSession();throw Error('此账号没有管理员权限');}identity=r;$('login-error').textContent='';$('login-card').hidden=true;$('shell').hidden=false;$('identity').textContent=r.orgId+' / '+r.employeeId+' · 管理员';section='overview';message('');await render();});};
+$('refresh').onclick=()=>run(async()=>{await render();message('数据已刷新');});$('logout').onclick=()=>run(async()=>{try{await post('/v1/session/logout',{});}finally{clearSession();}});$('close-dialog').onclick=()=>{$('dialog').close();$('dialog-body').replaceChildren();};
+</script></body></html>`;
 }

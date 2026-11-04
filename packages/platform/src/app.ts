@@ -1,3 +1,5 @@
+import { createGovernance } from './governance.js';
+import { createAdmin, type AdminResult } from './admin.js';
 import { createKnowledge, type KnowledgeResult } from './knowledge.js';
 import { createMarket, type MarketResult } from './market.js';
 import { randomBytes, randomUUID } from "node:crypto";
@@ -188,6 +190,7 @@ function requestIdOk(value: string): boolean {
 }
 
 export type PlatformApp = {
+  admin(accessToken: string, action: string, input: Record<string, unknown>): AdminResult;
   knowledge(accessToken: string, action: string, input: Record<string, unknown>): KnowledgeResult;
   market(accessToken: string, action: string, input: Record<string, unknown>): MarketResult;
   login(input: { employeeId: string; password: string; deviceLabel: string }): LoginSuccess | PlatformFailure;
@@ -282,8 +285,13 @@ export type PlatformApp = {
   ): { ok: true; candidate: LearningCandidateView } | PlatformFailure;
   reviewLearningCandidate(
     accessToken: string,
-    input: { candidateId: string; decision: "approve" | "reject" },
+    input: { candidateId: string; decision: "approve" | "reject"; members?: string[] },
   ): { ok: true; candidate: LearningCandidateView; resourceId?: string } | PlatformFailure;
+  learning(
+    accessToken: string,
+    action: string,
+    input: Record<string, unknown>,
+  ): { ok: true; [key: string]: unknown } | PlatformFailure;
   reviseLearningCandidate(
     accessToken: string,
     input: { candidateId: string; title: string; body: string },
@@ -701,9 +709,33 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
     return undefined;
   }
 
+  const governance = createGovernance(db, config.dataDir, config.now, audit);
   const knowledge = createKnowledge(db, config.now);
   const market = createMarket(db, config.now);
+  const admin = createAdmin(db, config.dataDir, config.now, audit);
   const app: PlatformApp = {
+    admin(accessToken, action, input) {
+      const actor = requireAdmin(accessToken);
+      if (!actor.ok) return actor;
+      const invalid = (): PlatformFailure => failure('CONFIG_INVALID', '管理操作参数无效');
+      if (action === 'learning-policy') return app.learningEnabled(accessToken);
+      if (action === 'learning-set') return typeof input.enabled === 'boolean' ? app.setLearningEnabled(accessToken, input.enabled) : invalid();
+      if (action === 'learning-review') {
+        if (typeof input.id !== 'string' || !['approve','reject'].includes(String(input.decision))) return invalid();
+        const existing = db.prepare('SELECT version,status FROM learning_candidates WHERE candidate_id=? AND org_id=?').get(input.id, actor.orgId);
+        if (!existing) return failure('NOT_FOUND', '没有这个学习候选');
+        if (input.version !== existing.version) return failure('CONFLICT', '候选版本已改变，请重新审阅');
+        if (input.members !== undefined && !Array.isArray(input.members)) return invalid();
+        const members = Array.isArray(input.members) ? input.members.filter((item): item is string => typeof item === 'string') : undefined;
+        const result = app.reviewLearningCandidate(accessToken, {candidateId:input.id,decision:input.decision as 'approve'|'reject', ...(members ? {members} : {})});
+        if (result.ok && input.decision === 'reject') audit(actor.orgId, actor.employeeId, 'learning_reject', input.id);
+        return result;
+      }
+      if (action === 'resource-retire') return typeof input.id === 'string' ? app.retireOrgResource(accessToken, input.id) : invalid();
+      if (action === 'wiki-review') return typeof input.id === 'string' && Number.isInteger(input.revision) && ['approve','reject'].includes(String(input.decision)) ? app.reviewWiki(accessToken, {pageId:input.id,revision:Number(input.revision),decision:input.decision as 'approve'|'reject'}) : invalid();
+      if (action === 'original-revoke') return typeof input.id === 'string' ? app.revokeKnowledge(accessToken, input.id) : invalid();
+      return governance(actor, action, input) ?? admin(actor, action, input);
+    },
     knowledge(accessToken, action, input) {
       const actor = principal(accessToken);
       if (!actor.ok) return actor;
@@ -1347,6 +1379,35 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
         return actor;
       }
       return enterpriseApi().listOrgResources(actor);
+    },
+    learning(accessToken, action, input) {
+      const actor = principal(accessToken);
+      if (!actor.ok) return actor;
+      if (action === "policy") return enterpriseApi().learningEnabled(actor);
+      if (action === "published") return enterpriseApi().listOrgResources(actor);
+      if (action === "submit") {
+        const kind = input.kind;
+        if ((kind !== "experience" && kind !== "memory" && kind !== "skill") || typeof input.title !== "string" || typeof input.body !== "string") {
+          return failure("CONFIG_INVALID", "学习候选参数无效");
+        }
+        if (input.sourceTaskId !== undefined && typeof input.sourceTaskId !== "string") return failure("CONFIG_INVALID", "学习来源任务无效");
+        return enterpriseApi().submitLearningCandidate(actor, {
+          kind,
+          title: input.title,
+          body: input.body,
+          ...(typeof input.sourceTaskId === "string" ? { sourceTaskId: input.sourceTaskId } : {}),
+        });
+      }
+      if (action === "withdraw") {
+        if (typeof input.id !== "string") return failure("CONFIG_INVALID", "缺少候选编号");
+        const row = db.prepare("SELECT author_id, status FROM learning_candidates WHERE candidate_id = ? AND org_id = ?").get(input.id, actor.orgId) as { author_id?: string; status?: string } | undefined;
+        if (!row || row.author_id !== actor.employeeId) return failure("NOT_FOUND", "没有这个学习候选");
+        if (row.status !== "pending") return failure("CONFLICT", "只有待审候选可以撤回");
+        db.prepare("UPDATE learning_candidates SET status = 'withdrawn' WHERE candidate_id = ?").run(input.id);
+        audit(actor.orgId, actor.employeeId, "learning_withdraw", input.id);
+        return { ok: true, candidateId: input.id, status: "withdrawn" };
+      }
+      return failure("CONFIG_INVALID", "未知学习操作");
     },
     recordFeedback(accessToken, input) {
       const actor = principal(accessToken);

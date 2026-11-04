@@ -1,6 +1,6 @@
 #!/bin/bash
 # 将控制面 Docker 部署到验证云主机（默认 47.113.225.93）。
-# 要求：SSH 可达、远端已装 Docker Compose；3928 仅对本机出口 IP 放行。
+# 要求：SSH 可达、远端已装 Docker Compose；3928 按已确认的网络策略放行。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,8 +15,10 @@ usage() {
   CPCLAW_REMOTE_HOST   默认 47.113.225.93
   CPCLAW_REMOTE_USER   默认 root
   CPCLAW_REMOTE_DIR    默认 /opt/cpclaw-platform
-  CPCLAW_FIREWALL_ACK  必须为精确值 yes（确认 3928 仅对本机出口 IP 放行）
-  CPCLAW_FIREWALL_SOURCE_IP  可选；设置后在远端 iptables 只放行该 IPv4 访问 3928
+  CPCLAW_FIREWALL_ACK  必须为精确值 yes（确认所选网络策略）
+  CPCLAW_FIREWALL_MODE  all / allowlist；未设置时优先沿用远端已保存策略
+  CPCLAW_FIREWALL_CIDRS  allowlist 的 IPv4/CIDR 列表，逗号分隔
+  CPCLAW_FIREWALL_SOURCE_IP  兼容旧版单 IP 配置
   CPCLAW_SESSION_SECRET  写入远端 .env；至少 32 位
 
 真实模型密钥经 SSH stdin 写入远端私有 .env，不进入镜像。fixture 仍是验证身份。
@@ -43,7 +45,7 @@ REMOTE_DIR="${CPCLAW_REMOTE_DIR:-/opt/cpclaw-platform}"
 FIREWALL_ACK="${CPCLAW_FIREWALL_ACK:-}"
 
 if [[ "$FIREWALL_ACK" != "yes" ]]; then
-  echo "拒绝部署：未确认防火墙。将 CPCLAW_FIREWALL_ACK=yes 表示你已把 ${REMOTE_HOST}:3928 限制为本机出口 IP。" >&2
+  echo "拒绝部署：请用 CPCLAW_FIREWALL_ACK=yes 确认所选网络策略。" >&2
   exit 1
 fi
 
@@ -63,7 +65,10 @@ fi
 
 TARGET="${REMOTE_USER}@${REMOTE_HOST}"
 echo "部署目标 ${TARGET}:${REMOTE_DIR}"
-echo "防火墙确认: CPCLAW_FIREWALL_ACK=yes（3928 仅受信源）"
+echo "防火墙确认: CPCLAW_FIREWALL_ACK=yes（3928 按保存或显式配置的策略）"
+if [[ -n "${CPCLAW_FIREWALL_MODE:-}" ]]; then
+  node "$ROOT/scripts/platform-network-policy.mjs" --check
+fi
 
 ssh -o BatchMode=yes -o ConnectTimeout=15 "$TARGET" "mkdir -p '${REMOTE_DIR}'"
 
@@ -117,28 +122,15 @@ fi
 "\${COMPOSE[@]}" up -d --build
 EOF
 
-SOURCE_IP="${CPCLAW_FIREWALL_SOURCE_IP:-}"
-if [[ -n "$SOURCE_IP" ]]; then
-  if [[ ! "$SOURCE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "CPCLAW_FIREWALL_SOURCE_IP 必须是 IPv4" >&2
-    exit 1
-  fi
-  echo "收紧远端 iptables：3928 仅放行 ${SOURCE_IP}"
-  ssh "$TARGET" "bash -s" <<EOF
-set -euo pipefail
-while iptables -C INPUT -p tcp --dport 3928 -j DROP -m comment --comment 'cpclaw-3928-deny' 2>/dev/null; do
-  iptables -D INPUT -p tcp --dport 3928 -j DROP -m comment --comment 'cpclaw-3928-deny' || break
-done
-while iptables -C INPUT -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment 'cpclaw-3928-allow' 2>/dev/null; do
-  iptables -D INPUT -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment 'cpclaw-3928-allow' || break
-done
-iptables -I INPUT 1 -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment 'cpclaw-3928-allow'
-iptables -A INPUT -p tcp --dport 3928 -j DROP -m comment --comment 'cpclaw-3928-deny'
-# Docker 发布端口走 FORWARD；INPUT 规则不能保护容器端口。
-IFACE=\$(ip route show default | awk '{print \$5; exit}')
-iptables -I DOCKER-USER 1 -i "\$IFACE" -p tcp --dport 3928 -j DROP -m comment --comment cpclaw-3928-docker-deny
-iptables -I DOCKER-USER 1 -i "\$IFACE" -p tcp --dport 3928 -s ${SOURCE_IP} -j ACCEPT -m comment --comment cpclaw-3928-docker-allow
-EOF
+# 显式模式优先；否则沿用保存策略，防止旧 .env 的单 IP 覆盖 all。
+if [[ -n "${CPCLAW_FIREWALL_MODE:-}" ]]; then
+  bash "$ROOT/scripts/configure-platform-network.sh"
+elif ssh "$TARGET" 'test -f /opt/cpclaw-platform/network-policy.sh'; then
+  ssh "$TARGET" 'bash /opt/cpclaw-platform/network-policy.sh'
+elif [[ -n "${CPCLAW_FIREWALL_SOURCE_IP:-}" ]]; then
+  bash "$ROOT/scripts/configure-platform-network.sh"
+else
+  echo '未配置网络策略；保留现有规则。可使用 configure-platform-network.sh 单独设置。'
 fi
 
 echo "等待远端健康检查..."
@@ -157,7 +149,4 @@ if [[ "$ok" -ne 1 ]]; then
 fi
 
 echo "平台已部署 http://${REMOTE_HOST}:3928 mode=real"
-if [[ -z "$SOURCE_IP" ]]; then
-  echo "警告: 未设置 CPCLAW_FIREWALL_SOURCE_IP，主机 iptables 未自动收紧 3928。请确认云安全组已白名单。" >&2
-fi
 echo "本机联调: CPCLAW_PLATFORM_URL=http://${REMOTE_HOST}:3928 bash scripts/verify-platform-remote.sh"

@@ -16,6 +16,8 @@ import {serviceReplaySafe} from './service-replay.mjs';
 import {taskIssue,recoveredMediaIssue} from './task-issue.mjs';
 import { addAppDriver, addComputerUseSite, listLocalExtensions, removeLocalExtension } from './local-extensions.mjs';
 import { runBoundReportLoop } from '@cpclaw/desktop-host';
+import { abstractLearningCandidate, canCaptureLearning, defaultLearningGrant } from './learning-flow.mjs';
+import { assessFormalTracks } from '@cpclaw/contracts';
 import { createKnowledgeStore, knowledgeSnippets } from './knowledge-service.mjs';
 import { searchProject, retrievalMessage } from './project-search.mjs';
 import { createProjectStore } from './project-service.mjs';
@@ -51,6 +53,8 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   db.exec('CREATE TABLE IF NOT EXISTS chat_materials(user_message TEXT PRIMARY KEY,body TEXT NOT NULL)');
   const knowledge = createKnowledgeStore(db);
   db.exec('CREATE TABLE IF NOT EXISTS chat_knowledge(message TEXT PRIMARY KEY,sources TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS learning_grants(account TEXT PRIMARY KEY, body TEXT NOT NULL)');
+  db.exec('CREATE TABLE IF NOT EXISTS learning_sent(account TEXT NOT NULL, task_id TEXT NOT NULL, candidate_id TEXT NOT NULL, PRIMARY KEY(account, task_id))');
   const projects = createProjectStore(db);
   const projectWiki = createProjectWiki({
     assertCurrent: context => {sameActor(context.actor);if(platform()!==context.platform)throw Error('平台连接已变化，请重新打开项目');projects.folder(context.actor,context.id);},
@@ -284,7 +288,14 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
               return JSON.stringify(reply);
             }},
         });
-        content=result.finalResponse;mode='real';state='done';done=true;
+        content=result.finalResponse;
+        if(result.cleanupWarning){
+          const notice=result.cleanupWarning.code==='HARNESS_CLEANUP'?'运行环境进程尚未退出':'运行环境退出状态尚未确认';
+          progress('cleanup',notice+'；已有回复已保留','error');
+          desktopLog(dataDir,'cpclaw-desktop-worker','warn','harness_cleanup_warning',notice,{chatId:chat.id,code:result.cleanupWarning.code});
+          content+='\n\n> '+notice+'，已有回复已保留。继续执行前请检查运行环境。';
+        }
+        mode='real';state='done';done=true;
         event('delta',{text:content,content});
         return;
       }
@@ -820,6 +831,57 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
           return { ok: true, message: probe.message, probe };
         }
       }
+      function readGrant(actor) {
+        const row = db.prepare('SELECT body FROM learning_grants WHERE account=?').get(knowledgeAccount(actor));
+        if (!row) return defaultLearningGrant();
+        try { return { ...defaultLearningGrant(), ...JSON.parse(row.body) }; } catch { return defaultLearningGrant(); }
+      }
+      if (method === 'formal.tracks') return { ok: true, tracks: assessFormalTracks(process.env) };
+      if (method === 'learning.grant') {
+        if (input.save === true) {
+          const current = readGrant(actor);
+          const next = {
+            ...current,
+            enabled: input.enabled === true,
+            autoSubmit: input.autoSubmit === true,
+            paused: input.paused === true,
+            kinds: Array.isArray(input.kinds) && input.kinds.length ? input.kinds : current.kinds,
+            excludes: Array.isArray(input.excludes) ? input.excludes.map(String) : current.excludes,
+            includeHistory: input.includeHistory === true,
+            expiresAt: Number.isInteger(input.expiresAt) ? input.expiresAt : null,
+            budget: Number.isInteger(input.budget) ? input.budget : current.budget,
+          };
+          db.prepare('INSERT INTO learning_grants(account,body) VALUES(?,?) ON CONFLICT(account) DO UPDATE SET body=excluded.body').run(knowledgeAccount(actor), JSON.stringify(next));
+          desktopLog(dataDir, 'cpclaw-desktop-worker', 'info', 'learning_grant', '已保存本机学习授权', { employeeId: actor, enabled: next.enabled, autoSubmit: next.autoSubmit, paused: next.paused });
+          return { ok: true, grant: next };
+        }
+        return { ok: true, grant: readGrant(actor) };
+      }
+      if (method === 'learning.published' || method === 'learning.capture') {
+        const auth = await refreshSession(new AbortController().signal);
+        sameActor(actor);
+        if (method === 'learning.published') {
+          const result = await (await post(auth.base, '/v1/learning', { action: 'published', input: {} }, new AbortController().signal, auth.token)).json();
+          sameActor(actor);
+          return result;
+        }
+        const taskId = String(input.taskId || '');
+        if (!taskId) return fail('CONFIG_INVALID', '缺少任务标识');
+        const grant = readGrant(actor);
+        const decision = canCaptureLearning(grant, taskId, Date.now());
+        if (!decision.ok) return { ok: true, submitted: false, reason: decision.reason };
+        const sent = db.prepare('SELECT candidate_id FROM learning_sent WHERE account=? AND task_id=?').get(knowledgeAccount(actor), taskId);
+        if (sent) return { ok: true, submitted: false, duplicate: true, candidateId: sent.candidate_id };
+        const candidate = abstractLearningCandidate(input, decision.kind);
+        const result = await (await post(auth.base, '/v1/learning', { action: 'submit', input: candidate }, new AbortController().signal, auth.token)).json();
+        sameActor(actor);
+        if (!result.ok) return result;
+        db.prepare('INSERT INTO learning_sent(account,task_id,candidate_id) VALUES(?,?,?)').run(knowledgeAccount(actor), taskId, result.candidate.candidateId);
+        const spent = { ...grant, spent: grant.spent + 1 };
+        db.prepare('INSERT INTO learning_grants(account,body) VALUES(?,?) ON CONFLICT(account) DO UPDATE SET body=excluded.body').run(knowledgeAccount(actor), JSON.stringify(spent));
+        desktopLog(dataDir, 'cpclaw-desktop-worker', 'info', 'learning_submit', '已提交学习候选', { employeeId: actor, taskId, candidateId: result.candidate.candidateId, kind: decision.kind });
+        return { ok: true, submitted: true, candidateId: result.candidate.candidateId };
+      }
       if (method.startsWith('knowledge.')) {
         const key=knowledgeAccount(actor);
         if(method==='knowledge.list')return {ok:true,links:knowledge.list(key),selected:input.chatId&&owns(actor,input.chatId)?knowledge.choices(key,input.chatId):[]};
@@ -947,6 +1009,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       }
       finally { if (changing) accountBusy = false; if (diagnosing) diagnosticBusy = false; }
     },
+    isBusy() { return Boolean(active.size||distilling.size||diagnosticBusy||accountBusy||wikiBusy.size||marketService.isBusy()); },
     stop() { projectWiki.stop();marketService.stop();for (const controller of [...active.values(),...distilling.values()]) controller.abort(); },
   };
 }

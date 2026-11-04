@@ -1,3 +1,4 @@
+import {createDiagnosticCenter} from './diagnostic-center.mjs';
 import { createChatService } from "./chat-service.mjs";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -31,6 +32,7 @@ function executeService(request,signal){
 const chat = createChatService(dataDir, event => process.stdout.write(JSON.stringify({ event }) + "\n"),{executeService});
 const workspace = openLocalWorkspace(dataDir);
 const activeReports = new Map();
+const diagnosticCenter=createDiagnosticCenter({dataDir,chat,appVersion:JSON.parse(readFileSync(new URL('./package.json',import.meta.url),'utf8')).version});
 const materials = [
   { fileName: "policy-excerpt.md", paragraphs: [{ id: "p1", text: "制度要求保留来源" }] },
   { fileName: "project-note.md", paragraphs: [{ id: "p1", text: "项目记录只覆盖本机材料" }] },
@@ -44,10 +46,12 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+let maintenance=false;
 function dispatch(message) {
   const input = isRecord(message.input) ? message.input : {};
   const actorId = message.actorId;
-  if (message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.")) return chat.dispatch(message.method, actorId, input);
+  if(maintenance&&!message.method?.startsWith("doctor.")&&message.method!=="chat.history")return fail("SLOT_BUSY","运行环境正在修复，请稍后再试。");
+  if (message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.") || message.method?.startsWith("learning.") || message.method === "formal.tracks") return chat.dispatch(message.method, actorId, input);
   if (typeof actorId !== "string") {
     return fail("SCHEMA_INVALID", "缺少员工标识");
   }
@@ -71,6 +75,10 @@ function dispatch(message) {
       return decide(input);
     case "selectWiki":
       return selectWiki(actorId, input);
+    case "doctor.preflight":
+      { const busy=Boolean(activeReports.size||chat.isBusy());if(!busy&&input.reserve===true)maintenance=true;return {ok:true,busy}; }
+    case "doctor.center":
+      return diagnosticCenter.dispatch(input.action,actorId,input);
     case "doctor.run":
       return doctorRun(input);
     case "doctor.export":
@@ -88,7 +96,10 @@ function doctorRun(input) {
     modelKeyPresent: input.modelKeyPresent,
     grantedDirectories: grants.filter((item) => typeof item === "string"),
     connectorConfigured: input.connectorConfigured,
+    firstCli: process.env.CPCLAW_FIRST_CLI,
+    firstMcp: process.env.CPCLAW_FIRST_MCP,
     imPaired: input.imPaired,
+    imCallbackVerified: process.env.CPCLAW_IM_CALLBACK_VERIFIED === "1",
   });
   return { ok: true, report };
 }

@@ -31,6 +31,9 @@ test('知识库：企业授权、个人隔离、版本冲突、平台接口及�
   assert.ok(call(a,'document-save',{id:personal.id,title:'个人验收记录',body:'验收记录 PERSONAL-998。'}).ok);
   assert.equal(call(admin,'document-save',{id:enterprise.id,documentId:doc.id,revision:0,title:'旧版本',body:'bad'}).code,'CONFLICT');
   assert.ok(call(admin,'document-save',{id:enterprise.id,documentId:doc.id,revision:1,title:'验收标准',body:'验收标准 KNOWLEDGE-873，核对证据。'}).ok);
+  assert.equal(call(a,'read',{id:enterprise.id}).documents.length,0);
+  assert.ok(call(admin,'document-review',{id:enterprise.id,documentId:doc.id,decision:'approve'}).ok);
+  assert.match(call(a,'read',{id:enterprise.id}).documents[0].body,/KNOWLEDGE-873/);
   upstream=documentModelFixture(({body})=>{const prompt=body.messages.at(-1).content;modelInputs.push(prompt);return {kind:'document',filename:'验收报告.md',content:'# 验收报告\n\n企业制度 / 验收标准:L1 KNOWLEDGE-873\n我的本地笔记 / 验收.md:L1 LOCAL-552'};});
   await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
   server=await listenPlatform(app,{port:0,dataDir:config.dataDir,aiMockMode:false,reportGateway:{mode:'real',baseUrl:`http://127.0.0.1:${upstream.address().port}`,apiKey:'fixture',timeoutMs:5000}});const base=`http://127.0.0.1:${server.port}`;

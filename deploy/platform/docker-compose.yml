@@ -1,5 +1,5 @@
 # 验证用控制面。数据卷落在远端机本地路径，不写回开发者本机。
-# 部署前必须确认安全组/防火墙：3928 仅对本机出口 IP 放行（见 deploy-platform-remote.sh）。
+# 部署前确认安全组/防火墙：3928 按 all 或 allowlist 策略放行（见 configure-platform-network.sh）。
 services:
   platform:
     build:

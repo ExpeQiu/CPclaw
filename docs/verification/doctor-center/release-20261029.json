@@ -1,0 +1,47 @@
+{
+  "version": "0.0.35",
+  "releasedAt": "2026-10-29T10:49:42.953878+00:00",
+  "cloud": {
+    "base": "http://47.113.225.93:3928",
+    "healthy": true,
+    "mode": "real",
+    "backup": "/opt/cpclaw-platform/backups/diagnostics-20261029T104104Z",
+    "image": "sha256:5b14c6d1e82a5457c5f8e5ea681e95d8f706a47da41799a58a318ad22190a833",
+    "configurationUnchanged": true,
+    "smoke": {
+      "ok": true,
+      "mode": "real",
+      "uploadId": "upl-79ab0f39d9b34261b61cb493ced5c343",
+      "sha256": "944b1643a88ca5178478da0a48621414e392abfbc06e69737eb2f47322b7f905",
+      "status": "available",
+      "idempotent": true,
+      "contentVerified": true,
+      "accountIsolation": true,
+      "unauthenticatedRejected": true,
+      "syntheticOnly": true,
+      "modelCalls": 0
+    }
+  },
+  "installed": {
+    "installed": "/Applications/CPclaw.app",
+    "backup": "/Volumes/Lexar/git/03T/CPclaw-app-backups/diagnostics-035-20261029T104432Z",
+    "version": "0.0.35",
+    "missingPathPackageCheck": true,
+    "doctorCenter": true,
+    "runtimeRepair": true,
+    "originalTaskRerun": false,
+    "restarted": true
+  },
+  "installedToCloud": {
+    "ok": true,
+    "installedVersion": "0.0.35",
+    "realWorker": true,
+    "productionPlatform": true,
+    "verifiedReceipt": true,
+    "uploadId": "upl-e67742fb67af489788c9f87fbee2c0cd",
+    "syntheticIsolatedDataOnly": true,
+    "modelCalls": 0
+  },
+  "delivery": "/Users/expeqiu/Documents/产品设计/CPclaw桌面APP/0.0.35",
+  "dmgSha256": "3916160b319fbe94fc1171cf79583ae226b52f604360db4fc86e2075d0f68418"
+}

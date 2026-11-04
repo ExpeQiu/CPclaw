@@ -79,6 +79,9 @@ async function decide(changeId, decision) {
   const result = await window.cpclaw.workspace({ method: "decide", input: { changeId, decision } });
   if (!result.ok) {
     document.getElementById("status").textContent = result.message;
+  } else if (decision === "accept" && typeof chatCall === "function") {
+    const captured = await chatCall("learning.capture", { taskId: changeId, title: "已验收变更", outcome: "已接受审阅结果" });
+    if (captured?.submitted) document.getElementById("status").textContent = "学习候选已提交待审";
   }
   await refresh();
 }
@@ -116,42 +119,7 @@ onAction("cancel-report", async () => {
   await refresh();
 });
 
-let lastDoctorReport = null;
 
-onAction("doctor", async () => {
-  const output = document.getElementById("output").value;
-  const result = await window.cpclaw.runDoctor({
-    grantedDirectories: output ? [output] : [],
-  });
-  const out = document.getElementById("doctor-out");
-  if (!result.ok) {
-    out.textContent = result.message;
-    return;
-  }
-  lastDoctorReport = result.report;
-  out.textContent = result.report.checks
-    .map((item) => `${item.id}\t${item.status}\t${item.summary}`)
-    .join("\n");
-});
-
-onAction("doctor-export", async () => {
-  const out = document.getElementById("doctor-out");
-  if (lastDoctorReport === null) {
-    out.textContent = "请先运行诊断";
-    return;
-  }
-  const includeExtra = document.getElementById("diag-extra").checked;
-  const result = await window.cpclaw.exportDiagnostic({
-    report: lastDoctorReport,
-    includeExtra,
-    extraScopes: includeExtra ? ["sync_meta"] : [],
-  });
-  if (!result.ok) {
-    out.textContent = result.message;
-    return;
-  }
-  out.textContent = `已导出 ${result.fileName}（${result.bytes} 字节）\n` + out.textContent;
-});
 
 function onAction(id, action) {
   const button = document.getElementById(id);

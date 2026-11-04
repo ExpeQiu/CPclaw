@@ -1,15 +1,15 @@
+import { ensureConnectorPolicySchema } from './connector-policy.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { platformLog } from "./log.js";
 
 export type AuthorityEntry = {
-  kind: "knowledge" | "session" | "employee" | "channel_binding" | "conversation";
   id: string;
   at: number;
   orgId: string;
   actorId: string;
-};
+} & ({kind: "knowledge" | "session" | "employee" | "channel_binding" | "conversation"} | {kind:"connector_policy";blocked:boolean;revision:number});
 
 export type AuthorityLedger = {
   schemaVersion: 1;
@@ -55,13 +55,16 @@ export function readAuthorityLedger(dataDir: string): AuthorityLedger {
           kind === "session" ||
           kind === "employee" ||
           kind === "channel_binding" ||
-          kind === "conversation") &&
+          kind === "conversation" || kind === "connector_policy") &&
         typeof id === "string" &&
         typeof at === "number" &&
         typeof orgId === "string" &&
         typeof actorId === "string"
       ) {
-        cleaned.push({ kind, id, at, orgId, actorId });
+        if (kind === 'connector_policy') {
+          const blocked = Reflect.get(item, 'blocked'), revision = Reflect.get(item, 'revision');
+          if (typeof blocked === 'boolean' && Number.isSafeInteger(revision) && Number(revision) > 0) cleaned.push({kind,id,at,orgId,actorId,blocked,revision:Number(revision)});
+        } else cleaned.push({ kind, id, at, orgId, actorId });
       }
     }
     return { schemaVersion: 1, entries: cleaned };
@@ -92,8 +95,12 @@ export function appendAuthorityRevocation(dataDir: string, entry: AuthorityEntry
 export function applyAuthorityLedger(db: DatabaseSync, dataDir: string): { applied: number } {
   const ledger = readAuthorityLedger(dataDir);
   let applied = 0;
+  ensureConnectorPolicySchema(db);
   for (const entry of ledger.entries) {
-    if (entry.kind === "knowledge") {
+    if (entry.kind === 'connector_policy') {
+      const result = db.prepare('INSERT INTO org_connector_controls VALUES(?,?,?,?,?) ON CONFLICT(org,id) DO UPDATE SET blocked=excluded.blocked,revision=excluded.revision,updated=excluded.updated WHERE org_connector_controls.revision <= excluded.revision').run(entry.orgId,entry.id,entry.blocked?1:0,entry.revision,entry.at);
+      applied += Number(result.changes ?? 0);
+    } else if (entry.kind === "knowledge") {
       const result = db.prepare("UPDATE knowledge_docs SET status = 'revoked' WHERE doc_id = ? AND status != 'revoked'").run(
         entry.id,
       );

@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("cpclaw", {
   settingsPickHarnessRoot() {
     return ipcRenderer.invoke("settings.pickHarnessRoot");
   },
+  doctorAction(input) { return ipcRenderer.invoke('doctor.action',input??{}); },
   runDoctor(input) {
     return ipcRenderer.invoke("doctor.run", input ?? {});
   },

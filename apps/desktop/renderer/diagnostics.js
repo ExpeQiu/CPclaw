@@ -5,6 +5,7 @@ let lastDiagnoseChatId = '';
 
 byId('diagnostics-close').onclick = () => diagnosticsDialog.close();
 window.clearChatDiagnostics = function () {
+  window.clearDoctorCenter?.();
   diagnosticsDialog.close();
   byId('diagnostics-body').replaceChildren();
   lastDiagnoseResult = null;

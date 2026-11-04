@@ -8,7 +8,7 @@ export const WORKSPACE_SCHEMA_SUPPORTED = 2;
 /** 本机会话文件当前支持的 schema。 */
 export const SESSION_SCHEMA_SUPPORTED = 1;
 /** 平台库当前支持的 schema。与 platform ensureSchema 保持一致。 */
-export const PLATFORM_SCHEMA_SUPPORTED = 3;
+export const PLATFORM_SCHEMA_SUPPORTED = 4;
 
 export type CompatCode = "SCHEMA_INCOMPATIBLE" | "NOT_FOUND" | "IO";
 

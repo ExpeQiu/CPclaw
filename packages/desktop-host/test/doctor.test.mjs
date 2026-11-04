@@ -132,3 +132,16 @@ test("未签名制品清单与升级门禁", () => {
   });
   assert.equal(refuse.ok, false);
 });
+
+test("登记首个 CLI 与 MCP 后诊断不再跳过，回调未验证时 IM 仍跳过", () => {
+  const dir = tempDir();
+  const report = runDoctor({
+    dataDir: dir,
+    firstCli: "lark-cli",
+    firstMcp: "https://mcp.example/rpc",
+    imCallbackVerified: false,
+  });
+  assert.equal(report.checks.find((item) => item.id === "cli_mcp")?.status, "ok");
+  assert.match(report.checks.find((item) => item.id === "cli_mcp")?.summary ?? "", /lark-cli/);
+  assert.equal(report.checks.find((item) => item.id === "im")?.status, "skipped");
+});

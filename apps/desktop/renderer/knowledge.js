@@ -44,8 +44,10 @@ async function kbView(link,documentId){
  const r=await kbCall('knowledge.read',{id:link.id});kbOpen(link.name);
  if(r.library.editable){kbBody.append(kbButton('＋ 新建文档',()=>kbEditDocument(link)),kbButton('修改名称 / 权限',()=>kbEditLibrary(link.scope,r.library)));}
  const docs=documentId?r.documents.filter(d=>d.id===documentId):r.documents;
- if(!docs.length)kbBody.append(kbNode('p','暂无文档。'));
+ if(!docs.length)kbBody.append(kbNode('p',r.pendingCount?'企业文档待审核，通过前不能引用。':'暂无文档。'));
  for(const doc of docs){const detail=kbNode('details');detail.open=Boolean(documentId);detail.append(kbNode('summary',doc.title));const pre=kbNode('pre',doc.body);pre.className='knowledge-document';detail.append(pre);
+ if(doc.status==='pending')detail.append(kbNode('p','待审核，员工暂不可引用'));
+ if(r.library.editable&&doc.status==='pending')detail.append(kbButton('通过发布',async()=>{await kbCall('knowledge.remote',{action:'document-review',input:{id:link.target,documentId:doc.id,decision:'approve'}});await kbView(link);}));
  if(link.kind==='local')detail.append(kbButton('在文件夹中显示',async()=>{const result=await window.cpclaw.knowledgeAction({action:'open',id:link.id,path:doc.id});if(!result.ok)throw Error(result.message);}));
  if(r.library.editable)detail.append(kbButton('编辑文档',()=>kbEditDocument(link,doc)));kbBody.append(detail);}
 }

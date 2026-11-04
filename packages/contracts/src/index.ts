@@ -1,3 +1,5 @@
+export { assessFormalTracks, formalPhaseReady } from "./formal-gate.js";
+export type { FormalTrack, FormalTrackId } from "./formal-gate.js";
 export { inboundDedupKey, parseRelayEnvelope } from "./channel.js";
 export type { ChannelKind, RelayCommandKind, RelayEnvelope, RelayParseResult } from "./channel.js";
 export { resolveDevHostConfig } from "./config.js";

@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "desktopDir": "/Applications/CPclaw.app/Contents/Resources/app",
+  "version": "0.0.35",
+  "coveredEndpoints": [
+    "/v1/chat/stream",
+    "/v1/diagnostics",
+    "/v1/knowledge",
+    "/v1/market",
+    "/v1/me/quota",
+    "/v1/me/quota-requests",
+    "/v1/reports/generate",
+    "/v1/session/login",
+    "/v1/session/logout"
+  ],
+  "checks": [
+    "desktop cloud routes covered by management catalog",
+    "installed desktop respects effective connector enabled state"
+  ],
+  "limits": [
+    "does not execute installed app UI or access user workspace",
+    "does not verify new source-only desktop features in installed package"
+  ]
+}

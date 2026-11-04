@@ -1,3 +1,4 @@
+import { inspectHarnessProcess } from "./process-inspection.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -140,12 +141,9 @@ export async function runTextStream(input: {
 }
 
 function processStillMentions(marker: string): boolean {
-  try {
-    const listing = execFileSync("ps", ["-ax", "-o", "command="], { encoding: "utf8" });
-    return listing.includes(marker);
-  } catch {
-    return true;
-  }
+  const result = inspectHarnessProcess(marker);
+  if (result.state === 'unknown') throw new Error('Harness 退出状态检查失败，无法确认进程是否残留');
+  return result.state === 'remaining';
 }
 
 export async function cancelHarness(input: {
@@ -238,7 +236,7 @@ export async function runReportLoop(input: {
   goal: string; materials: { fileName: string; paragraphs: { id: string; text: string }[] }[];
   signal: AbortSignal; beforeCall: () => void; unknownUsage: () => void;
   service?: { context: string; execute: (request: string) => Promise<string> };
-}): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean }> {
+}): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean | null; cleanupWarning?: { code: string; message: string } }> {
   const budget = input.service ? serviceModelBudget() : null;
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
@@ -322,19 +320,25 @@ export async function runReportLoop(input: {
     if (fatal) throw fatal;
     input.signal.throwIfAborted();
     if ((!input.service && (toolCalls < 1 || modelCalls < 2)) || !result.finalResponse.trim()) throw new Error("Harness 未完成工具调用和模型续答");
-    await harness.close();
+    let cleanupWarning: { code: string; message: string } | undefined;
+    try { await harness.close(); }
+    catch { cleanupWarning = {code:'HARNESS_CLOSE_FAILED',message:'运行环境关闭异常，已有回复已保留；请检查运行环境后再继续。'}; }
     // SDK close may resolve before the operating system reaps its child.
     const cleanupDeadline = Date.now() + 2_000;
-    let remains = processStillMentions(patch);
-    while (remains && Date.now() < cleanupDeadline) {
+    let inspection = inspectHarnessProcess(patch);
+    while (inspection.state === 'remaining' && Date.now() < cleanupDeadline) {
       await new Promise(resolve => setTimeout(resolve, 50));
       input.signal.throwIfAborted();
-      remains = processStillMentions(patch);
+      inspection = inspectHarnessProcess(patch);
     }
     input.signal.throwIfAborted();
-    if (remains) throw new Error("Harness 子进程未回收");
+    if (inspection.state === 'remaining') cleanupWarning = {code:'HARNESS_CLEANUP',message:'检测到运行环境进程仍未退出，已有回复已保留；请检查运行环境后再继续。'};
+    else if (inspection.state === 'unknown') cleanupWarning = {code:'HARNESS_CLEANUP_UNKNOWN',message:'无法核实运行环境是否退出，已有回复已保留；请检查运行环境后再继续。'};
     const finalResponse = result.finalResponse.replace(/^#(?=任务目标|材料与来源|要点|未覆盖项)/gm, "# ");
-    return { finalResponse, toolCalls, modelCalls, childCommandSeenAfterClose: remains };
+    return { finalResponse, toolCalls, modelCalls,
+      childCommandSeenAfterClose: inspection.state === 'unknown' ? null : inspection.state === 'remaining',
+      ...(cleanupWarning ? {cleanupWarning} : {}) };
+
   } finally {
     input.signal.removeEventListener("abort", abort);
     await harness?.close().catch(() => undefined);

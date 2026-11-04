@@ -1,7 +1,7 @@
 {
   "name": "@cpclaw/desktop",
   "private": true,
-  "version": "0.0.33",
+  "version": "0.0.35",
   "type": "module",
   "main": "main.mjs",
   "scripts": {
