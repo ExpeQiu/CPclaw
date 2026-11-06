@@ -784,10 +784,18 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .project-wiki-preview .project-wiki-link{display:inline;margin:0;padding:0;border:0;background:transparent;color:inherit;text-decoration:underline;font-size:inherit;text-align:left}
 .project-chat-row{display:flex;align-items:center;position:relative}
 .project-chat-row .task-row{min-width:0;padding-right:28px}
-.chat-move{position:absolute;right:4px;border:0;padding:3px 5px;background:transparent;opacity:0}
-.project-chat-row:hover .chat-move,.project-chat-row:focus-within .chat-move{opacity:1}
-#move-chat-dialog{width:340px;max-width:90vw;border:1px solid #dfe5d8;border-radius:12px;padding:22px;color:#303b33}
-#move-chat-dialog::backdrop{background:#20301b40}#move-chat-dialog h2{margin:0 0 16px;font-size:17px}#move-chat-dialog .button-row{justify-content:flex-end;margin-top:20px}
+.chat-more{position:absolute;right:4px;border:0;padding:3px 5px;background:transparent;opacity:0}
+.project-chat-row:hover .chat-more,.project-chat-row:focus-within .chat-more{opacity:1}
+.chat-more-menu{position:fixed;z-index:40;width:168px;padding:6px;background:#fff;border:1px solid #e0e5da;border-radius:10px;box-shadow:0 8px 30px #20301b20}
+.chat-more-menu button{display:block;width:100%;margin:0;text-align:left;border:0;background:transparent;padding:8px 10px;font-size:12px;border-radius:7px}
+.chat-more-menu button:hover{background:#f0f3ec}
+.chat-more-menu button.danger{color:#8d3b32}
+#move-chat-dialog,#delete-chat-dialog{width:340px;max-width:90vw;border:1px solid #dfe5d8;border-radius:12px;padding:22px;color:#303b33}
+#move-chat-dialog::backdrop,#delete-chat-dialog::backdrop{background:#20301b40}
+#move-chat-dialog h2,#delete-chat-dialog h2{margin:0 0 16px;font-size:17px}
+#move-chat-dialog .button-row,#delete-chat-dialog .button-row{justify-content:flex-end;margin-top:20px}
+#delete-chat-dialog p{margin:0;font-size:13px;line-height:1.6}
+#delete-chat-dialog .danger{background:#8d3b32;color:#fff;border-color:#8d3b32}
 #project-material-context{display:flex;align-items:center;gap:8px;padding:2px 6px 8px;color:#64765b;font-size:12px}#project-material-context button{border:0;padding:2px 6px;background:transparent;border-radius:999px}#project-material-context button:hover{background:#eef1e8}
 #current-project-label{color:inherit;overflow:hidden;text-overflow:ellipsis;max-width:100px}
 
@@ -938,3 +946,17 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 
 /* 设置中的诊断与修复入口 */
 #doctor-center h2{margin-top:0}.doctor-checks{display:grid;gap:7px;margin:12px 0}.doctor-check{display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px;padding:8px 10px;border:1px solid var(--line,#dfe4da);border-radius:8px;font-size:12px;overflow-wrap:anywhere}.doctor-check span{color:#68745f}.doctor-fail{border-left:3px solid #b96b41}.doctor-warn{border-left:3px solid #b89a54}.doctor-ok{border-left:3px solid #6d8a62}.doctor-shortcuts{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.doctor-privacy{font-size:12px}.doctor-cloud code{display:block;font-size:11px;overflow-wrap:anywhere}#doctor-out{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}
+
+/* Folder loading shares the service picker; no additional modal. */
+.folder-loader header h2{margin:0 0 8px}.folder-loader header p{overflow-wrap:anywhere;font-size:12px}
+.folder-load-status{padding:12px 14px;border-radius:10px;background:#eef3e9;line-height:1.65}
+.folder-load-error{background:#fff0eb;color:#8d3025}
+.folder-app-list{display:grid;gap:12px}.folder-app-card{border:1px solid #dce3d6;border-radius:12px;padding:16px}
+.folder-app-card strong{font-size:16px}.folder-app-state{display:block;font-size:12px;color:#63745c;margin-top:6px}
+.folder-app-card p{line-height:1.6}.folder-loader[aria-busy="true"] .folder-load-status{opacity:.8}
+.extension-kind-actions details{margin-top:10px}.extension-kind-actions summary{cursor:pointer;color:#687263;font-size:12px}
+.extension-kind-actions details label{margin-top:12px}
+
+/* Only the selected service category uses the solid active treatment. */
+.extension-kind-tab[aria-selected="true"],.extension-kind-tab[aria-selected="true"]:hover{background:#354d3c;border-color:#354d3c;color:#fff;font-weight:600}
+.extension-kind-tab[aria-selected="false"]{background:#fff;color:#5d6a55;font-weight:400}

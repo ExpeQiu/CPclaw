@@ -24,6 +24,7 @@ function wikiBusy(value){wikiStart.disabled=value;wikiStop.hidden=!value;wikiVie
 function wikiIssues(rows,title){if(!rows?.length)return;const details=wikiNode('details'),summary=wikiNode('summary',`${title}（${rows.length}）`),list=wikiNode('ul');for(const row of rows)list.append(wikiNode('li',row.path+'：'+row.reason));details.append(summary,list);wikiDetails.append(details);}
 function renderWikiStatus(result) {
   wikiStatus=result;
+  if(result.kernelManaged){wikiSummary.textContent='上次整理运行：'+(result.run?.state||'尚未开始')+'；'+(result.home?'可查看已保存 Wiki。':'尚无已保存 Wiki 入口，请在聊天核对结果。');wikiStart.textContent='整理项目 Wiki';wikiBusy(result.busy);return;}
   wikiSummary.textContent=`${result.total} 份支持的文本 · ${result.changed} 份新增或变化 · ${result.removed} 份来源移除。上次更新：${result.updated?new Date(result.updated).toLocaleString():'尚未整理'}`;
   wikiStart.textContent=result.updated?'更新知识':'开始整理';wikiBusy(result.busy);
   wikiDetails.replaceChildren();wikiIssues(result.last?.pending,'待处理');wikiIssues(result.skipped,'未加工材料');
@@ -41,6 +42,7 @@ async function runProjectWiki() {
   const generation=wikiGeneration;wikiBusy(true);wikiFeedback.textContent='正在扫描项目资料…';wikiPreview.replaceChildren();
   try {
     const result=await wikiCall('project.wiki.run');if(generation!==wikiGeneration)return;
+    if(result.kernelManaged){wikiFeedback.textContent='本次整理已通过项目聊天交给内核处理；请在聊天中核对工具回执和实际文件。';if(result.chatId){wikiDialog.close();await loadChats();await selectChat(result.chatId);}return;}
     renderWikiStatus(await wikiCall('project.wiki.status'));
     wikiFeedback.textContent=result.unchanged?'资料没有变化，未调用模型。':`整理完成：新增 ${result.created} 页、更新 ${result.changed} 页、移除 ${result.removed} 份来源；${result.pending.length} 项待处理。Agent 索引已就绪，检索时会校验来源有效性。`;
   } catch(error) {

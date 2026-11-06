@@ -1,0 +1,60 @@
+{
+  "version": "0.0.42",
+  "installedApp": "/Applications/CPclaw.app",
+  "backup": "/Volumes/Lexar/git/03T/CPclaw-app-backups/unified-042-20261105T130851Z",
+  "before": {
+    "chats": 16,
+    "messages": 78,
+    "streaming": 0
+  },
+  "after": {
+    "chats": 16,
+    "messages": 78,
+    "streaming": 0
+  },
+  "launched": true,
+  "pids": [
+    5356,
+    5733,
+    5734,
+    5735,
+    5738
+  ],
+  "dmgSha256": "bced1f2004215643f62b2d154c8058f2d4806263422ce3e0c5848ae52597d5dc",
+  "zipSha256": "14cbbbd7c04c602bc3aaded77b2e2684fa7448c386508f4fa62f79b7558bae72",
+  "signature": "ad-hoc",
+  "notarized": false,
+  "delivery": "/Users/expeqiu/Documents/产品设计/CPclaw桌面APP/0.0.42",
+  "cloud": {
+    "base": "http://47.113.225.93:3928",
+    "backup": "/opt/cpclaw-platform/backups/unified-042-20261105T130146Z",
+    "image": "sha256:169c30ec82a165689961432248dc48995130cb5844f68f64a61224421950ace3",
+    "healthy": true,
+    "mode": "real",
+    "privateEnvironmentUnchanged": true,
+    "sourceHashesMatch": true
+  },
+  "checks": {
+    "dmgIntegrity": true,
+    "strictSignature": true,
+    "packagedSdkControlledProvider": true,
+    "cleanPathPackageSmoke": true,
+    "installedPackageSmoke": true,
+    "installedManifestFiles": 630,
+    "desktopCloudAlignment": true,
+    "remoteLoginAndIsolation": true,
+    "realCloudSyntheticChatAndDocument": true
+  },
+  "realCloudProbe": {
+    "passed": true,
+    "version": "0.0.42",
+    "platform": "http://47.113.225.93:3928",
+    "realProvider": true,
+    "packagedSdk": true,
+    "ordinaryChat": true,
+    "sameSessionDocument": true,
+    "nativeDocumentTool": true,
+    "streamedText": true,
+    "syntheticInputsOnly": true
+  }
+}

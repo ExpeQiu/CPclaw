@@ -56,7 +56,7 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
   const program=process.platform==='win32'?'powershell.exe':'/bin/zsh';
   const args=process.platform==='win32'?['-NoProfile','-NonInteractive','-Command',request.command]:['-c',request.command];
   try {
-    const result=await run(program,args,{cwd,signal,timeout,maxBuffer:1024*1024,shell:false,windowsHide:true,env:Object.fromEntries(Object.entries(runtimeEnv()).filter(([k])=>!/(MINIMAX.*KEY|CPCLAW.*(TOKEN|SECRET|PASSWORD|KEY))/.test(k)))});
+    const result=await run(program,args,{cwd,signal,timeout,maxBuffer:1024*1024,shell:false,windowsHide:true,env:{...Object.fromEntries(Object.entries(runtimeEnv()).filter(([k])=>!/(MINIMAX.*KEY|CPCLAW.*(TOKEN|SECRET|PASSWORD|KEY))/.test(k))),...(context.service?.tpcstore?{CUTPOT_URL:new URL(context.service.pageUrl).origin,CUTPOT_DATA:context.service.tpcstore.appData}:{})}});
     signal.throwIfAborted();return {ok:true,exitCode:0,stdout:result.stdout.slice(0,48000),stderr:result.stderr.slice(0,12000),cwd};
   } catch(error) {
     signal.throwIfAborted();return {ok:false,code:error.killed?'COMMAND_TIMEOUT':'COMMAND_FAILED',exitCode:typeof error.code==='number'?error.code:null,stdout:String(error.stdout??'').slice(0,48000),stderr:String(error.stderr??'').slice(0,12000),cwd,message:error.killed?'命令超时，结果可能部分完成，请先检查现状。':'命令未成功，请依据退出码及输出排查。'};

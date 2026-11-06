@@ -1,12 +1,12 @@
+import {desktopLog} from './desktop-log.mjs';
+import {errorMetadata} from '@cpclaw/model-gateway';
 import {createDiagnosticCenter} from './diagnostic-center.mjs';
 import { createChatService } from "./chat-service.mjs";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import { buildSyntheticReport, checkReport, parseTaskMode } from "@cpclaw/contracts";
+import { parseTaskMode } from "@cpclaw/contracts";
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
-import { readCurrentAccountSession, runBoundReportLoop, exportDiagnosticPack, runDoctor } from "@cpclaw/desktop-host";
-import { sessionRefresher } from "./session-refresh.mjs";
+import { exportDiagnosticPack, runDoctor } from "@cpclaw/desktop-host";
 import { openLocalWorkspace } from "@cpclaw/desktop-host/workspace";
 
 const dataDir = process.env.CPCLAW_DATA_DIR;
@@ -51,7 +51,7 @@ function dispatch(message) {
   const input = isRecord(message.input) ? message.input : {};
   const actorId = message.actorId;
   if(maintenance&&!message.method?.startsWith("doctor.")&&message.method!=="chat.history")return fail("SLOT_BUSY","运行环境正在修复，请稍后再试。");
-  if (message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.") || message.method?.startsWith("learning.") || message.method === "formal.tracks") return chat.dispatch(message.method, actorId, input);
+  if (message.method?.startsWith("extensions.") || message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.") || message.method?.startsWith("learning.") || message.method === "formal.tracks") return chat.dispatch(message.method, actorId, input);
   if (typeof actorId !== "string") {
     return fail("SCHEMA_INVALID", "缺少员工标识");
   }
@@ -143,110 +143,7 @@ function enqueue(input) {
   return workspace.enqueueInput(input.taskId, input.body);
 }
 
-async function stageReport(actorId, input) {
-  if (typeof input.taskId !== "string" || typeof input.outputDir !== "string") {
-    return fail("SCHEMA_INVALID", "暂存命令不符合形状");
-  }
-  const task = workspace.readTask(input.taskId);
-  if (!task.ok) {
-    return task;
-  }
-  const board = workspace.readWorkbench(actorId);
-  const current = board.tasks.find((item) => item.taskId === input.taskId);
-  if (current === undefined) return fail("FORBIDDEN", "任务不属于当前员工");
-  if (activeReports.has(input.taskId)) return fail("SLOT_BUSY", "报告正在生成");
-  if (task.mode !== "execute") return fail("MODE_READONLY", "问答和规划模式不能生成文件变更");
-  const target = workspace.checkWriteTarget(input.taskId, `${input.outputDir.replace(/\/$/, "")}/report.md`);
-  if (!target.ok) return target;
-  let runId = current !== undefined && current.runStatus === "running" ? current.runId : null;
-  if (runId === null) {
-    const started = workspace.startRun({
-      taskId: input.taskId,
-      runId: `run-${randomUUID()}`,
-      idempotencyKey: `stage-${randomUUID()}`,
-      expectedRevisionId: task.revisionId,
-    });
-    if (!started.ok) {
-      return started;
-    }
-    runId = started.runId;
-  }
-  let body;
-  if (process.env.CPCLAW_REPORT_MODEL_MODE === "real") {
-    const controller = new AbortController();
-    const active = { actorId, controller, runId, attempted: false, operationId: `usage-${randomUUID()}` };
-    activeReports.set(input.taskId, active);
-    let attempted = false;
-    try {
-      if (typeof input.materialPath !== "string" || input.materialPath === "") throw new Error("请选择要送入模型的材料文件");
-      const { lstatSync } = await import("node:fs");
-      const info = lstatSync(input.materialPath);
-      if (!info.isFile() || info.size > 8000) throw new Error("材料必须是 8 KB 以内的普通文本文件");
-      const text = readFileSync(input.materialPath, "utf8");
-      const fileName = basename(input.materialPath);
-      if (!/^[\w.\-\u4e00-\u9fff]{1,100}$/.test(fileName) || !text.trim()) throw new Error("材料文件名或正文不符合限制");
-      const paragraphs = text.split(/\r?\n/).filter(line => line.trim()).map((text, i) => ({ id: `p${i+1}`, text }));
-      if (paragraphs.length > 64 || paragraphs.some(p => p.text.length > 4000)) throw new Error("材料段落超过限制");
-      const session = readCurrentAccountSession(dataDir);
-      if (!session.ok || session.session?.employeeId !== actorId) throw new Error("当前员工未登录");
-      const base = process.env.CPCLAW_PLATFORM_URL;
-      if (!base) throw new Error("缺少 CPCLAW_PLATFORM_URL");
-      const post = async (path, payload, accessToken) => {
-        const response = await fetch(`${base.replace(/\/$/, "")}${path}`, {
-          method: "POST", headers: { "content-type": "application/json", ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
-          body: JSON.stringify(payload), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(70_000)]),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message ?? "平台请求失败");
-        return result;
-      };
-      // 与聊天、技能市场共用同一续期单例，避免并发续期互相作废刷新令牌。
-      const refreshed = await sessionRefresher(dataDir).refresh();
-      if (!refreshed.ok) throw new Error(refreshed.message);
-      if (refreshed.employeeId !== actorId) throw new Error("平台会话员工不匹配");
-      if (process.env.CPCLAW_REPORT_ENGINE === "harness") {
-        const generated = await runBoundReportLoop({
-          homeParent: dataDir, platformBase: base, accessToken: refreshed.accessToken, materials: [{ fileName, paragraphs }], goal: task.goal, signal: controller.signal,
-          beforeCall: () => {
-            const charged = workspace.recordUsage(input.taskId, { kind: "known", calls: 1, runId });
-            if (!charged.ok) throw new Error(charged.message);
-            attempted = true; active.attempted = true; active.operationId = `usage-${randomUUID()}`;
-          },
-          unknownUsage: () => workspace.recordUsage(input.taskId, { kind: "unknown", operationId: active.operationId, runId }),
-        });
-        attempted = false; active.attempted = false;
-        if (controller.signal.aborted || !checkReport(generated.finalResponse, [fileName]).ok || !paragraphs.every(p => generated.finalResponse.includes(`${fileName}#${p.id}`))) throw new Error("Harness 报告未完成或来源检查失败");
-        return { ...workspace.stageChange({ changeId: `chg-${randomUUID()}`, taskId: input.taskId, runId, path: `${input.outputDir.replace(/\/$/, "")}/report.md`, body: generated.finalResponse, materialNames: [fileName] }), harness: { toolCalls: generated.toolCalls, modelCalls: generated.modelCalls, childCommandSeenAfterClose: generated.childCommandSeenAfterClose } };
-      }
-      const charged = workspace.recordUsage(input.taskId, { kind: "known", calls: 1, runId });
-      if (!charged.ok) throw new Error(charged.message);
-      attempted = true;
-      active.attempted = true;
-      const generated = await post("/v1/reports/generate", { requestId: `report-${randomUUID()}`, goal: task.goal, materials: [{ fileName, paragraphs }] }, refreshed.accessToken);
-      if (controller.signal.aborted) throw new Error("报告已取消");
-      if (generated.usage?.state !== "known") workspace.recordUsage(input.taskId, { kind: "unknown", operationId: `usage-${randomUUID()}`, runId });
-      const currentSession = readCurrentAccountSession(dataDir);
-      if (!currentSession.ok || currentSession.session?.employeeId !== actorId) throw new Error("账号已切换，报告不进入待审区");
-      body = generated.text;
-      // 以下公共暂存路径仍由工作区授权检查守护。
-      const staged = workspace.stageChange({ changeId: `chg-${randomUUID()}`, taskId: input.taskId, runId, path: `${input.outputDir.replace(/\/$/, "")}/report.md`, body, materialNames: [fileName] });
-      return staged;
-    } catch (error) {
-      if (attempted && !controller.signal.aborted && process.env.CPCLAW_REPORT_ENGINE !== "harness") workspace.recordUsage(input.taskId, { kind: "unknown", operationId: `usage-${randomUUID()}`, runId });
-      workspace.cancelRun(runId, "cancel");
-      return fail(controller.signal.aborted ? "CANCELLED" : "MODEL_FAILED", controller.signal.aborted ? "报告已取消，未创建待审变更" : (error instanceof Error ? error.message : "模型调用失败"));
-    } finally { activeReports.delete(input.taskId); }
-  }
-  body = buildSyntheticReport({ goal: task.goal, materials });
-  return workspace.stageChange({
-    changeId: `chg-${randomUUID()}`,
-    taskId: input.taskId,
-    runId,
-    path: `${input.outputDir.replace(/\/$/, "")}/report.md`,
-    body,
-    materialNames: materials.map((item) => item.fileName),
-  });
-}
+async function stageReport(_actorId,_input){return fail('LEGACY_TASK_READONLY','早期报告链路已退役，请在聊天中通过统一内核创建新任务；原记录和待审变更仍可查看。');}
 
 function decide(input) {
   if (typeof input.changeId !== "string" || (input.decision !== "accept" && input.decision !== "reject")) {
@@ -281,9 +178,13 @@ lines.on("line", async (line) => {
   }
   if(message?.serviceResult){servicePending.get(message.serviceResult.id)?.(message.serviceResult.result);servicePending.delete(message.serviceResult.id);return;}
   const id = isRecord(message) ? message.id : null;
-  let result;
+  let result, failureDetails={};const rpcStarted=Date.now();
   try { result = isRecord(message) ? await dispatch(message) : fail("SCHEMA_INVALID", "命令不符合形状"); }
-  catch { result = fail("INTERNAL_ERROR", "工作区命令执行失败"); }
+  catch(error) {failureDetails=errorMetadata(error);result = fail("INTERNAL_ERROR", "工作区命令执行失败"); }
+  if(result?.ok===false){
+    const safeId=v=>typeof v==='string'&&/^[A-Za-z0-9._:-]{1,64}$/.test(v)?v:'';
+    desktopLog(dataDir,'cpclaw-desktop-worker','error','rpc_request_failed','工作区请求失败',{method:safeId(message?.method),requestId:safeId(message?.input?.requestId),chatId:safeId(message?.input?.chatId),code:safeId(result.code),durationMs:Date.now()-rpcStarted,...failureDetails});
+  }
   process.stdout.write(`${JSON.stringify({ id, result })}\n`);
 });
 

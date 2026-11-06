@@ -22,17 +22,17 @@ function fillSettingsForm(view) {
   }
   settingsById("settings-app-version").textContent = view.appVersion || "—";
   settingsById("settings-data-dir").textContent = view.dataDir || "—";
-  settingsById("settings-report-mode").value = view.reportModelMode === "real" ? "real" : "mock";
-  settingsById("settings-mode-source").textContent = sourceLabel(view.sources?.reportModelMode);
-  window.renderComposerModel?.(view.reportModelMode === "mock" ? "mock" : "real");
-  settingsById("settings-report-engine").value = view.reportEngine === "harness" ? "harness" : "none";
+  settingsById("settings-report-mode").value = "real";
+  settingsById("settings-mode-source").textContent = "由企业端配置";
+  window.renderComposerModel?.("platform");
+  settingsById("settings-report-engine").value = "harness";
   settingsById("settings-harness-root").value = view.harnessRoot || "";
   settingsById("settings-kernel-status").textContent = kernelSummary(view);
   settingsById("settings-kernel-status").classList.toggle("settings-ok", Boolean(view.kernel?.ready));
   settingsById("settings-kernel-status").classList.toggle("settings-fail", !view.kernel?.ready);
   const bundledNote = view.bundled
     ? "当前检测到包内 deepseek-harness，运行时优先使用包内内核；上方检出路径可留空（仅开发机需要）。"
-    : "未检测到包内内核；启用后将使用上方检出路径。";
+    : "未检测到包内内核；对话运行需要上方检出路径可用。";
   settingsById("settings-kernel-hint").textContent =
     `${bundledNote} 保存后工作区进程按新配置重启。路径来源：${sourceLabel(view.sources?.harnessRoot)}；引擎：${sourceLabel(view.sources?.reportEngine)}。`;
   if (view.platformUrl && !settingsById("platform-url").value) {

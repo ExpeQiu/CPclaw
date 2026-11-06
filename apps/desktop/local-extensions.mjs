@@ -58,15 +58,24 @@ export function addComputerUseSite(dataDir, { pageUrl, title } = {}) {
   return entry;
 }
 
-export function addAppDriver(dataDir, { root, title } = {}) {
+export function addAppDriver(dataDir, { root, title, pageUrl } = {}) {
+  let page;
+  if (pageUrl !== undefined && pageUrl !== '') {
+    page = validateHttps(pageUrl);
+    if (page.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(page.hostname)) throw Error('驱动应用工作台必须使用本机 HTTP 地址');
+  }
   if (typeof root !== 'string' || !root || !isAbsolute(root)) throw Error('请选择应用或项目的绝对路径文件夹');
   let path;
   try { path = realpathSync(root); } catch { throw Error('文件夹不存在'); }
   if (!statSync(path).isDirectory()) throw Error('请选择文件夹');
   const services = read(dataDir).services;
   const existing = services.find(s => s.kind === SERVICE_KINDS.appDriver && s.root === path);
-  if (existing) return annotateService(existing);
+  if (existing) {
+    if (page) { existing.pageUrl = page.href; existing.pageOrigins = [page.origin]; write(dataDir, services); }
+    return annotateService(existing);
+  }
   const entry = annotateService({
+    ...(page ? { pageUrl: page.href, pageOrigins: [page.origin] } : {}),
     id: 'app-' + createHash('sha256').update(path).digest('hex').slice(0, 12),
     title: (typeof title === 'string' && title.trim()) ? title.trim().slice(0, 100) : basename(path),
     type: 'APP',
@@ -92,4 +101,11 @@ export function removeLocalExtension(dataDir, id) {
 
 export function localExtensionById(dataDir, id) {
   return listLocalExtensions(dataDir).find(s => s.id === id) || null;
+}
+
+
+export function attachAppSource(dataDir,id,source) {
+  const services=read(dataDir).services, entry=services.find(s=>s.id===id);
+  if(!entry)throw Error('应用不存在');
+  entry.tpcstore=source;write(dataDir,services);return annotateService(entry);
 }

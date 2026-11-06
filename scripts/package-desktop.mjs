@@ -1,5 +1,5 @@
 // 按 Electron 官方手工打包布局生成本机 macOS 应用；仅包含显式列出的代码与运行依赖。
-import { cpSync, mkdirSync, readFileSync, readdirSync, existsSync, writeFileSync, realpathSync, chmodSync, renameSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, readdirSync, existsSync, writeFileSync, realpathSync, chmodSync, renameSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -24,7 +24,7 @@ renameSync(join(contents,'MacOS','Electron'), join(contents,'MacOS','CPclaw'));
 const resources = join(contents, 'Resources');
 const app = join(resources, 'app');
 mkdirSync(app, {recursive:true});
-for (const file of ['diagnostic-center.mjs','runtime-env.mjs','conversation-permissions.mjs','local-tools.mjs','chat-diagnostics.mjs','diagnostic-authority.mjs','diagnostic-journal.mjs','media-task-state.mjs','service-images.mjs','service-replay.mjs','task-issue.mjs','creation-process.mjs','market-service.mjs','service-runtime.mjs','local-command-authorization.mjs','extension-host.mjs','extension-service.mjs','computer-use.mjs','desktop-log.mjs','desktop-settings.mjs','message-actions.mjs','local-extensions.mjs','service-kinds.mjs','session-refresh.mjs','platform-capability.mjs','connector-health.mjs','internal-skills.mjs','project-wiki.mjs','learning-flow.mjs','main.mjs','preload.cjs','workspace-client.mjs','workspace-worker.mjs','chat-service.mjs','knowledge-service.mjs','knowledge-actions.mjs','project-service.mjs','project-search.mjs','project-actions.mjs','document-service.mjs','document-actions.mjs','renderer']) {
+for (const file of ['harness-tools.mjs','task-checkpoints.mjs','request-evidence.mjs','app-folder.mjs','tpcstore-apps.mjs','diagnostic-center.mjs','runtime-env.mjs','conversation-permissions.mjs','local-tools.mjs','chat-diagnostics.mjs','diagnostic-authority.mjs','diagnostic-journal.mjs','media-task-state.mjs','service-images.mjs','service-replay.mjs','task-issue.mjs','creation-process.mjs','market-service.mjs','service-runtime.mjs','local-command-authorization.mjs','extension-host.mjs','extension-service.mjs','computer-use.mjs','desktop-log.mjs','desktop-settings.mjs','message-actions.mjs','local-extensions.mjs','service-kinds.mjs','session-refresh.mjs','platform-capability.mjs','connector-health.mjs','internal-skills.mjs','project-wiki.mjs','learning-flow.mjs','main.mjs','preload.cjs','workspace-client.mjs','workspace-worker.mjs','chat-service.mjs','knowledge-service.mjs','knowledge-actions.mjs','project-service.mjs','project-search.mjs','project-actions.mjs','document-service.mjs','document-actions.mjs','renderer']) {
   cpSync(join(root,'apps/desktop',file),join(app,file),{recursive:true,filter:p=>!basename(p).startsWith('._')});
 }
 writeFileSync(join(app,'package.json'), JSON.stringify({name:'cpclaw',productName:'CPclaw',version,type:'module',main:'main.mjs'},null,2));
@@ -52,7 +52,7 @@ copyPackage('@cpclaw/platform',join(root,'packages/platform'));
 // Harness is a required, self-contained runtime in every desktop distribution.
 const harnessManifest = bundleHarness(process.env.CPCLAW_HARNESS_ROOT || resolve(root, '../../13 Github/deepseek-harness'), join(resources, 'harness'));
 mkdirSync(join(app, 'node_modules/@cpclaw/harness-adapter/src'), {recursive:true});
-for(const file of ['material-plugin.mjs','service-plugin.mjs'])cpSync(join(root, 'packages/harness-adapter/src',file), join(app, 'node_modules/@cpclaw/harness-adapter/src',file));
+for(const file of ['material-plugin.mjs','service-plugin.mjs','pipeline-plugin.mjs'])cpSync(join(root, 'packages/harness-adapter/src',file), join(app, 'node_modules/@cpclaw/harness-adapter/src',file));
 const nodeTarget = join(resources,'runtime');
 mkdirSync(join(nodeTarget,'bin'),{recursive:true});
 cpSync(join(runtime,'bin/node'),join(nodeTarget,'bin/node'));
@@ -70,7 +70,7 @@ function recordReleaseFiles(directory, prefix = '') {
   }
 }
 recordReleaseFiles(app);
-writeFileSync(join(app, 'release-manifest.json'), JSON.stringify({version, buildType:'full-workspace', createdAt:new Date().toISOString(), features:['knowledge','projects','documents','markdown','elapsed-timer','extensions-picker','extensions-native-view','natural-service-requests','harness-service-tools','cli-mcp-execution','creation-process-export','skill-distillation','enterprise-skill-market','versioned-skill-install','skill-trials','scene-experts','conversation-permissions','local-tools','chat-diagnostics','computer-use','desktop-settings','desktop-log','local-extensions','service-kinds','service-catalog-compat','diagnose-repair-plans','connector-health','internal-skills','project-wiki'], files:releaseFiles}, null, 2) + '\n');
+writeFileSync(join(app, 'release-manifest.json'), JSON.stringify({version, buildType:'full-workspace', createdAt:new Date().toISOString(), features:['knowledge','projects','documents','markdown','elapsed-timer','extensions-picker','extensions-native-view','natural-service-requests','harness-service-tools','cli-mcp-execution','creation-process-export','skill-distillation','enterprise-skill-market','versioned-skill-install','skill-trials','scene-experts','conversation-permissions','local-tools','chat-diagnostics','computer-use','desktop-settings','desktop-log','local-extensions','service-kinds','service-catalog-compat','diagnose-repair-plans','connector-health','internal-skills','project-wiki','learning-grant','enterprise-wiki-review','persistent-chat-harness-sessions','request-diagnostic-evidence','task-checkpoints','sectioned-document-resume','bounded-model-retries','harness-final-checkpoint','unified-harness-pipeline','typed-harness-tools','native-harness-document-delivery','explicit-legacy-history-attachment'], files:releaseFiles}, null, 2) + '\n');
 const plist = join(contents,'Info.plist');
 for (const [key,value] of Object.entries({CFBundleExecutable:'CPclaw',CFBundleName:'CPclaw',CFBundleDisplayName:'CPclaw',CFBundleIdentifier:'com.cpclaw.desktop',CFBundleShortVersionString:version,CFBundleVersion:version,NSHumanReadableCopyright:'CPclaw local build'})) {
   execFileSync('/usr/bin/plutil', ['-replace', key, '-string', value, plist]);
@@ -89,7 +89,8 @@ try {
 execFileSync('/usr/bin/codesign',['--force','--deep','--sign','-',bundle],{stdio:'inherit'});
 execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'inherit'});
 execFileSync(join(nodeTarget, 'bin/node'), [join(root, 'scripts/verify-bundled-harness.mjs'), bundle], {stdio:'inherit'});
-execFileSync(join(nodeTarget,'bin/node'),[join(root,'scripts/verify-bundled-service.mjs'),bundle],{stdio:'inherit'});
+execFileSync(join(nodeTarget,'bin/node'),[join(root,'scripts/verify-harness-sessions.mjs'),bundle],{stdio:'inherit'});
+execFileSync(join(nodeTarget,'bin/node'),[join(root,'scripts/verify-unified-harness.mjs'),bundle],{stdio:'inherit'});
 const dmgStage = join(out, 'dmg');
 mkdirSync(dmgStage);
 execFileSync('/usr/bin/ditto', [bundle, join(dmgStage, 'CPclaw.app')]);
@@ -97,10 +98,13 @@ execFileSync('/bin/ln', ['-s', '/Applications', join(dmgStage, 'Applications')])
 const dmg = `${out}.dmg`;
 // hdiutil 在部分外置卷上会报「操作不被允许」；先在本机临时目录建盘再移回产物目录。
 const dmgTmp = join('/tmp', `cpclaw-dmg-${version}-${process.pid}.dmg`);
+const dmgLocalStage=mkdtempSync('/tmp/cpclaw-dmg-stage-');
 try {
-  execFileSync('/usr/bin/hdiutil', ['create', '-volname', `CPclaw ${version}`, '-srcfolder', dmgStage, '-ov', '-format', 'UDZO', dmgTmp], {stdio:'inherit'});
+  execFileSync('/usr/bin/ditto',[dmgStage,dmgLocalStage]);
+  execFileSync('/usr/bin/hdiutil', ['create', '-volname', `CPclaw ${version}`, '-srcfolder', dmgLocalStage, '-ov', '-format', 'UDZO', dmgTmp], {stdio:'inherit'});
   execFileSync('/bin/cp', ['-f', dmgTmp, dmg], {stdio:'inherit'});
 } finally {
+  rmSync(dmgLocalStage,{recursive:true,force:true});
   try { execFileSync('/bin/rm', ['-f', dmgTmp]); } catch { /* ignore */ }
 }
 const zip = `${out}.zip`;

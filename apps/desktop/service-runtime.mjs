@@ -1,3 +1,4 @@
+import {callTpcstore} from './tpcstore-apps.mjs';
 import {canAutoApprove} from './conversation-permissions.mjs';
 import {localService,executeLocalTool} from './local-tools.mjs';
 import {browserPageService,executeComputerUse,pageOriginsForService} from './computer-use.mjs';
@@ -116,6 +117,10 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       return {ok:true,data:{...image,resourceId:request.resourceId,preview:{state:'ready'},deliveryVerified:true}};
     }
     if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context,request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
+    if(service.tpcstore&&['discover','app_call'].includes(request.action)) {
+      await consent(context,signal,{risk:'unknown',title:'TPCstore 应用调用',message:'读取应用清单并调用已登记适配器',detail:`应用：${service.tpcstore.appId}\n来源：${service.tpcstore.root}\n操作：${request.operation||'discover'}`},JSON.stringify(['tpcstore',service.tpcstore.root,service.tpcstore.appId]));
+      return sanitizeServiceResult(await callTpcstore(service,request,{signal}));
+    }
     if(serviceKind(service)===SERVICE_KINDS.appDriver&&service.type==='APP'&&typeof service.root==='string'){
       const root=realpathSync(service.root);
       return sanitizeServiceResult(await executeLocalTool({

@@ -82,23 +82,9 @@ test('真实报告 HTTP 网关：鉴权、重放、失败、撤销和取消均�
       assert.equal(task.ok, true);
       const initialCalls = calls;
       const outside = await call('stageReport', { taskId: task.taskId, outputDir: dir, materialPath: source });
-      assert.equal(outside.code, 'OUTSIDE_GRANT'); assert.equal(calls, initialCalls);
-      scenario = 'wait'; release = undefined;
-      const generating = call('stageReport', { taskId: task.taskId, outputDir: out, materialPath: source });
-      const deadline = Date.now() + 5000;
-      while (!release && Date.now() < deadline) await new Promise(r => setTimeout(r, 5));
-      assert.ok(release, '供应商必须已受理请求');
-      const duplicate = await call('stageReport', { taskId: task.taskId, outputDir: out, materialPath: source });
-      assert.equal(duplicate.code, 'SLOT_BUSY');
-      assert.equal((await call('cancelReport', { taskId: task.taskId })).ok, true);
-      assert.equal((await generating).code, 'CANCELLED');
-      scenario = 'success'; release();
-      await new Promise(r => setTimeout(r, 30));
-      const board = await call('snapshot', {});
-      assert.equal(board.changes.length, 0); assert.equal(existsSync(`${out}/report.md`), false);
-      assert.equal(board.tasks[0].unknownUsageCount, 1);
-      assert.equal((await call('stageReport', { taskId: task.taskId, outputDir: out, materialPath: source })).ok, false);
-      assert.equal(calls, initialCalls + 1, '预算已用尽时不得调用模型');
+      assert.equal(outside.code,'LEGACY_TASK_READONLY');assert.equal(calls,initialCalls);
+      const retired=await call('stageReport',{taskId:task.taskId,outputDir:out,materialPath:source});assert.equal(retired.code,'LEGACY_TASK_READONLY');assert.equal(calls,initialCalls,'桌面不得调用旧报告模型旁路');
+      const board=await call('snapshot',{});assert.equal(board.tasks.length,1);assert.equal(board.changes.length,0);assert.equal(existsSync(`${out}/report.md`),false);
     } finally { worker.stop(); }
   } finally { await server.close(); upstream.closeAllConnections(); await new Promise(r => upstream.close(r)); }
 });

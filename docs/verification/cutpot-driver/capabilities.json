@@ -1,0 +1,138 @@
+{
+  "app": "cutpot",
+  "version": "0.9.0",
+  "apiVersion": 1,
+  "manifestSchemaVersion": 1,
+  "service": {
+    "running": true,
+    "url": "http://127.0.0.1:50810",
+    "dataDir": "/tmp/cpclaw-cutpot-integration-E5grXZ/cutpot-data",
+    "capabilities": [
+      "storyboard",
+      "first-last-frame",
+      "generation-versions",
+      "pipeline-handoff",
+      "project-package",
+      "project-folder",
+      "tts",
+      "tts-child-presets",
+      "tts-gpt-sovits",
+      "tts-native-child",
+      "tts-config",
+      "tts-characters",
+      "tts-dialogue",
+      "burn-subtitles"
+    ]
+  },
+  "commands": [
+    "arrange",
+    "assets import",
+    "assets list",
+    "audio set",
+    "cancel",
+    "capabilities",
+    "clip add",
+    "clip duplicate",
+    "clip edit",
+    "clip list",
+    "clip move",
+    "clip remove",
+    "compose",
+    "doctor",
+    "download",
+    "export",
+    "job",
+    "job wait",
+    "jobs",
+    "probe",
+    "project new",
+    "project open",
+    "project save",
+    "project show",
+    "render",
+    "schema manifest",
+    "serve",
+    "start",
+    "status",
+    "stop",
+    "tts cancel",
+    "tts config",
+    "tts configure",
+    "tts download",
+    "tts generate",
+    "tts job",
+    "tts jobs",
+    "tts providers",
+    "tts voices",
+    "validate",
+    "workflow apply",
+    "workflow generate",
+    "workflow handoff",
+    "workflow show",
+    "workflow wait"
+  ],
+  "features": {
+    "compose": true,
+    "render": true,
+    "validate": true,
+    "dryRun": true,
+    "projectEdit": true,
+    "tts": true,
+    "burnSubtitles": true,
+    "jobWait": true
+  },
+  "dependencies": {
+    "ffmpeg": {
+      "supported": true,
+      "ready": true
+    },
+    "ffprobe": {
+      "supported": true,
+      "ready": true
+    },
+    "libx264": {
+      "supported": true,
+      "ready": true
+    },
+    "burnSubtitles": {
+      "supported": true,
+      "ready": true,
+      "python": "python3",
+      "pillow": true,
+      "font": false,
+      "pythonVersion": "12.2.0"
+    },
+    "tts": {
+      "supported": true,
+      "ready": true,
+      "providers": [
+        {
+          "id": "macos",
+          "name": "macOS 本地语音",
+          "requiresNetwork": false,
+          "available": true
+        },
+        {
+          "id": "edge",
+          "name": "Edge 在线语音",
+          "requiresNetwork": true,
+          "available": false,
+          "reason": "未找到可用的 edge-tts；安装后重启服务，或配置 CUTPOT_EDGE_TTS"
+        },
+        {
+          "id": "gpt-sovits",
+          "name": "GPT-SoVITS 开源配音",
+          "requiresNetwork": false,
+          "available": false,
+          "reason": "GPT-SoVITS 未配置：请先启动本机推理服务并添加参考音频"
+        }
+      ],
+      "service": true
+    }
+  },
+  "ready": {
+    "render": true,
+    "burnSubtitles": true,
+    "tts": true
+  }
+}

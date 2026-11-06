@@ -1,0 +1,30 @@
+{
+  "base": "http://47.113.225.93:3928",
+  "realModel": true,
+  "passed": true,
+  "checks": [
+    {
+      "question": "deepseek-super-agent 是什么",
+      "passed": true,
+      "serviceRequests": 0
+    },
+    {
+      "question": "飞书 CLI 是什么",
+      "passed": true,
+      "serviceRequests": 0
+    },
+    {
+      "question": "为什么启动自动工作流",
+      "passed": true,
+      "serviceRequests": 0
+    },
+    {
+      "question": "请调用飞书 CLI 检查连接",
+      "passed": true,
+      "serviceRequests": 1,
+      "serviceId": "feishu"
+    }
+  ],
+  "scope": "真实网关路由；仅请求执行路由，不实际运行 CLI",
+  "finishedAt": "2026-11-05T05:45:36.523Z"
+}

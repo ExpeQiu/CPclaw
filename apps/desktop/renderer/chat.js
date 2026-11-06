@@ -1,5 +1,6 @@
 let chatExecution={mode:"chat",service:""};
 let currentChatId = "";
+let chatNeedsMigration=false;
 let projects = [], currentProjectId = "", attachedProjectFile = null;
 let chats = [], chatMessages = [];
 let chatAccount = null;
@@ -62,12 +63,14 @@ function renderComposer() {
   byId('current-project-label').title=projects.find(p=>p.id===currentProjectId)?.folder??'';
   byId('project-material-context').hidden=!attachedProjectFile;
   byId('project-material-name').textContent=attachedProjectFile?.name??'';
+  const archived=Boolean(chats.find(item=>item.id===currentChatId)?.archived);
   byId("chat-send").hidden = !chat || Boolean(runningChatId);
-  byId("chat-send").disabled = !chatAccount;
+  byId("chat-send").disabled = !chatAccount || archived;
+  byId("chat-send").title = archived ? "恢复对话后才能继续发送" : "发送";
   byId("chat-stop").hidden = !chat || !runningChatId;
   byId("enqueue").hidden = chat;
   const hint = chat ? "Enter 发送 · Shift + Enter 换行" : "补充内容会加入当前任务队列";
-  byId("note").placeholder = chat ? (editingArtifact ? "描述文档需要怎样修改…" : "向 CPclaw 提问…") : "补充任务要求、背景或期望的结果…";
+  byId("note").placeholder = !chat ? "补充任务要求、背景或期望的结果…" : archived ? "此对话已归档，恢复后可继续。文档和图片仍可打开。" : editingArtifact ? "描述文档需要怎样修改…" : "向 CPclaw 提问…";
   byId("note").title = hint;
   byId("composer-hint").textContent = hint;
 }
@@ -93,28 +96,8 @@ function refreshElapsedLabels(){
   for(const node of document.querySelectorAll('.chat-elapsed')){const message=chatMessages.find(m=>m.role==='assistant'&&m.request===node.dataset.request);if(message){const label=elapsedLabel(message);if(node.textContent!==label)node.textContent=label;node.hidden=!label;}}
 }
 setInterval(refreshElapsedLabels,1000);
-/** 折叠历史恢复文本中的逐步清单，与 chat-diagnostics.compactServiceChatText 同口径。 */
-function compactServiceChatText(content=''){
-  const text=String(content||'');
-  if(!text.trim())return '';
-  const match=text.match(/本轮回复未完成，已恢复 (\d+) 条应用执行记录（(\d+) 条明确返回失败）/);
-  if(match&&/^- 步骤 \d+ ·/m.test(text)){
-    return `本轮回复未完成，已恢复 ${match[1]} 条应用执行记录（${match[2]} 条明确返回失败）。\n\n过程与回执见右侧「自动工作流」。继续对话时先查询已有任务状态，避免重复提交。`;
-  }
-  return text.replace(/\n*- 步骤 \d+ ·[^\n]*/g,'').replace(/\n{3,}/g,'\n\n').trim();
-}
-function chatDisplayText(message){
-  if(message.issue&&(!message.content.trim()||/^本轮回复未完成，已恢复/.test(message.content)))return `${message.issue.title}\n\n${message.issue.summary}\n\n${message.issue.preserved}`;
-  if(message.hasServiceSteps){
-    const compact=compactServiceChatText(message.content);
-    if(!compact&&message.state==='streaming')return '正在右侧「自动工作流」执行…';
-    return compact;
-  }
-  const artifact=chatArtifacts.find(a=>a.message===message.id);
-  if(artifact&&message.content.length>400)return `已完成《${artifact.name}》。完整内容见右侧文档预览。`;
-  return message.content;
-}
-/** 与 apps/desktop/message-actions.mjs 同阈值：多轮且结果较充实才提供提炼 Skill。 */
+function chatDisplayText(message){return message.content;}
+/** 显式选择已完成的内核回复以提炼 Skill。 */
 function canOfferSkillDistill(messages,message){
   if(!message||message.role!=='assistant'||message.state!=='done')return false;
   if(messages.filter(m=>m.role==='user').length<2)return false;
@@ -160,6 +143,8 @@ function renderChat() {
   byId("task-title").textContent = chats.find(item => item.id === currentChatId)?.title ?? "新聊天";
   renderKernelBadge(runningChatId === currentChatId && runningChatId ? "正在回复" : "");
   const list = byId("chat-messages"); list.replaceChildren();
+  if(chatNeedsMigration){const panel=document.createElement('div'),text=document.createElement('p'),attach=document.createElement('button');text.textContent='这是旧链路聊天。原记录会保留；关联后，内核可按需读取完整历史，不会自动重放旧任务。';attach.textContent='关联原历史并继续';attach.onclick=async()=>{const id=currentChatId;const r=await chatCall('chat.migrate',{chatId:id,mode:'attach-history'});if(!r.ok){setStatus(r.message);return;}if(id===currentChatId){chatNeedsMigration=false;renderChat();}};panel.append(text,attach);list.append(panel);}
+
   for (const message of chatMessages) {
     const article = document.createElement("article"); article.className = `chat-message ${message.role}`;article.dataset.request=message.request;
     const label = document.createElement("div"); label.className = "message-label"; label.textContent = message.role === "user" ? "你" : "CPclaw";
@@ -182,7 +167,7 @@ function renderChat() {
     if (message.role === "assistant") {
       const tip=document.createElement('div');tip.className='message-tip-row';
       const meta = document.createElement("div"); meta.className = "message-meta";
-      meta.textContent = message.state === "streaming" ? "● 正在生成" : message.state === "done" ? "回复完成" : message.issue?.impact||message.error||"回复未完成";
+      meta.textContent = message.state === "streaming" ? "● 正在生成" : message.state === "done" ? "本轮运行结束" : message.issue?.impact||message.error||"回复未完成";
       tip.append(meta);
       if(message.issue){const action=document.createElement('button');action.type='button';action.className='task-issue-action';action.textContent=message.issue.actionLabel;action.onclick=()=>{if(message.issue.severity==='resolved')byId('chat-diagnose').click();else void window.showTaskIssue?.(message.issue,{messageId:message.id});};tip.append(action);}
       article.append(tip);
@@ -263,7 +248,7 @@ async function selectChat(id) {
   attachedProjectFile=null;
   if(id)currentProjectId=chats.find(chat=>chat.id===id)?.projectId??"";
   chatExecution={mode:"chat",service:""};window.restoreServicePanel?.([],chatExecution);
-  desktopView = "chat"; currentChatId = id; chatMessages = []; nearBottom = true;
+  desktopView = "chat"; chatNeedsMigration=false; currentChatId = id; chatMessages = []; nearBottom = true;
   byId("note").value = chatDrafts.get(id) ?? "";
   const generation = ++selectedChatGeneration;
   renderChat();
@@ -272,6 +257,7 @@ async function selectChat(id) {
   const result = await chatCall("chat.history", { chatId: id });
   if (generation !== selectedChatGeneration || desktopView !== "chat") return;
   if (!result.ok) { setStatus(result.message); return; }
+  chatNeedsMigration=result.migrationRequired===true;
   const newer = new Map(chatMessages.map(message => [message.request + message.role, message]));
   chatMessages = result.messages.map(message => {
     const recent = newer.get(message.request + message.role);
@@ -281,7 +267,7 @@ async function selectChat(id) {
   window.updateSkillBinding?.(result.skillBinding??null);
   for(const record of result.skillResults??[]){const m=chatMessages.find(m=>m.id===record.message);if(m)m.skillResult=record.result;}
   window.restoreServicePanel?.(result.serviceSteps??[],chatExecution);
-  chatArtifacts = result.artifacts ?? [];renderDocumentList();
+  chatArtifacts = [...(result.artifacts??[]),...(result.drafts??[])];renderDocumentList();
   if (result.active) runningChatId = id;
   void window.refreshConversationPermission?.();
   renderChat();
@@ -290,8 +276,10 @@ async function selectChat(id) {
 async function sendChat(retry = false) {
   if (runningChatId) { setStatus("请等待当前回复，或先停止生成。"); return; }
   if (!chatAccount) { openPanel("settings"); setStatus("请先设置平台地址并登录。"); return; }
-  const text = byId("note").value.trim();
-  if (!retry && !text) return;
+  if(chatNeedsMigration){setStatus("请先明确关联原历史，或新建聊天。");return;}
+  if(chats.find(item=>item.id===currentChatId)?.archived){setStatus("此对话已归档。恢复后可继续，文档和图片仍可打开。");return;}
+  const text = byId("note").value;
+  if (!retry && !text.trim()) return;
   if (text.length > 8000) { setStatus("单条消息最多 8000 个字符。"); return; }
   if (!currentChatId) {
     const created = await chatCall("chat.create",{projectId:currentProjectId}); if (!created.ok) throw new Error(created.message);
@@ -301,7 +289,7 @@ async function sendChat(retry = false) {
   if(!configured.ok){setStatus(configured.message);return;}
   const id = currentChatId, requestId = crypto.randomUUID();
   runningChatId = id; nearBottom = true;
-  if (retry) chatMessages.pop();
+  if (retry) {chatMessages.pop();}
   else { chatMessages.push({ id: requestId + "-user", role: "user", content: text, state: "done", request: requestId }); byId("note").value = ""; chatDrafts.delete(id); }
   chatMessages.push({ id: requestId, role: "assistant", content: "", state: "streaming", startedAt:Date.now(),request: requestId });
   renderChat(); setStatus("正在连接平台…");
@@ -328,7 +316,7 @@ window.cpclaw.onChatEvent(event => {
   if (event.actorId !== chatAccount || event.channel==='market' || event.channel==='project-wiki') return;
   if (event.type === "start") runningChatId = event.chatId;
   if (event.type === "finish") runningChatId = "";
-  if (currentChatId !== event.chatId) { renderChatList(); renderComposer(); return; }
+  if (currentChatId !== event.chatId) { if(event.type==='finish')void loadChats();renderChatList(); renderComposer(); return; }
   let message = chatMessages.find(item => item.role === "assistant" && item.request === event.requestId);
   if (!message && event.type !== "start") { message = { id: event.messageId, role: "assistant", content: "", state: "streaming", request: event.requestId }; chatMessages.push(message); }
   if (message) {
@@ -345,8 +333,11 @@ window.cpclaw.onChatEvent(event => {
   if(event.type==='service')window.showServiceEvent?.(event);
   if (event.type === "activity") setStatus(event.message);
   if (event.type === "mode") setStatus(event.mode === "mock" ? "Mock 演示模式 · 未调用真实模型" : "MiniMax-M3 · 正在生成回复");
-  if (event.type === "finish") setStatus(event.state === "done" ? (event.mode === "mock" ? "Mock 演示回复完成" : "回复完成") : event.issue?.title||event.error);
+  if (event.type === "finish") setStatus(event.state === "done" ? (event.mode === "mock" ? "Mock 演示回复完成" : "本轮运行结束") : event.issue?.title||event.error);
   if(event.type==='finish'&&event.issue)void window.showTaskIssue?.(event.issue,{automatic:true,messageId:event.messageId});
+  if(event.type==='drafts'||event.type==='finish'&&event.drafts){chatArtifacts=chatArtifacts.filter(a=>!a.draft).concat(event.drafts??[]);renderDocumentList();}
+  if(event.type==='artifact'&&event.artifact)addArtifact(event.artifact);
+  if(event.type==='finish')for(const artifact of event.artifacts??[])addArtifact(artifact);
   if(event.type==='finish'&&event.artifact){
     addArtifact(event.artifact);editingArtifact=null;byId('document-edit-context').hidden=true;
     showDocument(event.artifact.id).catch(e=>setStatus(e.message));

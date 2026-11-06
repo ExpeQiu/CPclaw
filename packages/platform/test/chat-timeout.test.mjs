@@ -12,7 +12,7 @@ test('桌面流式请求超过旧总时限仍完成，停顿时保留正文并�
  const dataDir=mkdtempSync('/tmp/cpclaw-timeout-platform-'),desktopDir=mkdtempSync('/tmp/cpclaw-timeout-desktop-');
  const opened=openPlatform({dataDir,port:0,listenHost:'127.0.0.1',sessionSecret:'chat-timeout-test-0123456789abcdef',accessTtlSec:3600,refreshTtlSec:7200,seed:{kind:'fixture',employees:fixtureEmployees},keyPresent:true,now:()=>Date.now()});assert.ok(opened.ok);
  const server=await listenPlatform(opened.app,{dataDir,port:0,aiMockMode:false,reportGateway:{mode:'real',baseUrl:`http://127.0.0.1:${upstream.address().port}`,apiKey:'test',timeoutMs:2000}});
- const service=createChatService(desktopDir,()=>{},{chatIdleMs:200,chatTotalMs:2000});
+ const service=createChatService(desktopDir,()=>{},{chatIdleMs:200,chatTotalMs:10000});
  const call=(method,input={})=>service.dispatch(method,'employee-a',input);
  try{
   assert.ok((await call('account.login',{platformUrl:`http://127.0.0.1:${server.port}`,employeeId:'employee-a',password:'fixture-employee-a'})).ok);

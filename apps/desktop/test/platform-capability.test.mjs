@@ -47,35 +47,8 @@ test('平台自报能力时按其白名单裁剪目录；未声明时按最保�
   assert.equal(full.activeId, 'browser-page');
 });
 
-test('平台拒绝服务目录时整轮对话给出可诊断错误，而非空白回复', async () => {
-  const root = mkdtempSync('/tmp/cpclaw-catalog-'), actor = 'catalog-user';
-  clearPlatformCapabilityCache();
-  writeAccountSession(root, { schemaVersion: 1, employeeId: actor, sessionId: 'fixture-session', refreshToken: 'fixture-refresh-token' }, { makeCurrent: true });
-  writeFileSync(join(root, 'desktop-connection.json'), JSON.stringify({ platformUrl: 'https://fixture.invalid' }));
-  globalThis.fetch = async (url) => {
-    if (url.endsWith('/v1/session/refresh')) return Response.json({ employeeId: actor, sessionId: 'fixture-session', refreshToken: 'fixture-refresh-token', accessToken: 'fixture-access' });
-    if (url.endsWith('/v1/market')) return Response.json({ connectors: [], items: [] });
-    if (url.endsWith('/health')) return Response.json({ status: 'ok' });
-    if (url.endsWith('/v1/chat/stream')) return Response.json({ ok: false, message: '应用服务目录无效', reason: '服务类型不被平台接受：WEB' }, { status: 400 });
-    throw Error('Unexpected route');
-  };
-  const service = createChatService(root, () => {}, { runServiceLoop: async () => ({}), executeService: async () => ({ ok: true }) });
-  try {
-    const { chatId } = await service.dispatch('chat.create', actor, {});
-    const sent = await service.dispatch('chat.send', actor, { chatId, requestId: 'catalog-1', text: '调用即梦CLI，生成图片' });
-    assert.equal(sent.state, 'error');
-    const history = await service.dispatch('chat.history', actor, { chatId });
-    const message = history.messages.at(-1);
-    assert.match(message.error, /不接受本机服务目录/);
-    // 平台拒绝目录必须被识别为可修复项，而不是笼统的“回复未完成”。
-    const report = analyzeChat(message, []);
-    assert(report.some((f) => f.code === 'SERVICE_CATALOG_REJECTED' && f.status === 'error'));
-    // 修复动作：重裁目录并清空能力缓存。
-    const repaired = await service.dispatch('chat.diagnoseRepair', actor, { chatId, code: 'SERVICE_CATALOG_REJECTED' });
-    assert.equal(repaired.ok, true);
-    assert(repaired.repairs.some((r) => r.code === 'SERVICE_CATALOG_REJECTED'));
-  } finally {
-    service.stop();
-    rmSync(root, { recursive: true, force: true });
-  }
+test('local tool catalog is not rejected by the retired chat gateway route',async t=>{
+ const root=mkdtempSync('/tmp/cpclaw-catalog-'),actor='catalog-user';writeAccountSession(root,{schemaVersion:1,employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh'},{makeCurrent:true});writeFileSync(join(root,'desktop-connection.json'),JSON.stringify({platformUrl:'https://fixture.invalid'}));
+ t.mock.method(globalThis,'fetch',async url=>{if(url.endsWith('/v1/session/refresh'))return Response.json({employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh',accessToken:'fixture-access'});if(url.endsWith('/v1/market'))return Response.json({connectors:[],items:[]});throw Error('模型旁路不应被调用');});
+ const service=createChatService(root,()=>{},{runServiceLoop:async input=>{input.onAccepted('accepted');assert(input.pipeline.tools.some(t=>t.name==='browser_open'));return {finalResponse:'内核答复'};}});try{const {chatId}=await service.dispatch('chat.create',actor,{});assert.equal((await service.dispatch('chat.send',actor,{chatId,requestId:'catalog',text:'普通问题'})).state,'done');}finally{service.stop();rmSync(root,{recursive:true,force:true});}
 });

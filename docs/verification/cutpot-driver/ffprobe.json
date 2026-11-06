@@ -1,0 +1,15 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "width": 1280,
+            "height": 720,
+            "nb_frames": "50"
+        }
+    ]
+}

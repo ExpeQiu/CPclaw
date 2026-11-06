@@ -18,7 +18,8 @@ function setup(t,options={}){
   if(url.endsWith('/v1/chat/stream')){const body=JSON.parse(init.body);modelRequests.push(body);const events=[{event:'start',mode:'mock'}];if(route==='service')events.push({event:'service_request',request:{serviceId:target,purpose:'受控测试'}});else if(route==='document')events.push({event:'document',document:{filename:'核对报告.md',sourceId:'',content:'## 结论\n已核对\n## 来源\n明确材料'}});else events.push({event:'delta',text:'## 结论\n已核对\n## 来源\n明确材料'});events.push({event:'done'});return new Response(events.map(e=>JSON.stringify(e)).join('\n')+'\n',{headers:{'content-type':'application/x-ndjson'}});}
   throw Error('未知测试请求 '+url);
  });
- const service=createChatService(desktopDir,()=>{},options),other=createChatService(otherDir,()=>{},options);
+ const kernel=async input=>{input.onAccepted('accepted');const r=await input.pipeline.execute({name:'list_resources',arguments:{},callId:'resources-'+input.parentRequestId});let material='';if(r.resources.skill){const s=await input.pipeline.execute({name:'read_resource',arguments:{kind:'skill'},callId:'skill-'+input.parentRequestId});if(!s.ok)throw Error(s.message);material+=JSON.parse(s.content).content;}if(r.resources.input.projectFile){const s=await input.pipeline.execute({name:'read_resource',arguments:{kind:'project',path:r.resources.input.projectFile},callId:'project-'+input.parentRequestId});material+=s.content;}modelRequests.push({goal:input.goal,messages:[{role:'user',content:material}]});if(route==='document')await input.pipeline.execute({name:'deliver_document',arguments:{documentKey:'doc-'+input.parentRequestId,filename:'核对报告.md',part:0,content:'## 结论\n已核对\n## 来源\n明确材料',complete:true},callId:'doc-'+input.parentRequestId});return {finalResponse:'## 结论\n已核对\n## 来源\n明确材料'};};
+ const service=createChatService(desktopDir,()=>{},{runServiceLoop:kernel,...options}),other=createChatService(otherDir,()=>{},{runServiceLoop:kernel,...options});
  const call=(method,input={})=>service.dispatch(method,'employee-a',input);
  const market=(who,action,input={})=>app.market(tokens[who],action,input);
  const save=(input={})=>{const r=market('employee-a','save',{...baseDraft,...input});assert.ok(r.ok,r.message);return r.item;};
@@ -30,7 +31,7 @@ test('安装真实落盘，另一设备不伪报安装；当前对话绑定、�
  const x=f.save();f.publish(x);const first=await f.call('market.call',{action:'install',input:{id:x.id}});assert.ok(first.ok,first.message);assert.ok((await f.call('market.call',{action:'list'})).localInstalls[0].valid);
  assert.equal((await f.other.dispatch('market.call','employee-a',{action:'list'})).localInstalls.length,0);
  const {chatId}=await f.call('chat.create');assert.ok((await f.call('market.use',{id:x.id,chatId,values:{}})).ok);
- const sent=await f.call('chat.send',{chatId,requestId:'market-bound-text',text:'核对这份材料'});assert.equal(sent.state,'done');assert.equal(sent.skillValidation.status,'passed');assert.equal(sent.skillValidation.mode,'mock');assert.match(f.modelRequests[0].messages.at(-1).content,/# 固定旧版方法/);
+ const sent=await f.call('chat.send',{chatId,requestId:'market-bound-text',text:'核对这份材料'});assert.equal(sent.state,'done');assert.equal(sent.skillValidation,undefined);assert.match(f.modelRequests[0].messages.at(-1).content,/# 固定旧版方法/);
  const history=await f.call('chat.history',{chatId});assert.equal(history.skillBinding.id,x.id);assert.equal(history.skillResults.length,1);
  assert.ok((await f.call('market.unbind',{chatId})).ok);assert.equal((await f.call('chat.history',{chatId})).skillBinding,null);assert.equal((await f.call('chat.history',{chatId})).messages.length,2);
  assert.equal((await f.service.dispatch('market.call','employee-b',{action:'list'})).ok,false);
@@ -39,7 +40,7 @@ test('安装真实落盘，另一设备不伪报安装；当前对话绑定、�
 test('新版安装不热替换聊天快照；旧版文件与文档交付均可追溯',async t=>{const f=setup(t);try{
  const old=f.save();f.publish(old);await f.call('market.call',{action:'install',input:{id:old.id}});const bound=await f.call('market.use',{id:old.id,values:{}});assert.ok(bound.ok,bound.message);
  const next=f.save({parentId:old.id,version:'1.0.1',body:'# 新版方法\n增加核对'});f.publish(next);assert.ok((await f.call('market.call',{action:'install',input:{id:next.id}})).ok);
- f.setRoute('document');const result=await f.call('chat.send',{chatId:bound.chatId,requestId:'market-doc-old',text:'请写文档'});assert.equal(result.state,'done');assert.ok(result.artifact);assert.equal(result.skillValidation.status,'passed');const prompt=f.modelRequests.at(-1).messages.at(-1).content;assert.match(prompt,/固定旧版方法/);assert.doesNotMatch(prompt,/# 新版方法/);
+ f.setRoute('document');const result=await f.call('chat.send',{chatId:bound.chatId,requestId:'market-doc-old',text:'请写文档'});assert.equal(result.state,'done');assert.ok(result.artifact);assert.equal(result.skillValidation,undefined);const prompt=f.modelRequests.at(-1).messages.at(-1).content;assert.match(prompt,/固定旧版方法/);assert.doesNotMatch(prompt,/# 新版方法/);
  assert.equal((await f.call('chat.history',{chatId:bound.chatId})).skillResults[0].snapshot.version,'1.0.0');
  assert.ok((await f.call('market.call',{action:'install',input:{id:old.id}})).ok,'可以切回已获准旧版');
 }finally{f.close();}});
@@ -48,14 +49,14 @@ test('草稿试用固定修订；上传清单只加载 SKILL.md，缺输入在�
  const x=f.save({source:'upload',body:JSON.stringify({files:[{path:'demo/SKILL.md',body:'# 入口方法\n只核对本次材料'},{path:'demo/references/a.md',body:'不能无条件加载的参考正文'}]}),inputs:[{name:'materials',label:'材料',required:true,example:'合成记录'}]});
  const missing=await f.call('market.trial',{id:x.id,values:{}});assert.equal(missing.code,'INPUT_REQUIRED');assert.equal((await f.call('chat.list')).chats.length,0);
  const trial=await f.call('market.trial',{id:x.id,values:{materials:'合成记录'}});assert.ok(trial.ok,trial.message);assert.equal((await f.call('chat.send',{chatId:trial.chatId,requestId:'trial-1',text:'核对'})).state,'done');const prompt=f.modelRequests.at(-1).messages.at(-1).content;assert.match(prompt,/# 入口方法/);assert.doesNotMatch(prompt,/不能无条件加载的参考正文/);
- const trials=await f.call('market.trials',{id:x.id});assert.equal(trials.trials.length,1);assert.equal(trials.trials[0].result.mode,'mock');
+ const trials=await f.call('market.trials',{id:x.id});assert.equal(trials.trials.length,1);assert.equal(trials.trials[0].result,null);
  const updated=f.market('employee-a','save',{...x,revision:x.revision,body:JSON.stringify({files:[{path:'SKILL.md',body:'# 改后方法'}]})});assert.ok(updated.ok);
  const stale=await f.call('chat.send',{chatId:trial.chatId,requestId:'trial-stale',text:'继续'});assert.equal(stale.state,'error');assert.match((await f.call('chat.history',{chatId:trial.chatId})).messages.at(-1).error,/修订已改变/);
 }finally{f.close();}});
 
 test('服务执行保留技能方法，紧急停用后下一次工具调用被阻断',async t=>{
  let f,calls=0,skill;
- f=setup(t,{executeService:async()=>{calls++;f.market('admin','withdraw',{id:skill.id,note:'测试停用'});return {ok:true};},runServiceLoop:async options=>{assert.match(JSON.parse(options.goal).conversation.at(-1).content,/固定旧版方法/);await options.service.execute(JSON.stringify({action:'discover'}));await assert.rejects(options.service.execute(JSON.stringify({action:'call',args:['--version']})),/不可使用|停用/);return {finalResponse:'## 结论\n后续调用已阻断\n## 来源\n实际回执'};}});
+ f=setup(t,{executeService:async()=>{calls++;f.market('admin','withdraw',{id:skill.id,note:'测试停用'});return {ok:true};},runServiceLoop:async options=>{options.onAccepted('accepted');const r=await options.pipeline.execute({name:'read_resource',arguments:{kind:'skill'},callId:'skill'});assert.match(r.content,/固定旧版方法/);await options.pipeline.execute({name:'discover_service',arguments:{serviceId:'local-terminal'},callId:'first'});const blocked=await options.pipeline.execute({name:'terminal',arguments:{command:'pwd'},callId:'second'});assert.equal(blocked.ok,false);assert.match(blocked.message,/不可使用|停用/);return {finalResponse:'## 结论\n后续调用已阻断\n## 来源\n实际回执'};}});
  try{skill=f.save();f.publish(skill);await f.call('market.call',{action:'install',input:{id:skill.id}});const bound=await f.call('market.use',{id:skill.id,values:{}});const c=await f.call('market.call',{action:'connector-save',input:{title:'测试 CLI',type:'CLI',target:process.execPath}});f.setRoute('service',c.connector.id);await f.call('chat.send',{chatId:bound.chatId,requestId:'service-disable',text:'检查服务'});assert.equal(calls,1);}finally{f.close();}
 });
 
@@ -82,7 +83,7 @@ test('专家选择具体任务后仅加载所选成员的方法',async t=>{const
 
 test('共享提交附带当前修订的宿主试用摘要，Mock 不冒充真实验证',async t=>{const f=setup(t);try{
  const x=f.save();const trial=await f.call('market.trial',{id:x.id,values:{}});await f.call('chat.send',{chatId:trial.chatId,requestId:'trial-evidence',text:'核对'});const submitted=await f.call('market.call',{action:'submit',input:{id:x.id,strict:true}});assert.ok(submitted.ok,submitted.message);
- const detail=f.market('admin','detail',{id:x.id});assert.equal(detail.submissionEvidence.mode,'mock');assert.equal(detail.submissionEvidence.digest,x.digest);assert.equal(detail.submissionEvidence.source,'author-host-report');assert.equal(detail.submissionEvidence.status,'passed');
+ const detail=f.market('admin','detail',{id:x.id});assert.equal(detail.submissionEvidence,null,'未由内核明确提交的语义验收，不生成宿主通过结论');
 }finally{f.close();}});
 
 test('连接器列表含内置即梦；探测结果落盘；场景包就绪分态',async t=>{const f=setup(t);try{

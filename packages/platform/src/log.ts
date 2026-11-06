@@ -40,6 +40,7 @@ export function platformLog(
   }
   const line = JSON.stringify(created.event);
   process.stderr.write(`${line}\n`);
+  try {
   const dir = join(dataDir, "logs");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "platform.log");
@@ -53,4 +54,5 @@ export function platformLog(
     }
   }
   appendFileSync(path, `${line}\n`, "utf8");
+  }catch{process.stderr.write('{"event":"log_write_failed","service":"cpclaw-platform"}\n');}
 }

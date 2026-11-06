@@ -12,14 +12,14 @@ test('原生文档工具：分片、普通回答、未知工具/目标、坏参�
  let deliveries=[],text='',activity=0;
  const run=signal=>streamChat(config,[{role:'user',content:'准备明天开会用的材料'}],signal??new AbortController().signal,async delta=>{text+=delta;},{context,onDocument:async d=>{deliveries.push(d);},onActivity:async()=>{activity++;}});
  try{
-  await run();assert.equal(deliveries.length,1);assert.equal(deliveries[0].filename,'Meeting notes.md');assert.equal(text,'');assert.ok(activity>0);assert.equal(seenRequest.body.tool_choice,'auto');assert.equal(seenRequest.body.tools[0].function.name,'deliver_document');
+  await run();assert.equal(deliveries.length,1);assert.equal(deliveries[0].filename,'Meeting notes.md');assert.equal(text,'');assert.ok(activity>0);assert.equal(seenRequest.body.tool_choice,'auto');assert.equal(seenRequest.body.tools[0].function.name,'deliver_document');assert.equal(seenRequest.body.tools[0].function.parameters.properties.complete,undefined);
   choice={kind:'answer',content:'直接解释即可'};deliveries=[];await run();assert.equal(deliveries.length,0);assert.match(text,/直接解释/);
   choice={kind:'document',sourceId:'base-1'};await run();assert.equal(deliveries.at(-1).sourceId,'base-1');
   const count=deliveries.length;choice={kind:'document',sourceId:'someone-else'};await assert.rejects(run(),/目标无效/);assert.equal(deliveries.length,count);
   choice={kind:'document',filename:'../escape.md'};await assert.rejects(run(),/名称/);assert.equal(deliveries.length,count);
   choice={kind:'document',toolName:'exec_shell'};await assert.rejects(run(),/未知文档工具/);
   choice={kind:'document',rawArgs:'{broken'};await assert.rejects(run());
-  choice={kind:'document',finish:'length'};await assert.rejects(run(),/未完整结束/);
+  choice={kind:'document',finish:'length'};await assert.rejects(run(),e=>e.diagnostic?.code==='MODEL_OUTPUT_LIMIT');
   choice={kind:'document',slow:true,content:'长文'.repeat(500)};const abort=new AbortController();const pending=run(abort.signal);setTimeout(()=>abort.abort(),70);await assert.rejects(pending);assert.equal(deliveries.length,count);
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });

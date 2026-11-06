@@ -1,4 +1,4 @@
-import {documentModelFixture} from '../../../scripts/document-model-fixture.mjs';
+import {createServer} from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,writeFileSync,mkdirSync,symlinkSync,readFileSync} from 'node:fs';
@@ -34,7 +34,18 @@ test('知识库：企业授权、个人隔离、版本冲突、平台接口及�
   assert.equal(call(a,'read',{id:enterprise.id}).documents.length,0);
   assert.ok(call(admin,'document-review',{id:enterprise.id,documentId:doc.id,decision:'approve'}).ok);
   assert.match(call(a,'read',{id:enterprise.id}).documents[0].body,/KNOWLEDGE-873/);
-  upstream=documentModelFixture(({body})=>{const prompt=body.messages.at(-1).content;modelInputs.push(prompt);return {kind:'document',filename:'验收报告.md',content:'# 验收报告\n\n企业制度 / 验收标准:L1 KNOWLEDGE-873\n我的本地笔记 / 验收.md:L1 LOCAL-552'};});
+  let phase=0,links=[],current=null;
+  upstream=createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=JSON.parse(raw);modelInputs.push(JSON.stringify(body.messages));const last=body.messages.at(-1);if(last.role==='user')phase=0;let returned=null;try{returned=last.role==='tool'?JSON.parse(last.content):null;}catch{}
+    let name,args,content;
+    if(returned?.ok===false)content='访问被拒绝，未重新取得企业资料';
+    else if(phase===0){name='list_resources';args={};phase++;}
+    else if(phase===1){current=returned.resources;links=current.knowledge;name='read_resource';args={kind:'knowledge',id:links[0].id};phase++;}
+    else if(phase===2){const docs=JSON.parse(returned.content);name='read_resource';args={kind:'knowledge',id:links[0].id,path:docs[0].id||docs[0].path};phase++;}
+    else if(phase===3){name='read_resource';args={kind:'knowledge',id:links[1].id};phase++;}
+    else if(phase===4){const docs=JSON.parse(returned.content);name='read_resource';args={kind:'knowledge',id:links[1].id,path:docs[0].id||docs[0].path};phase++;}
+    else if(phase===5){name='deliver_document';args={documentKey:'knowledge-'+current.inputId,filename:'验收报告.md',part:0,complete:true,content:'# 验收报告\n企业制度 / 验收标准:L1 KNOWLEDGE-873\n我的本地笔记 / 验收.md:L1 LOCAL-552'};phase++;}
+    else content='已按来源交付';
+    res.writeHead(200,{'content-type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:name?{tool_calls:[{index:0,id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}}]}:{content},finish_reason:name?'tool_calls':'stop'}],usage:{prompt_tokens:1,completion_tokens:1}})+'\n\ndata: [DONE]\n\n');});
   await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
   server=await listenPlatform(app,{port:0,dataDir:config.dataDir,aiMockMode:false,reportGateway:{mode:'real',baseUrl:`http://127.0.0.1:${upstream.address().port}`,apiKey:'fixture',timeoutMs:5000}});const base=`http://127.0.0.1:${server.port}`;
   assert.equal((await fetch(base+'/v1/knowledge',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
@@ -48,10 +59,10 @@ test('知识库：企业授权、个人隔离、版本冲突、平台接口及�
   const localLink=await request('knowledge.link',{kind:'local',scope:'personal',target:local});assert.ok(localLink.ok,localLink.message);
   const chat=await request('chat.create');assert.ok(chat.ok);
   assert.ok((await request('knowledge.choose',{chatId:chat.chatId,ids:[linked.link.id,localLink.link.id]})).ok);
-  const sent=await request('chat.send',{chatId:chat.chatId,text:'根据验收标准生成报告',requestId:'knowledge-send'});assert.ok(sent.ok,sent.message);assert.equal(sent.state,'done');assert.match(modelInputs[0],/KNOWLEDGE-873/);assert.match(modelInputs[0],/LOCAL-552/);assert.ok(sent.artifact);const artifact=await request('document.read',{id:sent.artifact.id});assert.match(artifact.artifact.body,/KNOWLEDGE-873/);
-  const history=await request('chat.history',{chatId:chat.chatId});const citations=history.messages.at(-1).knowledgeSources;assert.equal(citations.length,2);assert.ok(citations.some(s=>s.excerpt.includes('KNOWLEDGE-873')));assert.ok(citations.some(s=>s.excerpt.includes('LOCAL-552')));
+  const sent=await request('chat.send',{chatId:chat.chatId,text:'根据验收标准生成报告',requestId:'knowledge-send'});assert.ok(sent.ok,sent.message);assert.equal(sent.state,'done');assert.doesNotMatch(modelInputs[0],/KNOWLEDGE-873|LOCAL-552/);assert.match(modelInputs.at(-1),/KNOWLEDGE-873/);assert.match(modelInputs.at(-1),/LOCAL-552/);assert.ok(sent.artifact);const artifact=await request('document.read',{id:sent.artifact.id});assert.match(artifact.artifact.body,/KNOWLEDGE-873/);
+  const history=await request('chat.history',{chatId:chat.chatId});assert.equal(history.messages.at(-1).knowledgeSources.length,0,'宿主不预先摘录或生成引用，引用来自内核文档');
   assert.ok(call(admin,'save',{id:enterprise.id,name:'企业制度',members:[]}).ok);
-  const denied=await request('chat.send',{chatId:chat.chatId,text:'再查验收',requestId:'knowledge-revoked'});assert.equal(denied.state,'error');
+  const denied=await request('chat.send',{chatId:chat.chatId,text:'再查验收',requestId:'knowledge-revoked'});assert.equal(denied.state,'done');assert.match(denied.content,/访问被拒绝/);
   assert.equal((await request('knowledge.read',{id:linked.link.id})).ok,false);
   assert.equal((await request('knowledge.list',{},'employee-b')).ok,false);
   assert.ok((await request('knowledge.unlink',{id:linked.link.id})).ok);

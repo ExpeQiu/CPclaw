@@ -1,5 +1,5 @@
 /** User-facing issue contract: cause, impact, preserved evidence and one concrete next action. */
-export function taskIssue({error='',state='error',safeToRetry=false,hasServiceSteps=false,modelQuota=null,serviceAuthRequired=false}={}) {
+export function taskIssue({error='',state='error',safeToRetry=false,hasServiceSteps=false,modelQuota=null,serviceAuthRequired=false,diagnostic=null}={}) {
   if(!error||state==='cancelled')return null;
   const saved=hasServiceSteps?(safeToRetry?'这轮仅有只读准备记录，尚无生成或写入提交；可继续原请求。':'已有操作记录已保存；恢复时先核实原任务，避免重复生成。'):'你的请求已保留；恢复后可继续原请求。';
   const base={severity:'blocking',popup:false,impact:'本轮已暂停，尚未确认任务完成。',preserved:saved,safeToRetry,hasServiceSteps,details:String(error).replace(/Bearer\s+\S+/gi,'Bearer [redacted]').slice(0,500),modelQuota};
@@ -11,6 +11,8 @@ export function taskIssue({error='',state='error',safeToRetry=false,hasServiceSt
   if(/图片.*(预览|解码)|超过预览限制/.test(error))return {...base,code:'IMAGE_DELIVERY_FAILED',title:'图片交付尚未完成',summary:'图片读取或预览遇到问题，需要先核实已有文件。',action:'diagnose',actionLabel:'查找并恢复图片'};
   if(/网关返回 50[234]|timeout|超时|fetch failed|断网|连接中断/i.test(error))return {...base,code:'CONNECTION_INTERRUPTED',severity:'temporary',title:'连接中断，任务未完成',summary:'模型或平台暂未正常响应，当前原因仍需检查。',action:safeToRetry?'retry':'diagnose',actionLabel:safeToRetry?'继续原请求':'检查原任务状态'};
   if(/模型步骤达到上限/.test(error))return {...base,code:'MODEL_STEP_LIMIT',title:'本轮执行已暂停',summary:'本轮模型调用已达次数上限，需要核实已有进度后继续。',action:'diagnose',actionLabel:'检查进度并恢复'};
+  const causes={MODEL_OUTPUT_LIMIT:'模型达到输出长度上限，正文或工具调用未完成。',MODEL_STREAM_INCOMPLETE:'模型响应未完整结束；具体中断原因仍需核实。',TOOL_FINISH_MISMATCH:'模型工具调用的结束状态不符合协议。',TOOL_ARGUMENTS_INVALID:'模型返回的工具参数无效，未完成交付。',MODEL_EVENT_INVALID:'模型返回的流式事件无法解析。',MODEL_STREAM_TIMEOUT:'等待模型响应超时。',LOCAL_SERVICE_FAILED:'本机工具执行没有取得正常回执，操作结果需要核实。'};
+  if(diagnostic?.code&&causes[diagnostic.code])return {...base,code:diagnostic.code,title:'请求未完成',summary:causes[diagnostic.code],action:safeToRetry?'retry':'diagnose',actionLabel:safeToRetry?'重试本次请求':'检查原任务状态'};
   return {...base,code:'TASK_INTERRUPTED',title:'任务遇到问题，进度已保留',summary:'本轮执行未完成，需要检查具体原因。',action:'diagnose',actionLabel:'运行自诊断'};
 }
 

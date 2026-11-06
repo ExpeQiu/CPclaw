@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "cli_version": "1.0.0",
+  "ok": true,
+  "command": "cutpot.turn",
+  "request_id": "req_9a774484-3d8d-421e-b68a-c530389e5190",
+  "mode": "local",
+  "data": {
+    "version": 1,
+    "id": "d0c5045e-e025-432a-b49b-d57eaf2e05b2",
+    "name": "未命名项目",
+    "fps": 25,
+    "width": 1920,
+    "height": 1080,
+    "clips": [],
+    "narration": null,
+    "music": null,
+    "musicVolume": 0.12,
+    "updatedAt": "2026-11-05T01:17:20.996Z"
+  },
+  "error": null,
+  "warnings": []
+}

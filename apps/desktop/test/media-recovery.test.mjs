@@ -34,7 +34,7 @@ test('diagnosis recovers existing image, persists delivery, survives restart and
   assert(report.repairs.some(r=>r.code==='MEDIA_DELIVERY'&&r.verified));
   assert(events.some(e=>e.type==='image'&&e.path===realpathSync(path)));
   assert.equal(calls.length,1);assert.equal(calls[0].action,'recover_image');
-  const history=await service.dispatch('chat.history',actor,{chatId});assert.match(history.messages.at(-1).content,/图片.*恢复|恢复.*图片/);
+  const history=await service.dispatch('chat.history',actor,{chatId});assert.equal(history.messages.at(-1).content,'本轮回复未完成，已恢复执行记录。');
   assert.equal(history.messages.at(-1).state,'error'); // Preserve original execution failure.
   assert(history.serviceSteps.some(s=>s.request.action==='recover_image'&&s.result.data.path===realpathSync(path)));
   service.stop();service=createChatService(root,()=>{},options);

@@ -106,22 +106,13 @@ function planRepairs(result) {
     });
   }
   // 回复未完成：给出重试入口。只在没有更具体的修复项时兜底，避免掩盖真因。
-  if (codes.has('REPLY_INCOMPLETE') && (!result.hasServiceSteps||result.safeToRetry) && !codes.has('MODEL_QUOTA_EXHAUSTED') && !codes.has('MODEL_CONCURRENCY_FULL') && !seen.has('REPLY_INCOMPLETE') && !seen.has('SERVICE_CATALOG_REJECTED')) {
+  if (codes.has('REPLY_INCOMPLETE') && result.safeToRetry && !codes.has('MODEL_QUOTA_EXHAUSTED') && !codes.has('MODEL_CONCURRENCY_FULL') && !seen.has('REPLY_INCOMPLETE') && !seen.has('SERVICE_CATALOG_REJECTED')) {
     seen.add('REPLY_INCOMPLETE');
     plans.push({
       code: 'REPLY_INCOMPLETE',
       label: result.hasServiceSteps?'继续原请求（此前仅有只读查询）':'重试本轮回复',
       detail: '按原请求继续；仅无执行回执或已确认全部为只读操作时可用，已有生成或写入仍禁止整轮重放',
       kind: 'retry',
-    });
-  }
-  if (codes.has('EMPTY_REPLY') && !seen.has('EMPTY_REPLY')) {
-    seen.add('EMPTY_REPLY');
-    plans.push({
-      code: 'EMPTY_REPLY',
-      label: '恢复空白回复摘要',
-      detail: '从已保存的应用回执恢复执行摘要；不代表原任务已完成',
-      kind: 'server',
     });
   }
   return plans;
@@ -137,6 +128,8 @@ function syncRepairButton(result) {
 
 function renderDiagnoseReport(body, result) {
   body.replaceChildren();
+  const explain=document.createElement('button');explain.textContent='由内核解释诊断';
+  explain.onclick=async()=>{explain.disabled=true;const id=currentChatId;try{const r=await chatCall('chat.explain-diagnosis',{chatId:id});if(!r.ok)throw Error(r.message||r.error||'内核诊断未完成');diagnosticsDialog.close();await loadChats();await selectChat(r.chatId||id);}catch(e){diagParagraph(body,e.message);explain.disabled=false;}};body.append(explain);
   if(result.summary){
     const summary=result.summary;
     diagParagraph(body,`检查完成 · ${{none:'未执行修复',verified:'本次修复已验证',failed:'修复仍有未通过项'}[summary.repairState]||'待核实'} · 当前待处理 ${summary.unresolved} 项`);

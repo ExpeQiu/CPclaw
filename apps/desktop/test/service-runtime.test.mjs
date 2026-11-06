@@ -11,7 +11,7 @@ function setup({approve=async()=>true,run,fetcher,readBinary=()=>Buffer.from('fi
 }
 const signal=()=>new AbortController().signal;
 test('registry includes CLI and SaaS MCP; disabled connectors excluded',()=>{
- assert.deepEqual(publicServices([{id:'x',enabled:true,type:'MCP'},{id:'off',enabled:false,type:'CLI'}]).map(s=>s.id),['dreamina','local-terminal','browser-page','x']);
+ const ids=publicServices([{id:'x',enabled:true,type:'MCP'},{id:'off',enabled:false,type:'CLI'}]).map(s=>s.id);assert.deepEqual(ids.filter(id=>id!=='feishu'),['dreamina','local-terminal','browser-page','x']);assert.equal(new Set(ids).size,ids.length);if(ids.includes('feishu'))assert(publicServices([]).find(s=>s.id==='feishu').builtin);
 });
 test('denial prevents any child command',async()=>{const f=setup({approve:async()=>false});await assert.rejects(()=>f.runtime.execute(f.context,{action:'discover'},signal()),e=>e.code==='DENIED');assert.equal(f.calls.length,0);});
 test('generic CLI uses reviewed argv with shell false, supports non-media operations',async()=>{const f=setup();const result=await f.runtime.execute(f.context,{action:'call',args:['list','--query','x; $(echo injected)'],purpose:'检索 SaaS 任务'},signal());assert.equal(result.value,'real');assert.equal(f.calls[0].options.shell,false);assert.equal(f.calls[0].args[2],'x; $(echo injected)');assert.match(f.approvals[0].detail,/x; \$\(echo injected\)/);});

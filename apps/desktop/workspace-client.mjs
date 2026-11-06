@@ -13,7 +13,7 @@ export function resolveKernelStatus(desktopDir, env = process.env) {
     try { version = JSON.parse(readFileSync(bundleManifest, "utf8")).version || ""; } catch { /* 清单损坏仍标可用，路径存在即可 */ }
     return { ok: true, name: "deepseek-harness", ready: true, source: "bundle", version };
   }
-  if (env.CPCLAW_REPORT_ENGINE === "harness") {
+  if (env.CPCLAW_REPORT_ENGINE === "harness" || env.CPCLAW_HARNESS_ROOT || existsSync(join(resolve(desktopDir,"../../../../13 Github/deepseek-harness"),"packages/sdk/client/src/index.ts"))) {
     const root = env.CPCLAW_HARNESS_ROOT || resolve(desktopDir, "../../../../13 Github/deepseek-harness");
     const ready = existsSync(join(root, "package.json"));
     let version = "";
@@ -53,7 +53,7 @@ export function createWorkspaceClient(dataDir, desktopDir, { onEvent = () => {},
       workerEnv.CPCLAW_HARNESS_BUNDLE = bundledHarness;
       delete workerEnv.CPCLAW_HARNESS_ROOT;
       delete workerEnv.TSX_TSCONFIG_PATH;
-    } else if (workerEnv.CPCLAW_REPORT_ENGINE === "harness") {
+    } else if (workerEnv.CPCLAW_REPORT_ENGINE === "harness" || existsSync(join(workerEnv.CPCLAW_HARNESS_ROOT||resolve(desktopDir,"../../../../13 Github/deepseek-harness"),"packages/sdk/client/src/index.ts"))) {
       const harnessRoot = workerEnv.CPCLAW_HARNESS_ROOT || resolve(desktopDir, "../../../../13 Github/deepseek-harness");
       workerEnv.CPCLAW_HARNESS_ROOT = harnessRoot;
       workerEnv.TSX_TSCONFIG_PATH = join(harnessRoot, "tsconfig.base.json");

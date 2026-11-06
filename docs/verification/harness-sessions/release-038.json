@@ -1,0 +1,25 @@
+{
+  "version": "0.0.38",
+  "installedApp": "/Applications/CPclaw.app",
+  "backupApp": "/Applications/CPclaw 0.0.37 backup-038-20261105T062227Z.app",
+  "backupData": "/Users/expeqiu/Library/Application Support/CPclaw-backups/038-20261105T062227Z/data",
+  "delivery": "/Users/expeqiu/Documents/产品设计/CPclaw桌面APP/0.0.38",
+  "dmgSha256": "9cfefde107580753c315e9437548bfda6c336aebfcc7934a5038b48939f5fd56",
+  "zipSha256": "412cc3933d6a3ac85724cb1a8c6d7b492b8bac0dc2fa5f84e08a3361e1310503",
+  "checks": {
+    "dmgIntegrity": true,
+    "packagedSdkRecovery": true,
+    "crossChatIsolation": true,
+    "childCleanup": true,
+    "releaseFileHashes": 618,
+    "cleanPathPackageSmoke": true,
+    "installedSignature": true,
+    "mainProcess": true,
+    "workerProcess": true,
+    "chatDataPreserved": true,
+    "sessionSchemaReady": true
+  },
+  "realModelValidated": false,
+  "signature": "ad-hoc",
+  "notarized": false
+}

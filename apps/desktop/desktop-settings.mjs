@@ -139,6 +139,7 @@ export function getDesktopSettingsView(dataDir, desktopDir, { appVersion = "", e
     dataDir,
     appVersion,
     platformUrl: platform.platformUrl,
+    chatEngine:"harness",chatModelSource:"platform",
     reportEngine: reportEngine === "harness" ? "harness" : "none",
     harnessRoot: typeof harnessRoot === "string" ? harnessRoot : "",
     reportModelMode: reportModelMode === "real" ? "real" : "mock",

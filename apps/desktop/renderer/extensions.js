@@ -3,14 +3,16 @@
   const el=id=>document.getElementById(id),action=input=>window.cpclaw.extensionAction(input);
   const panel=el('panel-extensions'),inspector=el('inspector'),slot=el('extension-native-slot'),picker=el('extension-picker'),approval=el('service-approval');
   let approvalRequest;
+  let folderFlow=null,folderBusy=false;
+  const folderPanel=document.createElement('section');folderPanel.id='extension-folder-loader';folderPanel.className='extension-config-details folder-loader';folderPanel.hidden=true;folderPanel.setAttribute('aria-label','加载应用文件夹');el('extension-service-details').after(folderPanel);
   let native=false,workspace=false,checking=false,frame;
   let selected={id:'dreamina',title:'即梦画布',type:'CLI',kind:'cli'},activeService=selected;
-  let services=[selected], records=[],canvasUrl='',pageUrl='',resultsGeneration=0,selectionId='',activeKind='computer-use';
+  let services=[selected], records=[],canvasUrl='',pageUrl='',resultsGeneration=0,selectionId='',activeKind='app-driver';
   const feedback=text=>{el('extension-feedback').textContent=text??'';el('extension-panel-feedback').textContent=text??'';};
   const DREAMINA_ORIGIN='https://jimeng.jianying.com';
   const KIND_BLURB={
     'computer-use':'直接控制网页页面；点击与输入走可访问树，登录与支付需请示。',
-    'app-driver':'选定本地应用或项目文件夹，通过代码层读写与终端驱动，右侧可见交互。',
+    'app-driver':'加载应用或项目文件夹，自动检查并连接可用工作台。',
     cli:'绑定本机 CLI 后按自动化流程驱动，例如即梦画布。',
   };
   function serviceKind(service){
@@ -48,6 +50,8 @@
   }
   function sync(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const visible=!checking&&!picker.open&&!approval.open&&native&&workspace&&!panel.hidden&&!inspector.hidden&&!document.querySelector('.market-overlay:not([hidden])');const r=slot.getBoundingClientRect();void action(visible?{action:'bounds',bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}:{action:'hide'}).catch(()=>{});});}
   function configure(){
+    const loading=Boolean(folderFlow)&&activeKind==='app-driver'&&!selectionId;
+    el('extension-service-details').hidden=loading;folderPanel.hidden=!loading;
     const choosing=Boolean(selectionId);
     const inKind=Boolean(selected)&&(choosing||serviceKind(selected)===activeKind);
     if(!inKind){
@@ -71,7 +75,7 @@
   function select(service){
     if(!service)return;
     if(!selectionId&&serviceKind(service)!==activeKind)return;
-    selected=service;
+    folderFlow=null;folderPanel.hidden=true;selected=service;
     if(selectionId)activeKind=serviceKind(service);
     renderKindChrome();
     configure();
@@ -87,9 +91,14 @@
       const add=document.createElement('button');add.type='button';add.textContent='添加网页';add.onclick=()=>void addComputerUse(input.value);
       row.append(add);label.append(input);actions.append(label,row);
     }else if(activeKind==='app-driver'){
-      const row=document.createElement('div');row.className='button-row';
-      const add=document.createElement('button');add.type='button';add.className='primary';add.textContent='选择应用 / 项目文件夹';add.onclick=()=>void addAppDriver();
-      row.append(add);actions.append(row);
+      const add=document.createElement('button');add.type='button';add.className='primary';add.id='extension-load-folder';add.textContent='加载应用文件夹';add.disabled=folderBusy;add.onclick=()=>void loadFolder();
+      const recent=document.createElement('button');recent.type='button';recent.textContent='最近的 TPCstore';recent.disabled=folderBusy;recent.onclick=()=>void loadFolder(true);
+      const hint=document.createElement('p');hint.className='muted';hint.textContent='自动识别应用、TPCstore 目录或普通项目。';
+      const advanced=document.createElement('details'),summary=document.createElement('summary');summary.textContent='手动配置工作台';
+      const label=document.createElement('label');label.textContent='已启动的本机工作台地址（可选）';
+      const input=document.createElement('input');input.type='url';input.id='extension-app-page-url';input.placeholder='http://127.0.0.1:4317/editor';label.append(input);
+      const manual=document.createElement('button');manual.type='button';manual.textContent='选择项目文件夹并添加';manual.disabled=folderBusy;manual.onclick=()=>void addAppDriver();advanced.append(summary,label,manual);
+      actions.append(add,recent,hint,advanced);
     }else{
       const row=document.createElement('div');row.className='button-row';
       const market=document.createElement('button');market.type='button';market.textContent='配置 CLI 连接器';market.onclick=()=>{picker.close();el('rail-market').click();};
@@ -129,12 +138,69 @@
       await refreshServices();select(r.service);feedback('已添加网页 · '+r.service.title);
     }catch(e){feedback(e.message);}
   }
+  function setFolderBusy(value){
+    folderBusy=value;el('extension-picker-close').disabled=value;
+    document.querySelectorAll('.extension-kind-tab').forEach(b=>b.disabled=value);
+    renderKindChrome();
+  }
+  function folderButton(label,fn,primary=false){const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=folderBusy;if(primary)b.className='primary';b.onclick=()=>void fn();return b;}
+  function renderFolder(){
+    if(!folderFlow)return;configure();folderPanel.replaceChildren();folderPanel.setAttribute('aria-busy',String(folderBusy));
+    const flow=folderFlow,header=document.createElement('header'),title=document.createElement('h2'),subtitle=document.createElement('p');
+    title.textContent=flow.folder?.title||'加载应用文件夹';subtitle.className='muted';subtitle.textContent=flow.folder?.root||'选择应用、TPCstore 目录或普通项目';header.append(title,subtitle);folderPanel.append(header);
+    const status=document.createElement('p');status.className='folder-load-status';status.setAttribute('role','status');status.textContent=flow.message||flow.folder?.description||'正在识别文件夹…';folderPanel.append(status);
+    if(flow.status==='error')status.classList.add('folder-load-error');
+    if(folderBusy){const progress=document.createElement('p');progress.className='muted';progress.textContent=flow.status==='connecting'?'正在校验清单、连接服务并确认工作台地址，请稍候。':'正在读取文件夹信息，请稍候。';folderPanel.append(progress);return;}
+    const controls=document.createElement('div');controls.className='button-row';
+    if(flow.service)controls.append(folderButton('打开应用',()=>openLoadedFolder(flow.service),true));
+    else if(flow.apps){
+      const list=document.createElement('div');list.className='folder-app-list';
+      for(const app of flow.apps){
+        const card=document.createElement('article');card.className='folder-app-card';const name=document.createElement('strong'),desc=document.createElement('p'),state=document.createElement('span');
+        name.textContent=app.app_id==='tpcstore.cutpot'?'CutPot':app.app_id;desc.textContent=app.app_id==='tpcstore.cutpot'?'视频分镜创作、时间轴剪辑与本地导出。':app.description;desc.className='muted';
+        const connected=services.find(s=>s.tpcstore?.appId===app.app_id&&s.tpcstore.root===flow.folder.storeRoot);
+        const supported=app.app_id==='tpcstore.cutpot'&&Boolean(app.integration)&&app.stage!=='design';
+        state.textContent=connected?'已添加 · 可重新连接':supported?'可连接':'当前版本暂不支持连接';state.className='folder-app-state';
+        card.append(name,state,desc);const button=folderButton(connected?'重新连接并打开':'连接并打开',()=>runFolder(app.app_id),true);button.disabled=!supported;card.append(button);list.append(card);
+      }
+      if(!flow.apps.length){const empty=document.createElement('p');empty.textContent='此目录暂未登记应用。';list.append(empty);}folderPanel.append(list);
+    } else if(flow.folder?.kind==='project')controls.append(folderButton('作为项目添加并打开',()=>runFolder(),true));
+    else if(flow.folder?.kind==='store')controls.append(folderButton(flow.status==='error'||flow.status==='cancelled'?'重试检查':'检查并查看应用',()=>runFolder(),true));
+    else if(flow.folder?.kind==='app'&&flow.folder.connectable)controls.append(folderButton(flow.status==='error'||flow.status==='cancelled'?'重试连接':'连接并打开',()=>runFolder(),true));
+    if(flow.status==='error'&&!flow.folder)controls.append(folderButton('重新选择文件夹',()=>loadFolder(),true));
+    else controls.append(folderButton('更换文件夹',()=>loadFolder()));
+    folderPanel.append(controls);
+  }
+  async function loadFolder(recent=false){
+    if(folderBusy)return;activeKind='app-driver';const previous=folderFlow;folderFlow={status:'choosing',message:'请选择文件夹；识别过程不会启动应用。'};setFolderBusy(true);renderFolder();
+    try{const result=await action({action:'folder-inspect',recent});if(result.cancelled){folderFlow=previous;return;}if(!result.ok)throw Error(result.message);folderFlow={...result,status:'recognized'};}
+    catch(e){folderFlow={status:'error',message:e.message||'文件夹识别失败，请重新选择。'};}
+    finally{setFolderBusy(false);if(folderFlow)renderFolder();else configure();}
+  }
+  async function openLoadedFolder(service){
+    if(window.chooseExecutionService){if(!await window.chooseExecutionService(service)){folderFlow={status:'ready',service,folder:folderFlow?.folder,message:'应用已添加，当前对话暂时无法打开。可稍后重试，无需重新连接。'};renderFolder();return;}}
+    else window.showServiceWorkspace(service);
+    folderFlow=null;configure();picker.close();feedback('已添加并打开 · '+service.title);
+  }
+  async function runFolder(appId){
+    if(folderBusy||!folderFlow?.token)return;const flow=folderFlow;setFolderBusy(true);flow.status='connecting';flow.message=flow.folder.kind==='project'?'正在添加项目…':'正在检查应用并连接工作台…';renderFolder();
+    let service;
+    try{
+      const result=await action(flow.folder.kind==='project'?{action:'folder-add-project',token:flow.token}:{action:'folder-load',token:flow.token,...(appId?{appId}:{})});
+      if(!result.ok){flow.status=result.cancelled?'cancelled':'error';flow.message=result.message||'加载失败，请重试。';return;}
+      if(result.apps){flow.apps=result.apps;flow.status='catalog';flow.message='目录检查通过。选择应用即可连接，无需配置文件夹或端口。';return;}
+      service=result.service;if(!service)throw Error('未取得服务连接，请重试');
+      folderFlow=null;await refreshServices();select(service);folderFlow={...flow,status:'ready',service,message:'应用已就绪。'};
+    }catch(e){folderFlow=flow;flow.status='error';flow.message=e.message||'加载失败，请重试。';}
+    finally{setFolderBusy(false);renderFolder();}
+    if(service)await openLoadedFolder(service);
+  }
   async function addAppDriver(){
     try{
       const pick=await action({action:'pick-directory',title:'选择要驱动的应用或项目文件夹'});
       if(!pick.ok)throw Error(pick.message||'无法选择文件夹');
       if(pick.cancelled)return;
-      const r=await window.cpclaw.workspace({method:'extensions.add-app-driver',input:{root:pick.path}});
+      const r=await window.cpclaw.workspace({method:'extensions.add-app-driver',input:{root:pick.path,pageUrl:el('extension-app-page-url')?.value.trim()||''}});
       if(!r.ok)throw Error(r.message||'添加失败');
       activeKind='app-driver';await refreshServices();select(r.service);feedback('已添加驱动应用 · '+r.service.title);
     }catch(e){feedback(e.message);}
@@ -181,11 +247,11 @@
       ?`驱动目录：${activeService.root||'本机工作区'}。在左侧描述任务，将按对话权限执行。`
       :'在左侧描述任务，将按当前对话权限执行。登录与支付需确认。';
     openPanel('extensions');
-    void mode(serviceKind(activeService)==='computer-use'&&canNative(activeService));
+    void mode(['computer-use','app-driver'].includes(serviceKind(activeService))&&canNative(activeService));
   };
   window.executionServiceName=id=>services.find(s=>s.id===id)?.title??(id==='dreamina'?'即梦画布':'');
   for(const tab of document.querySelectorAll('.extension-kind-tab'))tab.onclick=()=>{
-    activeKind=tab.dataset.kind;
+    folderFlow=null;folderPanel.hidden=true;activeKind=tab.dataset.kind;
     renderKindChrome();
     renderServiceList();
   };
@@ -202,8 +268,8 @@
     if(picker.open)return;await action({action:'hide'}).catch(()=>{});picker.showModal();sync();
     try{await refreshServices();}catch(e){el('extension-summary').textContent=e.message||'服务目录读取失败，请检查平台连接。';renderKindChrome();}
   };
-  el('extension-picker-close').onclick=()=>picker.close();picker.addEventListener('close',()=>{if(selectionId){void action({action:'cancel-selection',selectionId});selectionId='';}sync();});
-  picker.addEventListener('click',e=>{if(e.target!==picker)return;const r=picker.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)picker.close();});
+  picker.addEventListener('cancel',e=>{if(folderBusy)e.preventDefault();});el('extension-picker-close').onclick=()=>{if(!folderBusy)picker.close();};picker.addEventListener('close',()=>{if(selectionId){void action({action:'cancel-selection',selectionId});selectionId='';}sync();});
+  picker.addEventListener('click',e=>{if(folderBusy||e.target!==picker)return;const r=picker.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)picker.close();});
   el('extension-native').onclick=()=>void mode(true);el('extension-cli').onclick=()=>void mode(false);
   el('extension-refresh').onclick=()=>native?void mode(true):void renderResults();
   el('extension-revoke').onclick=async()=>{const r=await action({action:'revoke-permission'});feedback(r.message);};

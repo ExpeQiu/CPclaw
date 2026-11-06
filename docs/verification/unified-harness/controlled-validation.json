@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-05",
+  "scope": "source-only",
+  "desktopTests": 177,
+  "platformTests": 60,
+  "gatewayTests": 23,
+  "adapterTests": 9,
+  "build": true,
+  "engineeringVerify": true,
+  "actualSdkControlledProvider": true,
+  "actualElectronControlledProvider": true,
+  "realProviderBusinessValidation": false,
+  "dmgBuilt": false,
+  "installedAppReplaced": false,
+  "cloudDeployed": false
+}

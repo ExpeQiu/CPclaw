@@ -46,7 +46,7 @@ test('市场：空目录、组织隔离、审核、撤回、持久化与真实�
   assert.match(page.html,/button\(label,\(\)=>switchSection\(key\),false,false\)/);
   assert.match(page.html,/正在加载…/);
   assert.ok((await request('market.call',{action:'list'})).ok);
-  const generated=await request('market.generate',{title:'信息检查',description:'检查来源'});assert.ok(generated.ok,generated.message);assert.equal(generated.mode,'mock');
+  const generated=await request('market.generate',{title:'信息检查',description:'检查来源'});assert.equal(generated.ok,false,'Mock 控制面没有模型执行器，不得绕过 Harness 合成 Skill');assert.match(generated.message,/内核|Harness|未启用|未完成|503/);
   const cli=await request('market.call',{action:'connector-save',input:{title:'Node',type:'CLI',target:process.execPath}});assert.ok(cli.ok);
   const probe=await request('market.probe',{id:cli.connector.id});assert.equal(probe.ok,false);assert.equal(probe.code,'LOCAL_EXECUTION_REQUIRED');assert.equal(probe.localExecution.target,process.execPath);
   const mcp=createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({jsonrpc:'2.0',id:1,result:{protocolVersion:'2024-11-05',serverInfo:{name:'test-mcp',version:'1'},capabilities:{}}}));});

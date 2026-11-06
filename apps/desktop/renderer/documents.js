@@ -24,7 +24,7 @@ function renderDocumentList() {
     const tab=documentButton(latest.name,()=>showDocument(latest.id));tab.title=latest.name;tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(activeArtifact?.document_id===latest.document_id));tabs.append(tab);
     if(query&&!versions.some(a=>(a.name+' v'+a.revision).toLowerCase().includes(query)))continue;
     const group=document.createElement('details');group.open=true;group.className='document-tree-group';const summary=document.createElement('summary');summary.textContent='▤ '+latest.name;group.append(summary);
-    for(const artifact of versions){const row=documentButton(`v${artifact.revision} · ${artifact.name}`,()=>showDocument(artifact.id));row.className='document-tree-file';row.setAttribute('aria-current',String(activeArtifact?.id===artifact.id));row.title=artifact.path;group.append(row);}
+    for(const artifact of versions){const row=documentButton(`${artifact.draft?'未完成草稿':'v'+artifact.revision} · ${artifact.name}`,()=>showDocument(artifact.id));row.className='document-tree-file';row.setAttribute('aria-current',String(activeArtifact?.id===artifact.id));row.title=artifact.path;group.append(row);}
     list.append(group);
   }
   if(groups.size&&!list.children.length)list.textContent='没有匹配的文件';
@@ -44,6 +44,7 @@ function renderDocumentCard(artifact) {
   const path=document.createElement('small');path.textContent=artifact.path;path.className='document-path';
   const meta=document.createElement('span');meta.textContent=`Markdown · v${artifact.revision} · 已保存到本地`;
   title.title=artifact.path;
+  if(artifact.draft){meta.textContent='未完成草稿 · 仅预览，尚未发布';card.append(title,meta,documentButton('预览草稿',()=>showDocument(artifact.id)));return card;}
   card.append(title,meta,documentButton('预览文档',()=>showDocument(artifact.id)),documentButton('打开',()=>documentAction('open',artifact.id)),documentButton('另存为',()=>documentAction('saveAs',artifact.id)));
   return card;
 }
@@ -54,13 +55,14 @@ function renderMarkdown(body) {
 async function showDocument(id) {
   const generation=++documentGeneration, actor=chatAccount, chatId=currentChatId;
   activeArtifact=null;documentElement('document-view').hidden=true;
-  const result=await chatCall('document.read',{id});
+  const result=await chatCall(id.startsWith('draft:')?'document.draft.read':'document.read',{id,chatId});
   if(generation!==documentGeneration||chatAccount!==actor||currentChatId!==chatId)return;
   if(!result.ok)throw Error(result.message);
   const a=result.artifact;activeArtifact=a;openPanel('documents');
   documentElement('document-view').hidden=false;documentElement('document-empty').hidden=true;
   documentElement('document-location').textContent=a.path;
-  documentElement('document-version').textContent=`v${a.revision}`;
+  documentElement('document-version').textContent=a.draft?'未完成草稿 · 尚未发布':`v${a.revision}`;
+  for(const name of ['open','save-as','reveal','edit'])documentElement('document-'+name).disabled=Boolean(a.draft);
   documentElement('document-feedback').textContent=a.externalChange?'文件已在外部修改，当前显示磁盘中的最新内容。':'';
   documentElement('document-feedback').hidden=!a.externalChange;
   documentElement('document-more').open=false;
@@ -68,7 +70,7 @@ async function showDocument(id) {
   setDocumentView(false);renderDocumentList();
 }
 async function documentAction(action,id=activeArtifact?.id) {
-  if(!id)throw Error('请先选择文档');
+  if(!id)throw Error('请先选择文档');if(id.startsWith('draft:'))throw Error('草稿尚未发布，请由内核继续提交');
   const result=await window.cpclaw.documentAction({action,id});if(!result.ok)throw Error(result.message);
   if(action==='saveAs')setStatus(result.cancelled?'已取消另存为':`已另存为：${result.path}`);
 }
@@ -79,7 +81,7 @@ documentElement('document-save-as').onclick=()=>documentAction('saveAs').catch(e
 documentElement('document-reveal').onclick=()=>documentAction('reveal').catch(e=>setStatus(e.message));
 documentElement('document-refresh').onclick=()=>activeArtifact&&showDocument(activeArtifact.id).catch(e=>setStatus(e.message));
 documentElement('document-edit').onclick=()=>{
-  if(!activeArtifact)return;
+  if(!activeArtifact||activeArtifact.draft)return;
   if(innerWidth<=1100)documentElement('close-panel').click();
   else if(document.body.classList.contains('document-expanded'))documentElement('document-expand').click();
   editingArtifact={id:activeArtifact.id,expectedHash:activeArtifact.currentHash,name:activeArtifact.name};

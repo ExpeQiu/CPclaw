@@ -1,0 +1,19 @@
+{
+  "recognized": {
+    "kind": "app",
+    "root": "/Volumes/Lexar/git/10 baseTools/TPCstore/cutpot",
+    "storeRoot": "/Volumes/Lexar/git/10 baseTools/TPCstore",
+    "appId": "tpcstore.cutpot",
+    "title": "CutPot",
+    "description": "已识别视频创作应用。连接后可通过对话操作，并在右侧打开工作台。",
+    "connectable": true
+  },
+  "reused": {
+    "app_id": "tpcstore.cutpot",
+    "url": "http://127.0.0.1:53534/",
+    "webUrl": "http://127.0.0.1:53534/editor",
+    "data_dir": "/tmp/cpclaw-cutpot-integration-7iOaQ2/app-runtimes/294c07b3917aecb4864f",
+    "reused": true
+  },
+  "denialAndRetry": true
+}

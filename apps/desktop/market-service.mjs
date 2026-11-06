@@ -193,7 +193,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     db.prepare('INSERT INTO chat_skills VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET skill=excluded.skill').run(chatId,resolved.item.id);
     return {ok:true,chatId,binding:value,readiness:ready,prompt:inputFields.map(p=>p.label+'：'+(values[p.name]??'')).join('\n')};
   }
-  async function prepareRun(actor,chatId,messageId,signal){
+  async function prepareRun(actor,chatId,messageId,signal,{probe=true}={}){
     const startingScope=scope(actor);
     let selected=binding(chatId);
     if(!selected){const old=db.prepare('SELECT skill FROM chat_skills WHERE chat=?').get(chatId);if(!old)return null;const migrated=await use(actor,{id:old.skill,chatId},false,true);if(!migrated.ok)throw Error(migrated.message);selected=migrated.binding;}
@@ -213,7 +213,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     if(!selected.trial&&!installed(actor,selected.id)?.enabled)throw Error('当前技能已停用或卸载，可解除绑定后继续聊天');
     const snapshot=status(actor,await remote(actor,'list',{summary:true},signal));const ready=readiness(current.filter(r=>selected.resources.some(s=>s.id===r.item.id)),snapshot);if(!ready.canUse)throw Error(ready.checks.filter(c=>c.required&&c.state!=='available'&&c.state!=='needs_check').map(c=>c.message).join('；'));
     // 真实发现走同一宿主与对话权限入口，未通过不能只靠市场状态继续。
-    for(const check of ready.checks.filter(c=>c.required&&c.instanceId)){
+    for(const check of ready.checks.filter(c=>probe&&c.required&&c.instanceId)){
       const service=publicServices(snapshot.connectors).find(s=>s.id===check.instanceId);
       await revalidate(actor,selected,signal);
       const result=await executeService({actorId:actor,chatId,taskId:messageId,service,request:{action:'discover'}},signal);ensureScope(actor,startingScope);if(result.ok===false)throw Error(result.message||'依赖工具发现失败');

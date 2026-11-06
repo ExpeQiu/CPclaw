@@ -1,6 +1,12 @@
 import {randomUUID} from 'node:crypto';
 
 const rules={
+  MODEL_OUTPUT_LIMIT:{repair:'缩小本次成果范围后重试，核实未发生外部操作',prevention:'保留模型输出上限与结束状态；不把截断工具参数作为有效交付。'},
+  MODEL_STREAM_INCOMPLETE:{repair:'查询请求证据，核实已有执行后再决定是否重试',prevention:'记录流结束、EOF、最后数据时间与关联请求，不猜测断流的具体来源。'},
+  TOOL_FINISH_MISMATCH:{repair:'保留工具名称、参数长度与结束状态供协议排查',prevention:'只接受完整并通过校验的工具调用。'},
+  TOOL_ARGUMENTS_INVALID:{repair:'依据参数校验结果修正本次交付',prevention:'记录JSON完整性与校验阶段，不在诊断日志中保存参数正文。'},
+  MODEL_EVENT_INVALID:{repair:'按关联请求核对供应商协议',prevention:'将事件解析失败与网络断流分别记录。'},
+
   MEDIA_DELIVERY:{repair:'恢复已有图片、核实文件并准备预览',prevention:'生成、下载、预览分别记录终态；保留原图与校验回执，按原资源恢复，不重新生成。'},
   MEDIA_PENDING:{repair:'查询原提交并核实已有资源',prevention:'提交身份持久化；中断后先查询原提交，受理状态不作为完成。'},
   MEDIA_RESUME:{repair:'按原提交查询并补下载已有资源',prevention:'续接只查询原身份、核实资源并补下载，不重新提交生成；完成后回读成果。'},

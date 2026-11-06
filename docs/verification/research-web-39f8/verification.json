@@ -1,0 +1,79 @@
+{
+  "chatId": "39f8b50a-8583-4528-989f-de0ca466aa04",
+  "scope": "source-only",
+  "packaged": false,
+  "deployed": false,
+  "originalChatMutated": false,
+  "readOnlyReplay": {
+    "chatId": "39f8b50a-8583-4528-989f-de0ca466aa04",
+    "readOnlyReplay": true,
+    "toolsExecuted": 0,
+    "turns": [
+      {
+        "messageId": "14d84bbe-7153-476f-ac9d-858064ddea26",
+        "receipts": 12,
+        "recognizedSources": 1,
+        "sourceChars": 1980,
+        "ready": true,
+        "sourceKinds": [
+          "web"
+        ]
+      },
+      {
+        "messageId": "e70370a7-33c1-4398-a54a-2bd76a0f42aa",
+        "receipts": 7,
+        "recognizedSources": 5,
+        "sourceChars": 19236,
+        "ready": true,
+        "sourceKinds": [
+          "web"
+        ]
+      }
+    ],
+    "followupKeepsSubject": true,
+    "followupKeepsMethod": true
+  },
+  "tests": {
+    "gateway": {
+      "tests": 23,
+      "pass": 23,
+      "fail": 0
+    },
+    "platform": {
+      "tests": 60,
+      "pass": 60,
+      "fail": 0
+    },
+    "desktop": {
+      "tests": 18,
+      "pass": 18,
+      "fail": 0
+    }
+  },
+  "native": {
+    "passed": true,
+    "packaged": false,
+    "actualSdk": true,
+    "nativeCutoffCheckpoint": true,
+    "proactiveCollectionHandoff": false,
+    "toolExecutions": 2,
+    "nativeModelCalls": 3,
+    "documentSections": 1,
+    "finalDocumentComplete": true,
+    "toolsNotReplayed": true
+  },
+  "handoff": {
+    "passed": true,
+    "packaged": false,
+    "actualSdk": true,
+    "nativeCutoffCheckpoint": false,
+    "proactiveCollectionHandoff": true,
+    "toolExecutions": 7,
+    "nativeModelCalls": 7,
+    "documentSections": 1,
+    "finalDocumentComplete": true,
+    "toolsNotReplayed": true
+  },
+  "repositoryVerifyPassed": true,
+  "realModelLongTaskVerified": false
+}

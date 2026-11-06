@@ -1,0 +1,25 @@
+{
+  "version": "0.0.40",
+  "installedApp": "/Applications/CPclaw.app",
+  "priorVersionBackup": "/Applications/CPclaw 0.0.39 backup-040-20261105T081522Z.app",
+  "priorDataBackup": "/Users/expeqiu/Library/Application Support/CPclaw-backups/040-20261105T081522Z/data",
+  "finalReplacementBackup": "/Applications/CPclaw 0.0.40 preliminary-backup-20261105T082840Z.app",
+  "finalDataBackup": "/Users/expeqiu/Library/Application Support/CPclaw-backups/040-final-20261105T082840Z/data",
+  "cloudBackup": "/opt/cpclaw-platform/backups/resume-040-20261105T080751Z",
+  "dmgSha256": "23a08ae73629fe9ddd93a85fe82e461970bd97c036badbb35b41d4b4cb312524",
+  "zipSha256": "20bf21f53b385992c06a65735d6d5f47decbd8f66d20284a5b0e136e9899e8b4",
+  "signature": "ad-hoc",
+  "notarized": false,
+  "checks": {
+    "platformTests": 60,
+    "modelGatewayTests": 19,
+    "desktopResumeTests": 4,
+    "uiResumeTests": 2,
+    "realSdkInboxReceipts": true,
+    "packagedCompositeFault": true,
+    "fullVerify": true,
+    "dmgIntegrity": true,
+    "cleanPathPackageSmoke": true,
+    "realModelNewAndLegacyCompatibility": true
+  }
+}

@@ -1,3 +1,6 @@
+import {inspectAppFolder} from './app-folder.mjs';
+import {addAppDriver} from './local-extensions.mjs';
+import {sourceRoot,discoverTpcstore,rememberSource,connectTpcstore} from './tpcstore-apps.mjs';
 import {createConversationPermissions} from './conversation-permissions.mjs';
 import { createServiceRuntime, serviceImageData } from './service-runtime.mjs';
 import {inspectServiceImage,localServiceImage} from './service-images.mjs';
@@ -23,8 +26,10 @@ export function previewServiceImage(path,expected={}) {
   }
   return serviceImageData(path,info);
 }
-export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = () => null, approvalDialog = dialog.showMessageBox, service = createExtensionService() }) {
+export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = () => null, approvalDialog = dialog.showMessageBox, pickFolder = (win,options) => dialog.showOpenDialog(win,options), service = createExtensionService() }) {
   const permissions=createConversationPermissions();
+  const folderSelections=new Map();
+  function folderSelection(token,actor){const item=folderSelections.get(token);if(!item||item.actor!==actor||Date.now()-item.at>30*60*1000)throw Error('文件夹选择已失效，请重新选择');return item.folder;}
   let context = { actorId: null, chatId: '' };
   const effectiveContext = () => ({ actorId: getActor(), chatId: context.actorId === getActor() ? context.chatId : '' });
   let view, viewOrigins = [], connectorAuthorization, executionPending = false, serviceController, selectionPending, approvalPending;
@@ -139,6 +144,46 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
   }
   ipcMain.handle('extension.action', async (event, input) => {
     if (!trusted(event)) return { ok: false, message: '无效的应用请求。' };
+    if(input?.action==='folder-inspect') {
+      const actor=getActor();if(!actor)return {ok:false,message:'请先登录后加载应用'};
+      try {
+        let root=input.recent?sourceRoot(dataDir):null;
+        if(!root){const choice=await pickFolder(getWindow(),{title:'选择应用、TPCstore 或项目文件夹',properties:['openDirectory']});if(choice.canceled||!choice.filePaths[0])return {ok:true,cancelled:true};root=choice.filePaths[0];}
+        if(actor!==getActor())throw Error('账号已变化，请重新选择');
+        const folder=inspectAppFolder(root),token=createHash('sha256').update(String(Date.now())+Math.random()).digest('hex');
+        for(const [key,value]of folderSelections)if(value.actor!==actor||Date.now()-value.at>30*60*1000)folderSelections.delete(key);
+        folderSelections.set(token,{actor,folder,at:Date.now()});return {ok:true,folder,token};
+      }catch(e){return {ok:false,message:e.message};}
+    }
+    if(input?.action==='folder-add-project') {
+      try{const actor=getActor();if(!actor)throw Error('请先登录');const folder=folderSelection(input.token,actor);if(folder.kind!=='project')throw Error('此文件夹不是普通项目，不能跳过应用检查');return {ok:true,service:addAppDriver(dataDir,{root:folder.root})};}catch(e){return {ok:false,message:e.message};}
+    }
+    if(['tpcstore-catalog','tpcstore-connect','folder-load'].includes(input?.action)) {
+      const actor=getActor();if(!actor)return {ok:false,message:'请先登录'};
+      if(executionPending)return {ok:false,message:'请等待当前操作完成'};
+      executionPending=true;const controller=new AbortController();serviceController=controller;
+      try {
+        const folder=input.action==='folder-load'?folderSelection(input.token,actor):null;
+        if(folder&&!['app','store'].includes(folder.kind))throw Error('此文件夹没有受支持的连接适配');
+        const appId=folder?.appId||input.appId;
+        const connecting=Boolean(appId);
+        let root=folder?.storeRoot||sourceRoot(dataDir);
+        if(input.action==='tpcstore-catalog'&&(!root||input.chooseSource)) {
+          const choice=await dialog.showOpenDialog(getWindow(),{title:'选择可信的 TPCstore 根目录',properties:['openDirectory']});
+          if(choice.canceled)return {ok:true,cancelled:true};root=choice.filePaths[0];
+        }
+        if(!root)throw Error('请先选择 TPCstore 目录');
+        const approved=await approvalDialog(getWindow(),{type:'question',title:'TPCstore 本机应用',message:connecting?'校验并连接所选应用':'读取并校验 TPCstore 应用目录',detail:`来源：${root}\n将运行此可信来源的目录校验 CLI${connecting?'及应用连接程序，可能启动本机服务':''}。`,buttons:['取消','继续'],defaultId:0,cancelId:0});
+        if(approved.response!==1)return {ok:false,cancelled:true,message:'已取消加载，未执行应用程序'};
+        controller.signal.throwIfAborted();if(actor!==getActor())throw Error('账号已变化');
+        if(!connecting) {
+          const catalog=await discoverTpcstore(root,{signal:controller.signal});
+          if(actor!==getActor())throw Error('账号已变化');rememberSource(dataDir,root);return {ok:true,...catalog};
+        }
+        const result=await connectTpcstore(dataDir,root,appId,{signal:controller.signal});
+        if(actor!==getActor())throw Error('账号已变化');rememberSource(dataDir,root);return {ok:true,...result};
+      }catch(e){return {ok:false,message:e.message};}finally{executionPending=false;}
+    }
     if(input?.action==='set-permission-mode') {
       const c=effectiveContext();
       if(!c.actorId||!c.chatId||input.chatId!==c.chatId)return {ok:false,message:'对话已变化，请重新选择权限模式。'};

@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "version": "0.0.42",
+  "platform": "http://47.113.225.93:3928",
+  "realProvider": true,
+  "packagedSdk": true,
+  "ordinaryChat": true,
+  "sameSessionDocument": true,
+  "nativeDocumentTool": true,
+  "streamedText": true,
+  "syntheticInputsOnly": true
+}

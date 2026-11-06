@@ -33,7 +33,7 @@ test('quota exhaustion stops new model work; read-only preparation can resume af
  });
  const service=createChatService(root,()=>{},{executeService:async()=>{tools++;return {ok:true};},runServiceLoop:async input=>{
   loopCalls++;
-  await input.service.execute(JSON.stringify({action:'discover'}));
+  input.onAccepted('accepted');await input.pipeline.execute({name:'discover_service',callId:'quota-'+loopCalls,arguments:{serviceId:'dreamina'}});
   if(loopCalls===1){available=0;throw Error('远程 Harness 网关返回 429');}
   return {finalResponse:'连接检查已完成'};
  }});
@@ -42,10 +42,10 @@ test('quota exhaustion stops new model work; read-only preparation can resume af
   const first=await service.dispatch('chat.send',actor,{chatId,requestId:'first',text:'检查即梦连接'});assert.equal(first.state,'error');
   const diagnosis=await service.dispatch('chat.diagnose',actor,{chatId});
   assert(diagnosis.findings.some(f=>f.code==='MODEL_QUOTA_EXHAUSTED'));assert.equal(diagnosis.modelQuota.availableTokens,0);
-  assert.equal(diagnosis.task.status,'unknown');assert.equal(diagnosis.safeToRetry,true);
-  const blocked=await service.dispatch('chat.send',actor,{chatId,retry:true,requestId:'blocked'});assert.equal(blocked.state,'error');assert.match((await service.dispatch('chat.history',actor,{chatId})).messages.at(-1).error,/模型额度不足/);assert.equal(loopCalls,1);assert.equal(tools,1);
+  assert.equal(diagnosis.task.status,'unknown');assert.equal(diagnosis.safeToRetry,false);
+  assert.equal((await service.dispatch('chat.send',actor,{chatId,retry:true,requestId:'no-replay'})).ok,false);const blocked=await service.dispatch('chat.send',actor,{chatId,text:'继续',requestId:'blocked'});assert.equal(blocked.state,'error');assert.match((await service.dispatch('chat.history',actor,{chatId})).messages.at(-1).error,/模型额度不足/);assert.equal(loopCalls,1);assert.equal(tools,1);
   available=10000;
   const resumed=await service.dispatch('chat.send',actor,{chatId,retry:true,requestId:'resumed'});assert.equal(resumed.state,'done');assert.equal(loopCalls,2);
-  const history=await service.dispatch('chat.history',actor,{chatId});assert.equal(history.serviceSteps.length,2);assert.deepEqual(history.serviceSteps.map(s=>s.step),[1,2]);
+  const history=await service.dispatch('chat.history',actor,{chatId});assert.equal(history.serviceSteps.length,2);assert.deepEqual(history.serviceSteps.map(s=>s.step),[1,1]);
  }finally{service.stop();rmSync(root,{recursive:true,force:true});}
 });

@@ -21,7 +21,7 @@ export function createKnowledgeStore(db) {
     if(!entry.isFile()||! /\.(md|txt)$/i.test(entry.name))continue;
     const real=realpathSync(path),rel=relative(folder,real);if(rel.startsWith('..')||isAbsolute(rel))continue;
     const fd=openSync(real,constants.O_RDONLY|constants.O_NOFOLLOW);let body;
-    try{const st=fstatSync(fd);if(!st.isFile()||st.size>512000)throw Error('单份文档不能超过 512KB：'+rel);total+=st.size;if(total>8*1024*1024||docs.length>=500)throw Error('知识库超过 500 份文档或 8MB，请缩小目录');body=readFileSync(fd,'utf8');}finally{closeSync(fd);}
+    try{const st=fstatSync(fd);if(!st.isFile()||st.size>512000)throw Error('单份文档不能超过 512KB：'+rel);total+=st.size;if(total>8*1024*1024||docs.length>=500)throw Error('所选文件夹超过单个知识库的容量限制（最多 500 份文档、总大小 8MB）。请按主题拆分为多个文件夹，再逐个关联；每个文件夹需符合上述限制。对话中可通过「知识来源」选择使用，单次最多选择 12 个知识库。');body=readFileSync(fd,'utf8');}finally{closeSync(fd);}
     if(body.includes('\0'))continue;docs.push({path:rel,body});
    }}
    db.exec('BEGIN IMMEDIATE');try{db.prepare('DELETE FROM knowledge_index WHERE link=?').run(id);const put=db.prepare('INSERT INTO knowledge_index VALUES(?,?,?)');for(const d of docs)put.run(id,d.path,d.body);db.prepare("UPDATE knowledge_links SET updated=?,status='ready',error='' WHERE id=?").run(Date.now(),id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}

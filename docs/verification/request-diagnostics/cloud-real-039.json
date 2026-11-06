@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "cloud": "deployed-real",
+  "rejectedRequest": "diag-bad-1789a098-8019-45ca-9d6f-94bd681bb504",
+  "realRequest": "diag-real-27dfaa0a-f372-42fe-9f2c-870b162a0ed6",
+  "diagnostic": {
+    "code": "",
+    "stage": "tool_validate",
+    "outcome": "done",
+    "model": "MiniMax-M3",
+    "durationMs": 3382,
+    "httpStatus": 200,
+    "providerRequestId": "",
+    "finishReason": "stop",
+    "sawDone": false,
+    "normalEof": true,
+    "chunks": 4,
+    "responseBytes": 1098,
+    "textChars": 6,
+    "toolName": "",
+    "toolArgumentBytes": 0,
+    "toolJsonValid": null,
+    "lastDataAgeMs": 3,
+    "outputLimit": 4096
+  },
+  "accountIsolation": true,
+  "syntheticPromptOnly": true
+}

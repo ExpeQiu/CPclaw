@@ -1,0 +1,130 @@
+{
+  "ok": true,
+  "root": "/Volumes/Lexar/git/10 baseTools/TPCstore",
+  "apps": [
+    {
+      "protocol_version": "1.0.0",
+      "app_id": "tpcstore.cutpot",
+      "product_id": "V17",
+      "app_version": "0.9.0",
+      "stage": "local_preview",
+      "description": "CutPot 独立工作台与智能体调用；适配器首批仅提供读取，编辑仍可使用原生 CLI",
+      "contract_doc": "docs/规范/CutPot应用接入.md",
+      "quality_profile": "V17",
+      "runtime": {
+        "kind": "node-cli",
+        "entry": "adapters/cutpot.mjs",
+        "discovery": [
+          "capabilities",
+          "--json"
+        ],
+        "invoke": [
+          "turn",
+          "--json"
+        ],
+        "input": "stdin-json"
+      },
+      "workspace": {
+        "mode": "persistent",
+        "entry": "cutpot/public/index.html",
+        "state_authority": "service",
+        "sync": "reread"
+      },
+      "operations": [
+        {
+          "id": "cutpot.project-show",
+          "action": "project-show",
+          "input_schema": "contracts/schemas/cutpot-turn.schema.json",
+          "output_schema": "contracts/schemas/response.schema.json",
+          "effect": "read",
+          "cost": "none",
+          "idempotency": "not_applicable",
+          "recovery": "none",
+          "cancellable": false
+        },
+        {
+          "id": "cutpot.workflow-show",
+          "action": "workflow-show",
+          "input_schema": "contracts/schemas/cutpot-turn.schema.json",
+          "output_schema": "contracts/schemas/response.schema.json",
+          "effect": "read",
+          "cost": "none",
+          "idempotency": "not_applicable",
+          "recovery": "none",
+          "cancellable": false
+        }
+      ],
+      "integration": {
+        "root": "cutpot",
+        "connect": [
+          "connect",
+          "--json"
+        ]
+      }
+    },
+    {
+      "protocol_version": "1.0.0",
+      "app_id": "tpcstore.tech-cards",
+      "product_id": "V04",
+      "app_version": "1.0.0",
+      "stage": "local_preview",
+      "description": "技术卡会话预览；未配置模型时不能提取，无持久化和正式放行能力",
+      "contract_doc": "V04-tech-cards/bridge-design.md",
+      "quality_profile": "V04",
+      "runtime": {
+        "kind": "node-cli",
+        "entry": "V04-tech-cards/cli.mjs",
+        "discovery": [
+          "capabilities",
+          "--json"
+        ],
+        "invoke": [
+          "turn",
+          "--json"
+        ],
+        "input": "stdin-json"
+      },
+      "workspace": {
+        "mode": "session_preview",
+        "entry": null,
+        "state_authority": "caller_session",
+        "sync": "none"
+      },
+      "operations": [
+        {
+          "id": "tech-cards.extract",
+          "action": "extract",
+          "input_schema": "contracts/schemas/v04-turn.schema.json",
+          "output_schema": "contracts/schemas/response.schema.json",
+          "effect": "session_write",
+          "cost": "possible",
+          "idempotency": "unsupported",
+          "recovery": "none",
+          "cancellable": false
+        },
+        {
+          "id": "tech-cards.gaps",
+          "action": "gaps",
+          "input_schema": "contracts/schemas/v04-turn.schema.json",
+          "output_schema": "contracts/schemas/response.schema.json",
+          "effect": "read",
+          "cost": "none",
+          "idempotency": "not_applicable",
+          "recovery": "none",
+          "cancellable": false
+        },
+        {
+          "id": "tech-cards.lock",
+          "action": "lock",
+          "input_schema": "contracts/schemas/v04-turn.schema.json",
+          "output_schema": "contracts/schemas/response.schema.json",
+          "effect": "session_write",
+          "cost": "none",
+          "idempotency": "not_applicable",
+          "recovery": "none",
+          "cancellable": false
+        }
+      ]
+    }
+  ]
+}

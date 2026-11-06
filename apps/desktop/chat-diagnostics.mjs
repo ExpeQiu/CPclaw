@@ -28,7 +28,7 @@ export function analyzeChat(message, steps = [], task = mediaTaskState(steps)) {
   if (/Harness 子进程未回收/.test(error)) findings.push({code:'HARNESS_CLEANUP',status:'error',detail:'上次执行在 Harness 退出检查阶段失败。已加入有上限的退出等待；历史记录不能证明进程当前仍残留。若再次发生，需进一步检查运行环境。'});
   if (/应用服务目录无效|不接受本机服务目录/.test(error)) findings.push({code:'SERVICE_CATALOG_REJECTED',status:'error',detail:`平台拒绝了本机服务目录：${error}。平台版本与桌面端能力不一致时，目录里的网页/应用类型会被整体拒绝，导致整轮对话无回复。需更新平台服务，或让桌面端按平台能力裁剪目录。`});
   if (['error','cancelled','interrupted'].includes(message.state)) findings.push({code:'REPLY_INCOMPLETE',status:'error',detail:`上次回复未完成：${error || message.state}。`});
-  if (!message.content.trim()) findings.push({code:'EMPTY_REPLY',status:'error',detail:'回复正文为空。可从已保存的应用回执恢复执行摘要；摘要不代表原任务完成。'});
+  if (!message.content.trim()) findings.push({code:'EMPTY_REPLY',status:'error',detail:'回复正文为空。原始正文保持不变；可由内核读取已保存回执并解释。'});
   const failed = steps.filter(s => failedReceipts(s).length);
   const lastScope=steps.findLastIndex(s=>failedReceipts(s).some(r=>r.error?.reason==='oauth_scope_insufficient'));
   const authRestored=steps.slice(lastScope+1).some(s=>s.request?.action==='discover'&&s.result?.ok&&s.result?.account?.ok&&s.result?.current?.ok);
@@ -46,11 +46,6 @@ export function analyzeChat(message, steps = [], task = mediaTaskState(steps)) {
   if(/平台模型额度不足/.test(error))findings.push({code:'MODEL_QUOTA_EXHAUSTED',status:issueStatus,detail:'平台模型额度不足，后续模型请求已停止。需管理员调整额度；不要通过重复提交生图绕过。'});
   if(/步骤达到上限/.test(error))findings.push({code:'MODEL_STEP_LIMIT',status:issueStatus,detail:'推理步骤已用尽。先恢复已有成果或查询原提交，不整轮重新生成。'});
   if(task.status==='delivered'){
-    for(const f of findings){
-      if(f.code==='REPLY_INCOMPLETE'){f.status='warn';f.detail='原始回复曾中断；图片成果已恢复，历史执行状态保留。';}
-      if(f.code==='SERVICE_FAILED'){f.status='warn';f.detail='历史步骤有失败回执；后续图片生成与本机交付已确认。';}
-      if(f.code==='HARNESS_CLEANUP'){f.status='warn';f.detail='历史执行曾出现 Harness 退出异常；已有图片已恢复，历史记录不能证明当前仍有进程残留。';}
-    }
     findings.push({code:'MEDIA_DELIVERED',status:'ok',detail:task.detail});
   }else if(task.status==='generated')findings.push({code:'MEDIA_DELIVERY',status:'error',detail:'图片已生成成功，但预览或交付未完成。可恢复本机文件或补下载原资源，无需重新生成。'});
   else if(task.status==='pending')findings.push({code:'MEDIA_PENDING',status:'warn',detail:task.detail});

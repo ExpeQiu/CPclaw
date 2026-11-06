@@ -1,0 +1,10 @@
+应用来源：/Volumes/Lexar/git/10 baseTools/TPCstore
+
+tpcstore.cutpot · CutPot 独立工作台与智能体调用；适配器首批仅提供读取，编辑仍可使用原生 CLI
+
+连接并打开
+
+tpcstore.tech-cards · 技术卡会话预览；未配置模型时不能提取，无持久化和正式放行能力
+
+尚无连接适配器
+更换 TPCstore 来源

@@ -31,20 +31,3 @@ export function canCaptureLearning(grant, taskId, now) {
   if (!kind) return { ok: false, reason: "未选择候选类型" };
   return { ok: true, kind };
 }
-
-/**
- * 从验收结果提炼可上传的短候选，不带入文件正文。
- * @param input 任务标识、标题和结果摘要
- * @param kind 候选类型
- * @returns 平台提交字段
- */
-export function abstractLearningCandidate(input, kind) {
-  const title = String(input.title || "已验收工作").replace(/\s+/g, " ").trim().slice(0, 80);
-  const outcome = String(input.outcome || "已接受审阅结果").replace(/\s+/g, " ").trim().slice(0, 400);
-  return {
-    kind,
-    title: title || "已验收工作",
-    body: `来源任务 ${input.taskId}。摘要：${outcome}。不含原文与目录。`,
-    sourceTaskId: String(input.taskId),
-  };
-}

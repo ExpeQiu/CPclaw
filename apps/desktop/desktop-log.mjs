@@ -58,14 +58,15 @@ function redact(text) {
   return String(text || "").replace(SENSITIVE, "[redacted]").slice(0, 240);
 }
 
-function readLogFile(path, limit) {
+function readLogFile(path, limit, chatId = "") {
   if (!existsSync(path)) return [];
   const lines = readFileSync(path, "utf8").trimEnd().split("\n").filter(Boolean);
-  const slice = lines.slice(Math.max(0, lines.length - limit));
+  const slice = chatId ? lines : lines.slice(Math.max(0, lines.length - limit));
   const out = [];
   for (const line of slice) {
     try {
       const row = JSON.parse(line);
+      if(chatId&&row.fields?.chatId!==chatId)continue;
       out.push({
         timestamp: row.timestamp || "",
         level: row.level || "info",
@@ -73,6 +74,9 @@ function readLogFile(path, limit) {
         event: row.event || "",
         message: redact(row.message || ""),
         chatId: row.fields?.chatId,
+        traceId: row.fields?.traceId,
+        code: row.fields?.code,
+        stage: row.fields?.stage,
         requestId: row.requestId || row.fields?.requestId,
       });
     } catch {
@@ -86,13 +90,14 @@ function readLogFile(path, limit) {
 export function readRecentLogs(dataDir, { chatId = "", limit = 40 } = {}) {
   const perFile = Math.max(10, Math.ceil(limit / 2));
   const rows = [
-    ...readLogFile(join(dataDir, "logs", "desktop-worker.log"), perFile),
-    ...readLogFile(join(dataDir, "logs", "desktop-ui.log"), perFile),
-    ...readLogFile(join(dataDir, "logs", "desktop-host.log"), perFile),
+    ...readLogFile(join(dataDir, "logs", "desktop-worker.log.1"), perFile,chatId),
+    ...readLogFile(join(dataDir, "logs", "desktop-worker.log"), perFile,chatId),
+    ...readLogFile(join(dataDir, "logs", "desktop-ui.log"), perFile,chatId),
+    ...readLogFile(join(dataDir, "logs", "desktop-host.log"), perFile,chatId),
   ];
   rows.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
   const filtered = chatId
-    ? rows.filter((r) => r.chatId === chatId || /chat|diagnos|kernel|skill|harness|bridge/i.test(`${r.event} ${r.message}`))
+    ? rows.filter((r) => r.chatId === chatId)
     : rows;
   return filtered.slice(-limit);
 }

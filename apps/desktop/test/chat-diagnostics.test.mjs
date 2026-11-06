@@ -23,7 +23,7 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     throw Error('Unexpected route');
   });
   const service=createChatService(root,()=>{},{
-    runServiceLoop:async input=>{await input.service.execute(JSON.stringify({action:'call',args:['node','create','image','--project-id','00000000-0000-4000-8000-000000000001']}));throw Error('Harness 子进程未回收');},
+    runServiceLoop:async input=>{input.onAccepted('accepted');await input.pipeline.execute({name:'call_cli',callId:'native-call',arguments:{serviceId:'dreamina',args:['node','create','image','--project-id','00000000-0000-4000-8000-000000000001']}});throw Error('Harness 子进程未回收');},
     executeService:async()=>{serviceCalls++;return {ok:true};}
   });
   const db=new DatabaseSync(join(root,'chat.sqlite'));
@@ -33,12 +33,12 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     const sent=await call('chat.send',{chatId,requestId:'original',text:'检查即梦 CLI 连接'});
     assert.equal(sent.state,'error');assert.equal(serviceCalls,1);
     let history=await call('chat.history',{chatId}), message=history.messages.at(-1);
-    assert.match(message.content,/已恢复 1 条应用执行记录/);assert.match(message.content,/右侧「自动工作流」/);assert.doesNotMatch(message.content,/^- 步骤 /m);assert.match(message.error,/Harness 子进程未回收/);
+    assert.equal(message.content,'');assert.doesNotMatch(message.content,/^- 步骤 /m);assert.match(message.error,/Harness 子进程未回收/);
     // Reproduce an empty reply persisted by an older desktop build.
     db.prepare("UPDATE chat_messages SET content='' WHERE id=?").run(message.id);
     db.prepare("INSERT INTO chat_activity VALUES(?,?,?,?)").run(message.id,'stale','遗留步骤','running');
     const report=await call('chat.diagnose',{chatId});
-    assert.equal(report.ok,true);assert(report.repairs.every(r=>r.verified));assert.equal(report.repairs.length,2);
+    assert.equal(report.ok,true);assert(report.repairs.every(r=>r.verified));assert.equal(report.repairs.length,1);
     assert(report.findings.some(f=>f.code==='HARNESS_CLEANUP'));
     assert(report.findings.some(f=>f.code==='PLATFORM_SESSION'&&f.status==='ok'));
     assert(report.findings.some(f=>f.code==='KERNEL_OK'||f.code==='KERNEL_UNAVAILABLE'));
@@ -47,10 +47,10 @@ test('diagnosis repairs real stored evidence, keeps failure, blocks replay and i
     assert(report.kernel&&typeof report.kernel.ready==='boolean');
     assert(Array.isArray(report.repairActions));
     history=await call('chat.history',{chatId});message=history.messages.at(-1);
-    assert(message.content.trim());assert.equal(message.state,'error');assert(!message.activities.some(s=>s.state==='running'));
+    assert.equal(message.content,'');assert.equal(message.state,'error');assert(!message.activities.some(s=>s.state==='running'));
     const again=await call('chat.diagnose',{chatId});assert.equal(again.repairs.length,0);assert(again.repeated.every(r=>r.count===1));
     const retry=await call('chat.send',{chatId,retry:true,requestId:'retry'});
-    assert.equal(retry.code,'SERVICE_REPLAY_BLOCKED');assert.equal(serviceCalls,1);
+    assert.equal(retry.code,'HARNESS_ACCEPTANCE_CONFIRMED_OR_UNKNOWN');assert.equal(serviceCalls,1);
     const other=await call('chat.diagnose',{chatId},'other-user');assert.equal(other.ok,false);assert(!other.findings);
     holdRefresh=true;
     const pending=call('chat.diagnose',{chatId});

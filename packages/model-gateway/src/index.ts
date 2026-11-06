@@ -1,3 +1,5 @@
+import {fetchModel} from './model-retry.js';
+import {newRequestDiagnostic,notifyDiagnostic,diagnosticCode,RequestDiagnosticError,HarnessFinalCheckpointError,type DiagnosticObserver} from './request-diagnostics.js';
 import { createLogEvent, readTokenUsage, type ModelCheckRecord, type TokenUsage } from "@cpclaw/contracts";
 
 const MODEL = "MiniMax-M3" as const;
@@ -306,28 +308,46 @@ export async function generateReport(config: RealGatewayConfig, input: ReportInp
 }
 
 /** 保留工具调用与完整 assistant 消息，供现有 Harness 自己执行推理循环。 */
-export async function completeHarness(config: RealGatewayConfig, body: Record<string, unknown>, signal: AbortSignal): Promise<{ raw: string; usage: TokenUsage }> {
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+export async function completeHarness(config: RealGatewayConfig, body: Record<string, unknown>, signal: AbortSignal,onDiagnostic?:DiagnosticObserver,onRaw?:(chunk:string)=>Promise<void>): Promise<{ raw: string; usage: TokenUsage }> {
+  const outputLimit=typeof (body.max_completion_tokens??body.max_tokens)==='number'&&Number.isSafeInteger(body.max_completion_tokens??body.max_tokens)?Math.min(16384,Math.max(256,Number(body.max_completion_tokens??body.max_tokens))):2048;
+  const record=newRequestDiagnostic(outputLimit),started=Date.now();
+  try{
+  const response = await fetchModel(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages: body.messages, tools: body.tools, stream: true, stream_options: { include_usage: true }, thinking: { type: "disabled" }, max_completion_tokens: 2048 }),
+    body: JSON.stringify({ model: MODEL, messages: body.messages, tools: body.tools, stream: true, stream_options: { include_usage: true }, thinking: { type: "disabled" }, max_completion_tokens: outputLimit }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs)]),
-  });
+  },attempt=>{(record.attempts??=[]).push(attempt);},config.timeoutMs);
+  record.httpStatus=response.status;record.providerRequestId=(response.headers.get('x-request-id')||response.headers.get('request-id')||'').replace(/[^A-Za-z0-9._:-]/g,'').slice(0,128);record.stage='model_stream';
   if (!response.ok) throw new Error(`模型网关返回 ${response.status}`);
-  const raw = await response.text();
-  let finish: unknown;
+  let raw='';
+  if(onRaw){if(!response.body)throw Error('模型未返回数据流');const reader=response.body.getReader(),decoder=new TextDecoder();try{while(true){const part=await reader.read();const text=decoder.decode(part.value,{stream:!part.done});raw+=text;if(raw.length>4_000_000)throw Error('模型流超过协议存储上限');if(text)await onRaw(text);if(part.done)break;}}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}}
+  else raw=await response.text();
+  record.normalEof=true;record.responseBytes=Buffer.byteLength(raw);record.sawDone=raw.includes('data: [DONE]');
+  let finish: unknown,hasTools=false;let finalText="";
   let usage: TokenUsage = { state: "unknown" };
   for (const line of raw.split("\n")) {
     if (!line.startsWith("data:")) continue;
     const data = line.slice(5).trim();
     if (!data || data === "[DONE]") continue;
-    const chunk = JSON.parse(data);
+    const chunk = JSON.parse(data);record.chunks++;
+    const delta=chunk.choices?.[0]?.delta;if(typeof delta?.content==='string')finalText+=delta.content;
+    if(Array.isArray(delta?.tool_calls)&&delta.tool_calls.length)hasTools=true;
+    const call=delta?.tool_calls?.[0];if(call?.function?.name)record.toolName=['service_action','read_material','list_resources','read_resource','discover_service','read_file','write_file','terminal','call_cli','call_mcp','browser_open','browser_snapshot','browser_click','browser_type','browser_scroll','browser_press','deliver_document','register_document','submit_result','read_tool_result'].includes(call.function.name)?call.function.name:'unknown';
+    if(typeof call?.function?.arguments==='string')record.toolArgumentBytes+=Buffer.byteLength(call.function.arguments);
     if (chunk.error || (chunk.base_resp && chunk.base_resp.status_code !== 0)) throw new Error("模型返回错误");
     if (chunk.usage) usage = readTokenUsage(chunk.usage);
     if (chunk.choices?.[0]?.finish_reason) finish = chunk.choices[0].finish_reason;
   }
-  if (finish !== "stop" && finish !== "tool_calls") throw new Error("工具流未完整结束");
+  record.textChars=finalText.length;
+  record.finishReason=typeof finish==='string'&&/^[a-z_]{1,40}$/.test(finish)?finish:'';
+  if(finish==='length'&&!onRaw){record.code='MODEL_OUTPUT_LIMIT';if(!hasTools&&finalText.trim()&&finalText.length<=128000)throw new HarnessFinalCheckpointError(record,finalText,usage);}
+  if (finish !== "stop" && finish !== "tool_calls" && !(onRaw&&finish==='length')) throw new Error("工具流未完整结束");
+  if(finish==='length')record.code='MODEL_OUTPUT_LIMIT';
+  record.outcome='done';
   return { raw: raw + (raw.includes("data: [DONE]") ? "" : "\ndata: [DONE]\n\n"), usage };
+  }catch(error){record.outcome='error';if(error instanceof HarnessFinalCheckpointError)throw error;record.code=diagnosticCode(error,record,signal.aborted);if(error instanceof Error&&error.name==='TimeoutError')record.code='MODEL_STREAM_TIMEOUT';throw new RequestDiagnosticError(error instanceof Error?error.message:'内核模型调用失败',record);}
+  finally{record.durationMs=Date.now()-started;notifyDiagnostic(onDiagnostic,record);}
 }
 
 export { streamChat, type ChatMessage } from "./chat-stream.js";
@@ -335,3 +355,5 @@ export { streamChat, type ChatMessage } from "./chat-stream.js";
 export { createStreamDeadline } from "./stream-deadline.js";
 
 export type { ServiceContext, DocumentContext, DocumentDelivery } from "./document-tool.js";
+
+export {HarnessFinalCheckpointError,errorMetadata,cleanRequestDiagnostic,RequestDiagnosticError,newRequestDiagnostic,notifyDiagnostic,type RequestDiagnostic,type DiagnosticObserver} from './request-diagnostics.js';

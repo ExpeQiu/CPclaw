@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "cutpotRoot": "/Volumes/Lexar/git/10 baseTools/TPCstore/cutpot",
+  "url": "http://127.0.0.1:52129",
+  "evidence": "/tmp/cpclaw-cutpot-integration-Y8fJnY/evidence",
+  "serviceId": "app-d53bc932fe08",
+  "discovery": true,
+  "cliToEmbedded": true,
+  "embeddedToCli": true,
+  "independentSameProject": true,
+  "localVideoExport": {
+    "width": 1280,
+    "height": 720,
+    "frames": 50,
+    "fps": 25
+  },
+  "realModel": false,
+  "paidGeneration": false,
+  "tpcstoreDiscovery": true,
+  "manifestValidated": true,
+  "automaticConnection": true,
+  "reconnectReused": true,
+  "adapterRead": true,
+  "isolatedAccount": true,
+  "isolatedData": true
+}

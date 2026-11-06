@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-06",
+  "scope": "source-only",
+  "desktopTests": 181,
+  "platformTests": 60,
+  "newArtifactTests": 4,
+  "adapterTests": 9,
+  "actualElectronAndSdk": true,
+  "controlledProvider": true,
+  "draftPreview": true,
+  "registeredExistingFile": true,
+  "restartAndAccountIsolation": true,
+  "engineeringVerifyFinal": true,
+  "initialEngineeringFailure": "existing child-close fixture EPIPE; standalone and full rerun passed",
+  "packaged": false,
+  "installed": false,
+  "deployed": false
+}

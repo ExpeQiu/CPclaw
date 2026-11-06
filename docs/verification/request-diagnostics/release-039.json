@@ -1,0 +1,28 @@
+{
+  "version": "0.0.39",
+  "installedApp": "/Applications/CPclaw.app",
+  "backupApp": "/Applications/CPclaw 0.0.38 backup-039-20261105T071826Z.app",
+  "backupData": "/Users/expeqiu/Library/Application Support/CPclaw-backups/039-20261105T071826Z/data",
+  "cloudBackup": "/opt/cpclaw-platform/backups/diagnostics-039-20261105T071216Z",
+  "cloudHealthy": true,
+  "cloudMode": "real",
+  "dmgSha256": "18d22b9688ba9f2fee2a89aa4d568067a3557d2a2c498c2d186af125f4942008",
+  "zipSha256": "5db19b7a6fd2460826fc071102131a7c4555328ee8c9680a129352990ba62db9",
+  "installedReleaseFileHashes": 623,
+  "installedMainAndWorker": true,
+  "originalChatsPreserved": true,
+  "signature": "ad-hoc",
+  "notarized": false,
+  "realModelSyntheticRequests": 1,
+  "tests": {
+    "platform": 58,
+    "modelGateway": 15,
+    "harnessAdapter": 9,
+    "desktopTargeted": 5,
+    "fullVerify": "passed",
+    "packagedDiagnosticFault": "passed",
+    "packagedHarnessSessions": "passed",
+    "cleanPathSmoke": "passed",
+    "dmgIntegrity": "passed"
+  }
+}

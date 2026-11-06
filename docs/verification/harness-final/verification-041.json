@@ -1,0 +1,231 @@
+{
+  "version": "0.0.41",
+  "sourceChecks": {
+    "gateway": {
+      "tests": 21,
+      "pass": 21,
+      "fail": 0
+    },
+    "platform": {
+      "tests": 60,
+      "pass": 60,
+      "fail": 0
+    },
+    "adapter": {
+      "tests": 9,
+      "pass": 9,
+      "fail": 0
+    },
+    "desktop": {
+      "tests": 12,
+      "pass": 12,
+      "fail": 0
+    }
+  },
+  "mockOnlyFaults": [
+    "final text length",
+    "collection handoff",
+    "restart after delivery failure",
+    "source scope guard"
+  ],
+  "cloudBackup": "/opt/cpclaw-platform/backups/harness-final-041-20261105T094119Z",
+  "nativeCutoff": {
+    "passed": true,
+    "packaged": false,
+    "actualSdk": true,
+    "nativeCutoffCheckpoint": true,
+    "toolExecutions": 2,
+    "nativeModelCalls": 3,
+    "documentSections": 1,
+    "finalDocumentComplete": true,
+    "toolsNotReplayed": true
+  },
+  "collectionHandoff": {
+    "passed": true,
+    "packaged": false,
+    "actualSdk": true,
+    "nativeCutoffCheckpoint": false,
+    "proactiveCollectionHandoff": true,
+    "toolExecutions": 7,
+    "nativeModelCalls": 7,
+    "documentSections": 1,
+    "finalDocumentComplete": true,
+    "toolsNotReplayed": true
+  },
+  "repositoryVerifyPassed": true,
+  "packagedChecks": [
+    {
+      "passed": true,
+      "packaged": true,
+      "actualSdk": true,
+      "nativeCutoffCheckpoint": true,
+      "proactiveCollectionHandoff": false,
+      "toolExecutions": 2,
+      "nativeModelCalls": 3,
+      "documentSections": 1,
+      "finalDocumentComplete": true,
+      "toolsNotReplayed": true
+    },
+    {
+      "passed": true,
+      "packaged": true,
+      "actualSdk": true,
+      "nativeCutoffCheckpoint": false,
+      "proactiveCollectionHandoff": true,
+      "toolExecutions": 7,
+      "nativeModelCalls": 7,
+      "documentSections": 1,
+      "finalDocumentComplete": true,
+      "toolsNotReplayed": true
+    }
+  ],
+  "cloudReal": {
+    "passed": true,
+    "model": "deployed-real",
+    "newAndLegacyClientCompatible": true,
+    "checks": [
+      {
+        "appVersion": "0.0.41",
+        "requestId": "resume-smoke-ba0172d4-bd6d-4fda-a62a-0dc41892aa82",
+        "documentDelivered": true,
+        "toolName": "deliver_document",
+        "finishReason": "tool_calls",
+        "attempts": [
+          {
+            "attempt": 1,
+            "httpStatus": 200,
+            "waitMs": 0
+          }
+        ]
+      },
+      {
+        "appVersion": "0.0.39",
+        "requestId": "resume-smoke-c2819b15-ab0c-4c81-892e-93f60cdf76a4",
+        "documentDelivered": true,
+        "toolName": "deliver_document",
+        "finishReason": "tool_calls",
+        "attempts": [
+          {
+            "attempt": 1,
+            "httpStatus": 200,
+            "waitMs": 0
+          }
+        ]
+      }
+    ],
+    "syntheticPromptsOnly": true
+  },
+  "cloudNativeReal": {
+    "passed": true,
+    "realNativeHarnessModel": true,
+    "requestId": "native-final-smoke-97b3ff3a-2ef3-4ebb-95ed-797400b50b0c",
+    "finishReason": "stop",
+    "textChars": 4,
+    "httpStatus": 200,
+    "checkpointProtocolCompatible": true
+  },
+  "installed": {
+    "installedVersion": "0.0.41",
+    "manifestFilesVerified": 629,
+    "priorMessagesAndSessionBindingsPreserved": true,
+    "counts": {
+      "chats": 16,
+      "chat_messages": 76,
+      "chat_service_steps": 252,
+      "chat_harness_sessions": 4
+    },
+    "backupCounts": {
+      "chats": 15,
+      "chat_messages": 74,
+      "chat_service_steps": 252,
+      "chat_harness_sessions": 3
+    },
+    "databaseIntegrity": "ok",
+    "oldAppBackup": "/Applications/CPclaw 0.0.40 backup-041-20261105T094430Z.app",
+    "dataBackup": "/Users/expeqiu/Library/Application Support/CPclaw-backups/041-final-20261105T094430Z/data"
+  },
+  "release": {
+    "product": "CPclaw",
+    "version": "0.0.41",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "33.4.11",
+    "node": "22.23.3",
+    "harness": {
+      "version": "0.1.6-alpha.2",
+      "commit": "ddefc45fbc7f8e46dd73185e68295696d1297887",
+      "packages": 564,
+      "omittedOptional": [
+        "node-addon-require-builtin-darwin-x64",
+        "node-addon-require-builtin-linux-arm64-gnu",
+        "node-addon-require-builtin-linux-x64-gnu",
+        "node-addon-require-builtin-win32-arm64-msvc",
+        "node-addon-require-builtin-win32-x64-msvc",
+        "node-addon-require-builtin-win32-ia32-msvc",
+        "@img/sharp-darwin-x64",
+        "@img/sharp-freebsd-wasm32",
+        "@img/sharp-libvips-darwin-x64",
+        "@img/sharp-libvips-linux-arm",
+        "@img/sharp-libvips-linux-arm64",
+        "@img/sharp-libvips-linux-ppc64",
+        "@img/sharp-libvips-linux-riscv64",
+        "@img/sharp-libvips-linux-s390x",
+        "@img/sharp-libvips-linux-x64",
+        "@img/sharp-libvips-linuxmusl-arm64",
+        "@img/sharp-libvips-linuxmusl-x64",
+        "@img/sharp-linux-arm",
+        "@img/sharp-linux-arm64",
+        "@img/sharp-linux-ppc64",
+        "@img/sharp-linux-riscv64",
+        "@img/sharp-linux-s390x",
+        "@img/sharp-linux-x64",
+        "@img/sharp-linuxmusl-arm64",
+        "@img/sharp-linuxmusl-x64",
+        "@img/sharp-webcontainers-wasm32",
+        "@img/sharp-win32-arm64",
+        "@img/sharp-win32-ia32",
+        "@img/sharp-win32-x64",
+        "@koromix/koffi-linux-arm64",
+        "@koromix/koffi-linux-ia32",
+        "@koromix/koffi-linux-x64",
+        "@koromix/koffi-linux-riscv64",
+        "@koromix/koffi-freebsd-ia32",
+        "@koromix/koffi-freebsd-x64",
+        "@koromix/koffi-freebsd-arm64",
+        "@koromix/koffi-openbsd-ia32",
+        "@koromix/koffi-openbsd-x64",
+        "@koromix/koffi-win32-ia32",
+        "@koromix/koffi-win32-x64",
+        "@koromix/koffi-win32-arm64",
+        "@koromix/koffi-darwin-x64",
+        "@koromix/koffi-linux-loong64",
+        "bufferutil",
+        "utf-8-validate",
+        "@cfworker/json-schema",
+        "@vscode/ripgrep-darwin-x64",
+        "@vscode/ripgrep-win32-x64",
+        "@vscode/ripgrep-win32-arm64",
+        "@vscode/ripgrep-win32-ia32",
+        "@vscode/ripgrep-linux-x64",
+        "@vscode/ripgrep-linux-arm64",
+        "@vscode/ripgrep-linux-arm",
+        "@vscode/ripgrep-linux-ppc64",
+        "@vscode/ripgrep-linux-riscv64",
+        "@vscode/ripgrep-linux-s390x",
+        "@vscode/ripgrep-linux-ia32",
+        "@deepseek-ai/libreoffice-kit-darwin-x64",
+        "@deepseek-ai/libreoffice-kit-win32-arm64",
+        "@deepseek-ai/libreoffice-kit-win32-x64",
+        "@deepseek-ai/libreoffice-kit-wasm"
+      ]
+    },
+    "dmg": "CPclaw-0.0.41-mac-arm64.dmg",
+    "dmgSha256": "10b7f6057dc0d85d3e33d84c8b739bbc5271f3a3d7cc810ccebe1ec20932d4de",
+    "signature": "ad-hoc",
+    "notarized": false,
+    "createdAt": "2026-11-05T09:43:16.111Z",
+    "zip": "CPclaw-0.0.41-mac-arm64.zip",
+    "sha256": "dd0f31ffec857e235b00d4edd1d36c2ce19b312cbb6b3682388aa7944a66c11d"
+  },
+  "dmgIntegrityVerified": true
+}

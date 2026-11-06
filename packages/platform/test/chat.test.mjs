@@ -114,7 +114,7 @@ test('桌面实际工作进程：登录、聊天历史、上下文、取消、�
     assert.equal((await send('turn1')).code, 'CONFLICT');
     assert.equal((await send('turn2','继续')).state, 'done');
     assert.equal(s.state.bodies.at(-1).messages.filter(m=>m.role!=='system').length, 3);
-    assert.equal(s.state.bodies.at(-1).tools[0].function.name,'deliver_document');
+    assert(s.state.bodies.at(-1).tools.some(t=>t.function.name==='deliver_document'));assert(!s.state.bodies.at(-1).tools.some(t=>t.function.name==='request_service'));
     assert.equal(s.state.bodies.at(-1).messages.filter(m=>m.role!=='system')[1].content, '你好，世界🌏');
     s.state.scenario = 'hold'; s.state.release = null;
     const pending = send('turn3', '等待'); await until(() => s.state.release);
@@ -125,8 +125,9 @@ test('桌面实际工作进程：登录、聊天历史、上下文、取消、�
     const history = await call('chat.history', { chatId: chat.chatId });
     assert.equal(history.messages.at(-1).state, 'cancelled'); assert.ok(history.messages.at(-1).content);
     s.state.release?.(); s.state.scenario = 'normal';
-    assert.equal((await send('retry3', '', true)).state, 'done');
-    assert.equal((await call('chat.history', { chatId: chat.chatId })).messages.length, 6);
+    assert.equal((await send('retry3', '', true)).ok,false);
+    assert.equal((await send('continue3','继续')).state,'done');
+    assert.equal((await call('chat.history', { chatId: chat.chatId })).messages.length, 8);
     worker.stop(); worker = createWorkspaceClient(dir, desktop, { onEvent: event => events.push(event) });
     assert.equal((await call('chat.list')).chats[0].id, chat.chatId);
     assert.equal((await call('chat.history', { chatId: chat.chatId })).messages.at(-1).state, 'done');

@@ -34,3 +34,16 @@ test('invalid computer-use url and relative app path are rejected',()=>{
   assert.throws(()=>addComputerUseSite(root,{pageUrl:'file:///etc/passwd'}));
   assert.throws(()=>addAppDriver(root,{root:'relative/path'}));
 });
+
+
+test('app driver workbench persists with the same identity and only accepts local HTTP',()=>{
+  const root=mkdtempSync('/tmp/cpclaw-app-page-');
+  const original=addAppDriver(root,{root});
+  const updated=addAppDriver(root,{root,pageUrl:'http://127.0.0.1:4317/storyboard'});
+  assert.equal(updated.id,original.id);
+  assert.equal(updated.pageUrl,'http://127.0.0.1:4317/storyboard');
+  assert.deepEqual(updated.pageOrigins,['http://127.0.0.1:4317']);
+  assert.equal(listLocalExtensions(root).length,1);
+  assert.equal(listLocalExtensions(root)[0].pageUrl,updated.pageUrl);
+  for(const pageUrl of ['https://example.com/','http://192.168.1.2:4317/','file:///tmp/index.html','http://user:pass@localhost:4317/','http://localhost:4317/?token=secret'])assert.throws(()=>addAppDriver(root,{root,pageUrl}));
+});

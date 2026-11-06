@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, lstatSync, realpathSync, rmSync, constants, existsSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, lstatSync, realpathSync, rmSync, constants, existsSync, readdirSync } from 'node:fs';
 import { join, dirname, basename, relative, isAbsolute } from 'node:path';
 
 export const documentHash = body => createHash('sha256').update(body).digest('hex');
@@ -29,9 +29,15 @@ function projectResultFolder(targetRoot, actor, chatId, documentId, plan, db) {
 export function createDocumentStore(db, dataDir, projectFolder = () => null) {
   db.exec(`CREATE TABLE IF NOT EXISTS chat_documents (
     id TEXT PRIMARY KEY, document_id TEXT NOT NULL, actor TEXT NOT NULL, chat TEXT NOT NULL,
-    message TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL,
+    message TEXT NOT NULL, revision INTEGER NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL,
     hash TEXT NOT NULL, created INTEGER NOT NULL, UNIQUE(document_id,revision));
     CREATE TABLE IF NOT EXISTS chat_document_requests(user_message TEXT PRIMARY KEY, actor TEXT NOT NULL, base_id TEXT, expected_hash TEXT);`);
+  const legacy=db.prepare("SELECT sql FROM sqlite_master WHERE name='chat_documents'").get()?.sql;
+  if(/message TEXT NOT NULL UNIQUE/i.test(legacy||'')){
+    db.exec(`BEGIN IMMEDIATE; ALTER TABLE chat_documents RENAME TO chat_documents_legacy;
+      CREATE TABLE chat_documents(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,actor TEXT NOT NULL,chat TEXT NOT NULL,message TEXT NOT NULL,revision INTEGER NOT NULL,name TEXT NOT NULL,path TEXT NOT NULL,hash TEXT NOT NULL,created INTEGER NOT NULL,UNIQUE(document_id,revision));
+      INSERT INTO chat_documents SELECT * FROM chat_documents_legacy;DROP TABLE chat_documents_legacy;COMMIT;`);
+  }
   db.exec('CREATE TABLE IF NOT EXISTS document_roots(document_id TEXT PRIMARY KEY,root TEXT NOT NULL)');
   const root = join(dataDir, 'documents');
   mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -68,11 +74,11 @@ export function createDocumentStore(db, dataDir, projectFolder = () => null) {
   }
   function create(actor, chatId, messageId, text, content, plan = {}) {
     owner(actor,chatId);
-    const message = db.prepare("SELECT * FROM chat_messages WHERE id=? AND chat=? AND role='assistant' AND state='done'").get(messageId,chatId);
-    if(!message)throw Error('仅能将完整回复保存为文档');
+    const message = db.prepare("SELECT * FROM chat_messages WHERE id=? AND chat=? AND role='assistant'").get(messageId,chatId);
+    if(!message||(!plan.toolCall&&message.state!=='done'))throw Error('仅能保存明确工具交付或完整回复');
     const existing = db.prepare('SELECT * FROM chat_documents WHERE message=? AND actor=?').get(messageId,actor);
-    if(existing)return existing;
-    const body = content.trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i,'$1');
+    if(existing&&!plan.toolCall)return existing;
+    const body = plan.toolCall?content:content.trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i,'$1');
     if(!body || body.length>128000)throw Error('文档正文为空或超限');
     if(plan.base && read(actor,plan.base.id).currentHash!==plan.base.currentHash)throw Error('生成期间原文档被外部修改，新回复已保留，请重新预览后修改');
     const documentId=plan.base?.document_id??randomUUID();
@@ -104,10 +110,54 @@ export function createDocumentStore(db, dataDir, projectFolder = () => null) {
     if(active && active.body.length<=10000)context.active={id:active.id,name:active.name,body:active.body};
     return {context,captures};
   }
+  function emptyUp(dir, stop) {
+    while (dir !== stop && dir.startsWith(stop + '/')) {
+      let names;
+      try { names = readdirSync(dir); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; dir = dirname(dir); continue; }
+      if (names.length) return;
+      const parent = dirname(dir);
+      rmSync(dir, { recursive: true, force: true });
+      dir = parent;
+    }
+  }
+  /** 收集本对话交付的文件。归档不调用；删除时先校验路径，再由调用方在事务中忘掉记录并删文件。 */
+  function purgeChat(actor, chatId) {
+    owner(actor, chatId);
+    const rows = db.prepare('SELECT * FROM chat_documents WHERE actor=? AND chat=?').all(actor, chatId);
+    const paths = [];
+    for (const row of rows) {
+      const saved = db.prepare('SELECT root FROM document_roots WHERE document_id=?').get(row.document_id)?.root ?? rootReal;
+      if (realpathSync(saved) !== saved) throw Error('文档目录已改变，未删除对话');
+      if (!existsSync(row.path)) continue;
+      const st = lstatSync(row.path);
+      if (st.isSymbolicLink() || !st.isFile()) throw Error('文档路径异常，未删除对话');
+      const real = realpathSync(row.path);
+      const rel = relative(saved, real);
+      if (rel.startsWith('..') || isAbsolute(rel)) throw Error('文档路径已改变，未删除对话');
+      paths.push({ path: real, root: saved });
+    }
+    return {
+      paths,
+      forget() {
+        db.prepare('DELETE FROM chat_documents WHERE actor=? AND chat=?').run(actor, chatId);
+        for (const id of new Set(rows.map(row => row.document_id))) {
+          if (!db.prepare('SELECT 1 FROM chat_documents WHERE document_id=?').get(id)) db.prepare('DELETE FROM document_roots WHERE document_id=?').run(id);
+        }
+      },
+      removeFiles() {
+        for (const file of paths) {
+          rmSync(file.path, { force: true });
+          emptyUp(dirname(file.path), file.root);
+        }
+        return paths.length;
+      },
+    };
+  }
   /** 成果子目录若仍为文档编号，返回对话标题供界面展示。 */
   function folderLabel(actor, folderName) {
     if (!UUID_FOLDER.test(folderName)) return '';
     return db.prepare('SELECT c.title AS title FROM chat_documents d JOIN chats c ON c.id=d.chat AND c.actor=d.actor WHERE d.document_id=? AND d.actor=? ORDER BY d.created LIMIT 1').get(folderName,actor)?.title||'';
   }
-  return { list, read, plan, create, snapshot, folderLabel };
+  return { list, read, plan, create, snapshot, folderLabel, purgeChat };
 }

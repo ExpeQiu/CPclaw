@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "model": "deployed-real",
+  "newAndLegacyClientCompatible": true,
+  "checks": [
+    {
+      "appVersion": "0.0.40",
+      "requestId": "resume-smoke-e7d44abe-ded6-421d-9bc3-7455ae80bb37",
+      "documentDelivered": true,
+      "toolName": "deliver_document",
+      "finishReason": "tool_calls",
+      "attempts": [
+        {
+          "attempt": 1,
+          "httpStatus": 200,
+          "waitMs": 0
+        }
+      ]
+    },
+    {
+      "appVersion": "0.0.39",
+      "requestId": "resume-smoke-9d654fd5-693b-47b4-ba92-4b74bf2bdf2f",
+      "documentDelivered": true,
+      "toolName": "deliver_document",
+      "finishReason": "tool_calls",
+      "attempts": [
+        {
+          "attempt": 1,
+          "httpStatus": 200,
+          "waitMs": 0
+        }
+      ]
+    }
+  ],
+  "syntheticPromptsOnly": true
+}

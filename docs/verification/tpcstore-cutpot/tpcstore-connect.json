@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "service": {
+    "pageUrl": "http://127.0.0.1:52129/editor",
+    "pageOrigins": [
+      "http://127.0.0.1:52129"
+    ],
+    "id": "app-d53bc932fe08",
+    "title": "CutPot",
+    "type": "APP",
+    "kind": "app-driver",
+    "root": "/Volumes/Lexar/git/10 baseTools/TPCstore/cutpot",
+    "target": "/Volumes/Lexar/git/10 baseTools/TPCstore/cutpot",
+    "enabled": true,
+    "local": true,
+    "kindLabel": "驱动应用",
+    "tpcstore": {
+      "root": "/Volumes/Lexar/git/10 baseTools/TPCstore",
+      "appId": "tpcstore.cutpot",
+      "appData": "/tmp/cpclaw-cutpot-integration-Y8fJnY/app-runtimes/294c07b3917aecb4864f"
+    }
+  },
+  "connection": {
+    "app_id": "tpcstore.cutpot",
+    "url": "http://127.0.0.1:52129/",
+    "webUrl": "http://127.0.0.1:52129/editor",
+    "data_dir": "/tmp/cpclaw-cutpot-integration-Y8fJnY/app-runtimes/294c07b3917aecb4864f",
+    "reused": false
+  }
+}
