@@ -54,7 +54,7 @@ export function createAdmin(db: DatabaseSync, dataDir: string, now: () => number
     try {
       if (action === 'employee-create') {
         db.prepare("INSERT INTO employees VALUES(?,?,?,?, 'active', ?)").run(employeeId, actor.orgId, name.trim(), String(role), passwordHash!);
-        db.prepare('INSERT INTO quota VALUES(?,?,?,?,?,0,0,0,0)').run(employeeId, MODEL_ID, 1000, 1, 100);
+        db.prepare('INSERT INTO quota VALUES(?,?,?,?,?,0,0,0,0)').run(employeeId, MODEL_ID, 1000, 3, 100);
       } else {
         db.prepare('UPDATE employees SET name=?,role=? WHERE employee_id=?').run(name.trim(), String(role), employeeId);
         if (passwordHash) db.prepare('UPDATE employees SET password_hash=? WHERE employee_id=?').run(passwordHash, employeeId);

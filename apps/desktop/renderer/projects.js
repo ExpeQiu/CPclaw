@@ -1,5 +1,6 @@
 const projectOpen = new Map();
 let movingChatId = '';
+let renamingChatId = '';
 let deletingChatId = '';
 const chatMenu = document.createElement('div');
 chatMenu.className = 'chat-more-menu';
@@ -22,6 +23,7 @@ function openChatMenu(anchor, chat){
     button.onclick=async()=>{closeChatMenu();try{await action();}catch(error){projectError(error);}};
     chatMenu.append(button);
   };
+  add('改名', () => openRenameChat(chat));
   add('移动到项目', () => openMoveChat(chat));
   add(chat.archived ? '恢复' : '归档', () => archiveChat(chat));
   add('删除', () => openDeleteChat(chat), true);
@@ -34,7 +36,7 @@ function openChatMenu(anchor, chat){
   chatMenu.style.visibility='';
 }
 async function archiveChat(chat){
-  if(chat.id===runningChatId){setStatus('请等待回复完成再归档');return;}
+  if(runningChatIds.has(chat.id)){setStatus('请等待回复完成再归档');return;}
   const actor=chatAccount, archived=!chat.archived;
   const result=await chatCall('chat.archive',{chatId:chat.id, archived});
   if(actor!==chatAccount)return;
@@ -42,8 +44,17 @@ async function archiveChat(chat){
   await loadChats();
   setStatus(result.archived?'对话已归档。生成的文档和图片仍保留，可在「已归档」中打开。':'对话已恢复。');
 }
+function openRenameChat(chat){
+  renamingChatId=chat.id;
+  const input=byId('rename-chat-input');
+  input.value=chat.title;
+  byId('rename-chat-feedback').textContent='';
+  byId('rename-chat-dialog').showModal();
+  input.focus();
+  input.select();
+}
 function openDeleteChat(chat){
-  if(chat.id===runningChatId){setStatus('请等待回复完成再删除');return;}
+  if(runningChatIds.has(chat.id)){setStatus('请等待回复完成再删除');return;}
   deletingChatId=chat.id;
   byId('delete-chat-copy').textContent=`删除「${chat.title}」后，这条对话记录会被移除，其中生成的文档和图片也会删除。`;
   byId('delete-chat-feedback').textContent='';
@@ -55,7 +66,7 @@ function projectChatRow(chat) {
   const button=document.createElement('button');button.className=`task-row${desktopView==='chat'&&chat.id===currentChatId?' active':''}`;
   button.setAttribute('aria-current',String(desktopView==='chat'&&chat.id===currentChatId));
   const title=document.createElement('strong');title.textContent=chat.title;
-  const meta=document.createElement('small');meta.textContent=chat.id===runningChatId?'正在回复…':chat.archived?'已归档 · 文档仍保留':'本地保存';
+  const meta=document.createElement('small');meta.textContent=runningChatIds.has(chat.id)?'正在回复…':chat.archived?'已归档 · 文档仍保留':'本地保存';
   button.append(title,meta);button.onclick=()=>{closeChatMenu();selectChat(chat.id).catch(projectError);};
   const more=document.createElement('button');more.type='button';more.className='chat-more';more.textContent='•••';more.title='更多';more.setAttribute('aria-label','更多：'+chat.title);more.setAttribute('aria-haspopup','menu');
   more.onclick=event=>{event.stopPropagation();if(!chatMenu.hidden&&chatMenu.dataset.chat===chat.id)closeChatMenu();else openChatMenu(more,chat);};
@@ -162,6 +173,21 @@ onAction('attach-project-material',async()=>{
 });
 byId('remove-project-material').onclick=()=>{attachedProjectFile=null;renderComposer();};
 byId('move-chat-dialog').addEventListener('close',()=>{movingChatId='';});
+byId('rename-chat-dialog').querySelector('form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const actor=chatAccount, id=renamingChatId, title=byId('rename-chat-input').value.trim();
+  const result=await chatCall('chat.rename',{chatId:id,title});
+  if(actor!==chatAccount)return;
+  if(!result.ok){byId('rename-chat-feedback').textContent=result.message;return;}
+  const chat=chats.find(item=>item.id===id);
+  if(chat)chat.title=result.title;
+  if(id===currentChatId)byId('task-title').textContent=result.title;
+  byId('rename-chat-dialog').close();
+  await loadChats();
+  setStatus('对话已改名。');
+});
+byId('rename-chat-cancel').onclick=()=>byId('rename-chat-dialog').close();
+byId('rename-chat-dialog').addEventListener('close',()=>{renamingChatId='';});
 onAction('delete-chat-confirm',async()=>{
   const actor=chatAccount, id=deletingChatId;
   const result=await chatCall('chat.delete',{chatId:id});

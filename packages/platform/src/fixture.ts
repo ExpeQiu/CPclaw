@@ -24,7 +24,7 @@ export const fixtureEmployees: readonly SeedEmployee[] = [
     role: "admin",
     password: "fixture-admin",
     limitTokens: 1000,
-    concurrentLimit: 1,
+    concurrentLimit: 3,
     reserveTokens: 100,
   },
   {
@@ -35,7 +35,7 @@ export const fixtureEmployees: readonly SeedEmployee[] = [
     role: "employee",
     password: "fixture-employee-a",
     limitTokens: 1000,
-    concurrentLimit: 1,
+    concurrentLimit: 3,
     reserveTokens: 100,
   },
   {
@@ -46,7 +46,7 @@ export const fixtureEmployees: readonly SeedEmployee[] = [
     role: "employee",
     password: "fixture-employee-b",
     limitTokens: 1000,
-    concurrentLimit: 1,
+    concurrentLimit: 3,
     reserveTokens: 100,
   },
   {
@@ -57,7 +57,7 @@ export const fixtureEmployees: readonly SeedEmployee[] = [
     role: "employee",
     password: "fixture-employee-c",
     limitTokens: 1000,
-    concurrentLimit: 1,
+    concurrentLimit: 3,
     reserveTokens: 100,
   },
 ];

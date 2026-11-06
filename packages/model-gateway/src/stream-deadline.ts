@@ -4,7 +4,7 @@ export function createStreamDeadline(input: { signal: AbortSignal; idleMs: numbe
 } {
   const controller = new AbortController();
   const signal = AbortSignal.any([input.signal, controller.signal]);
-  const totalMs = input.totalMs ?? 300_000;
+  const totalMs = input.totalMs ?? 600_000;
   let idle: ReturnType<typeof setTimeout>;
   const abort = (message: string): void => controller.abort(new DOMException(message, 'TimeoutError'));
   const touch = (): void => {

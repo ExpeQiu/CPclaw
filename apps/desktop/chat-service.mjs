@@ -40,7 +40,7 @@ import { fetchServiceTypes, fitServiceCatalog, clearPlatformCapabilityCache } fr
 const fail = (code, message) => ({ ok: false, code, message });
 
 /** 仅在独立 Node 工作进程中使用；聊天内容与令牌不会通过流事件暴露给别的账号。 */
-export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTotalMs = 300_000, runServiceLoop = runBoundReportLoop, executeService = async()=>({ok:false,message:"本机服务执行尚未接入"}) } = {}) {
+export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTotalMs = 600_000, runServiceLoop = runBoundReportLoop, executeService = async()=>({ok:false,message:"本机服务执行尚未接入"}) } = {}) {
   mkdirSync(dataDir, { recursive: true });
   const db = new DatabaseSync(join(dataDir, "chat.sqlite"));
   chmodSync(join(dataDir, "chat.sqlite"), 0o600);
@@ -92,7 +92,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
   const configPath = join(dataDir, "desktop-connection.json");
   const marketService=createMarketService({db,dataDir,scope:actor=>knowledgeAccount(actor),
     remote:async(actor,action,input={},signal=new AbortController().signal)=>{const auth=await refreshSession(signal);sameActor(actor);const result=await(await post(auth.base,'/v1/market',{action,input},signal,auth.token)).json();sameActor(actor);return result;},
-    owns:(actor,id)=>owns(actor,id),assertCurrent:sameActor,isActive:()=>Boolean(active.size||distilling.size||diagnosticBusy),emit,executeService,
+    owns:(actor,id)=>owns(actor,id),assertCurrent:sameActor,isActive:()=>Boolean(distilling.size||diagnosticBusy),isChatActive:id=>active.has(id),emit,executeService,
     createChat:(actor,title,projectId)=>{if(projectId)projects.get(actor,projectId);const id=randomUUID();db.prepare('INSERT INTO chats (id,actor,title,updated) VALUES(?,?,?,?)').run(id,actor,title,Date.now());harnessSession(id);db.prepare('INSERT OR IGNORE INTO chat_kernel_versions VALUES(?,2)').run(id);if(projectId)projects.assign(actor,id,projectId);return id;}});
 
   function platform() {
@@ -243,8 +243,10 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     db.prepare('DELETE FROM chats WHERE id=? AND actor=?').run(chatId, actor);
   }
   async function send(actor,input){
-    if(accountBusy||diagnosticBusy||active.size||distilling.size)return fail('SLOT_BUSY','已有操作正在执行，请等待或停止后继续');
+    if(accountBusy||diagnosticBusy||distilling.size)return fail('SLOT_BUSY','已有操作正在执行，请等待或停止后继续');
     sameActor(actor);const chat=owns(actor,input.chatId);if(!chat)return fail('NOT_FOUND','找不到当前账号的聊天');
+    if(active.has(chat.id))return fail('SLOT_BUSY','这条对话正在回复，请等待或停止后再发送');
+    if(active.size>=3){desktopLog(dataDir,'cpclaw-desktop-worker','warn','chat_parallel_rejected','并行对话已达上限',{chatId:chat.id,active:active.size,limit:3});return fail('SLOT_BUSY','最多同时进行 3 个对话，请等待或停止其中一个');}
     if(chat.archived)return fail('ARCHIVED','此对话已归档，请先恢复后再继续');
     if(typeof input.requestId!=='string'||!/^[\w-]{1,64}$/.test(input.requestId))return fail('SCHEMA_INVALID','请求编号无效');
     if(db.prepare('SELECT id FROM chat_messages WHERE request=?').get(input.requestId))return fail('CONFLICT','该请求已受理');
@@ -281,7 +283,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
     const progress=(step,label,stepState='running')=>{db.prepare('INSERT INTO chat_activity VALUES(?,?,?,?) ON CONFLICT(assistant_message,step) DO UPDATE SET label=excluded.label,state=excluded.state').run(assistantId,step,label,stepState);event('progress',{step,label,stepState});};
     db.prepare('INSERT OR REPLACE INTO chat_timing VALUES(?,?,NULL)').run(assistantId,startedAt);event('start');
     const delivery=createDocumentDelivery({db,documents,actor,chatId:chat.id,messageId:assistantId,onArtifact:value=>{artifact=value;artifacts.push(value);event('artifact',{artifact:value});},onDraft:()=>event('drafts',{drafts:draftDocuments(actor,chat.id)})});
-    active.set(chat.id,controller);timeout=setTimeout(()=>controller.abort(Object.assign(Error('运行时间达到配置硬限制'),{code:'RUN_TIME_LIMIT'})),chatTotalMs);timeout.unref?.();
+    active.set(chat.id,controller);desktopLog(dataDir,'cpclaw-desktop-worker','info','chat_parallel_started','对话开始运行',{chatId:chat.id,active:active.size,limit:3});timeout=setTimeout(()=>controller.abort(Object.assign(Error('运行时间达到配置硬限制'),{code:'RUN_TIME_LIMIT'})),chatTotalMs);timeout.unref?.();
     try{
       const auth=await refreshSession(controller.signal);sameActor(actor);progress('connect','已连接工作平台','done');const quota=await readModelQuota(auth,controller.signal);if(quota&&quota.availableTokens<Math.max(1,quota.minimumRequestTokens||1))throw Object.assign(Error('平台模型额度不足'),{code:'QUOTA_EXCEEDED'});
       const access=await ensureModelGrant(auth,controller.signal);if(modelUsage(actor).known>=access.limitTokens)throw Object.assign(Error('平台模型额度不足'),{code:'QUOTA_EXCEEDED'});
@@ -666,7 +668,9 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
 
   async function kernelJob(actor,{text,action,data,projectId,chatId,onCreated}){
     sameActor(actor);
-    if(active.size||diagnosticBusy||accountBusy)throw Error('已有运行正在进行');
+    if(diagnosticBusy||accountBusy)throw Error('已有运行正在进行');
+    if(chatId&&active.has(chatId))throw Error('这条对话正在回复');
+    if(active.size>=3)throw Error('最多同时进行 3 个对话');
     if(!chatId){chatId=randomUUID();db.prepare('INSERT INTO chats (id,actor,title,updated) VALUES(?,?,?,?)').run(chatId,actor,text.slice(0,36),Date.now());harnessSession(chatId);db.prepare('INSERT INTO chat_kernel_versions VALUES(?,2)').run(chatId);if(projectId)projects.assign(actor,chatId,projectId);}
     onCreated?.(chatId);
     const result=await send(actor,{chatId,requestId:randomUUID(),text,job:{action,data}});
@@ -874,7 +878,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         return {ok:true,liked};
       }
       if (method === "document.create") {
-        if(active.size)throw Error("请等待当前回复完成");
+        if(active.has(input.chatId))throw Error("请等待当前回复完成");
         if(!owns(actor,input.chatId))throw Error("无权访问此聊天");
         const message=history(input.chatId).find(m=>m.id===input.messageId&&m.role==='assistant'&&m.state==='done');
         if(!message)throw Error("请选择已完成的回复");
@@ -903,7 +907,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
       }
       if(method==='chat.configure'){
         if(!owns(actor,input.chatId))throw Error('无权访问此聊天');
-        if(active.size||diagnosticBusy)throw Error('请先完成当前执行或自诊断，再切换模式或服务');
+        if(active.has(input.chatId)||diagnosticBusy)throw Error('请先完成当前执行或自诊断，再切换模式或服务');
         if(!['chat','cli'].includes(input.mode)||typeof input.service!=='string')throw Error('模式或服务无效');
         if(input.service){
           const auth=await refreshSession(new AbortController().signal);const snapshot=await(await post(auth.base,'/v1/market',{action:'list'},new AbortController().signal,auth.token)).json();sameActor(actor);
@@ -911,6 +915,15 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         }
         db.prepare('INSERT OR REPLACE INTO chat_modes VALUES(?,?,?)').run(input.chatId,input.mode,input.service);
         return {ok:true,execution:{mode:input.mode,service:input.service}};
+      }
+      if (method === 'chat.rename') {
+        const chat = owns(actor, input.chatId);
+        if (!chat) return fail('NOT_FOUND', '找不到当前账号的聊天');
+        const title = typeof input.title === 'string' ? input.title.trim() : '';
+        if (!title || title.length > 80 || /[\u0000-\u001f]/.test(title)) return fail('SCHEMA_INVALID', '名称需要 1–80 个字符，不能包含换行');
+        db.prepare('UPDATE chats SET title=?, updated=? WHERE id=? AND actor=?').run(title, Date.now(), input.chatId, actor);
+        desktopLog(dataDir, 'cpclaw-desktop-worker', 'info', 'chat_renamed', '对话已改名', { chatId: input.chatId, titleLength: title.length });
+        return { ok: true, title };
       }
       if (method === 'chat.archive') {
         const chat = owns(actor, input.chatId);
@@ -949,7 +962,7 @@ export function createChatService(dataDir, emit, { chatIdleMs = 70_000, chatTota
         if(input.projectId)projects.assign(actor,id,input.projectId);
         return { ok: true, chatId: id };
       }
-      if(method==='chat.migrate'){if(!owns(actor,input.chatId))return fail('NOT_FOUND','聊天不存在');if(input.mode!=='attach-history')return fail('MIGRATION_CONFIRMATION_REQUIRED','请明确选择将旧记录作为本聊天只读历史资料关联');if(active.size)return fail('SLOT_BUSY','请先停止当前运行');harnessSession(input.chatId);db.prepare('INSERT OR REPLACE INTO chat_kernel_versions VALUES(?,3)').run(input.chatId);return {ok:true};}
+      if(method==='chat.migrate'){if(!owns(actor,input.chatId))return fail('NOT_FOUND','聊天不存在');if(input.mode!=='attach-history')return fail('MIGRATION_CONFIRMATION_REQUIRED','请明确选择将旧记录作为本聊天只读历史资料关联');if(active.has(input.chatId))return fail('SLOT_BUSY','请先停止当前运行');harnessSession(input.chatId);db.prepare('INSERT OR REPLACE INTO chat_kernel_versions VALUES(?,3)').run(input.chatId);return {ok:true};}
       if (method === "chat.history") return owns(actor, input.chatId) ? { ok: true, migrationRequired:!db.prepare('SELECT 1 FROM chat_kernel_versions WHERE chat=?').get(input.chatId)&&Boolean(db.prepare('SELECT 1 FROM chat_messages WHERE chat=?').get(input.chatId)), messages: history(input.chatId), artifacts: documents.list(actor,input.chatId), drafts:draftDocuments(actor,input.chatId), execution:db.prepare("SELECT mode,service FROM chat_modes WHERE chat=?").get(input.chatId)??{mode:"chat",service:""}, serviceSteps:serviceSteps(input.chatId), skillBinding:marketService.binding(input.chatId), skillResults:db.prepare('SELECT message,body,result FROM skill_run_snapshots WHERE chat=?').all(input.chatId).map(r=>({message:r.message,snapshot:JSON.parse(r.body),result:r.result?JSON.parse(r.result):null})), active: active.has(input.chatId) } : fail("NOT_FOUND", "找不到当前账号的聊天");
       if(method.startsWith('diagnostic.'))return diagnosticTools.call(method.replace('.','_'),actor,input,{});
       if (method === "chat.diagnose") return diagnose(actor, input);

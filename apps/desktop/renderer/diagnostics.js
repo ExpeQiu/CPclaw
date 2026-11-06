@@ -469,7 +469,7 @@ diagnosticsRepairBtn.onclick = () => {
 
 byId('chat-diagnose').onclick = async () => {
   const button = byId('chat-diagnose'), body = byId('diagnostics-body');
-  if (button.dataset.busy || runningChatId || !currentChatId || !chatAccount) return;
+  if (button.dataset.busy || runningChatIds.size || !currentChatId || !chatAccount) return;
   if (!window.cpclaw?.workspace) {
     diagnosticsDialog.showModal();
     body.replaceChildren();

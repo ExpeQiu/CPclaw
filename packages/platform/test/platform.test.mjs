@@ -236,6 +236,10 @@ test("第二台设备并发被拒绝，另一名员工仍可预留；未知用�
     const deviceA = login(app, "employee-a", "device-a");
     const deviceB = login(app, "employee-a", "device-b");
     const other = login(app, "employee-b", "device-other");
+    const opened = app.readOwnQuota(deviceA.accessToken);
+    assert.equal(opened.ok, true);
+    if (opened.ok) assert.equal(opened.quota.concurrentLimit, 3);
+    assert.equal(app.setQuota(admin.accessToken, { employeeId: "employee-a", limitTokens: 1000, concurrentLimit: 1 }).ok, true);
     const first = app.reserve(deviceA.accessToken, { requestId: "req-a" });
     assert.equal(first.ok, true);
     const second = app.reserve(deviceB.accessToken, { requestId: "req-b" });
@@ -403,7 +407,7 @@ test("引导文件可以初始化，已有员工不会被合成账号覆盖", ()
         role: "admin",
         password: "file-admin-pass",
         limitTokens: 500,
-        concurrentLimit: 1,
+        concurrentLimit: 3,
         reserveTokens: 50,
       }],
     }],

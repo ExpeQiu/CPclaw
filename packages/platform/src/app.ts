@@ -517,6 +517,10 @@ function ensureSchema(db: DatabaseSync, config: PlatformConfig): { ok: true } | 
   if (count === undefined) {
     return { ok: false, message: "无法读取员工表" };
   }
+  const raised = db.prepare("UPDATE quota SET concurrent_limit = 3 WHERE concurrent_limit < 3").run();
+  if (Number(raised.changes) > 0) {
+    platformLog(config.dataDir, "info", "quota_concurrency_floor", "并发下限已提升到 3", { rows: Number(raised.changes) });
+  }
   if (count > 0) {
     seedKnowledgeAcl(db);
     platformLog(config.dataDir, "info", "platform_db_ready", "平台库已有员工，跳过初始化", { employees: count });

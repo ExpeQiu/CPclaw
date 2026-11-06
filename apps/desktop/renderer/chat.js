@@ -4,7 +4,14 @@ let chatNeedsMigration=false;
 let projects = [], currentProjectId = "", attachedProjectFile = null;
 let chats = [], chatMessages = [];
 let chatAccount = null;
+const runningChatIds = new Set();
 let runningChatId = "";
+function chatIsRunning(id = currentChatId) { return Boolean(id && runningChatIds.has(id)); }
+function markChatRunning(id, running) {
+  if (!id) return;
+  if (running) runningChatIds.add(id); else runningChatIds.delete(id);
+  runningChatId = chatIsRunning() ? currentChatId : "";
+}
 let selectedChatGeneration = 0;
 let nearBottom = true;
 let kernelStatus = { name: "…", ready: false, source: "none", version: "" };
@@ -47,7 +54,7 @@ async function refreshKernelStatus() {
   } catch {
     kernelStatus = { name: "未配置", ready: false, source: "none", version: "" };
   }
-  renderKernelBadge(runningChatId === currentChatId && runningChatId ? "正在回复" : "");
+  renderKernelBadge(chatIsRunning() ? "正在回复" : "");
 }
 window.cpclaw.settingsGet?.().then(view => showAppEdition(view?.appVersion)).catch(() => {});
 window.refreshKernelStatus = refreshKernelStatus;
@@ -59,21 +66,21 @@ function renderComposer() {
   const chat = desktopView === "chat";
   window.renderSkillBinding?.();
   byId("conversation-permissions").hidden=!chat;
-  byId("chat-diagnose").disabled = !chat || !chatAccount || !currentChatId || Boolean(runningChatId) || Boolean(byId("chat-diagnose").dataset.busy);
-  byId('mode-service').hidden=!chat;byId('mode-service').disabled=Boolean(runningChatId);
+  byId("chat-diagnose").disabled = !chat || !chatAccount || !currentChatId || runningChatIds.size > 0 || Boolean(byId("chat-diagnose").dataset.busy);
+  byId('mode-service').hidden=!chat;byId('mode-service').disabled=chatIsRunning();
   byId('mode-service').textContent=window.executionServiceName?.(chatExecution.service)||'应用服务';
   byId("knowledge-sources").hidden = !chat;
   const modelPicker=byId('composer-model'),modelLabel=byId('composer-model-label');
-  if(modelPicker){modelPicker.hidden=!chat;modelPicker.style.pointerEvents=runningChatId?'none':'';if(modelLabel)modelLabel.style.opacity=runningChatId?'.5':'';}
+  if(modelPicker){modelPicker.hidden=!chat;modelPicker.style.pointerEvents=chatIsRunning()?'none':'';if(modelLabel)modelLabel.style.opacity=chatIsRunning()?'.5':'';}
   byId('current-project-label').textContent=projects.find(p=>p.id===currentProjectId)?.name??'工作台';
   byId('current-project-label').title=projects.find(p=>p.id===currentProjectId)?.folder??'';
   byId('project-material-context').hidden=!attachedProjectFile;
   byId('project-material-name').textContent=attachedProjectFile?.name??'';
   const archived=Boolean(chats.find(item=>item.id===currentChatId)?.archived);
-  byId("chat-send").hidden = !chat || Boolean(runningChatId);
+  byId("chat-send").hidden = !chat || chatIsRunning();
   byId("chat-send").disabled = !chatAccount || archived;
   byId("chat-send").title = archived ? "恢复对话后才能继续发送" : "发送";
-  byId("chat-stop").hidden = !chat || !runningChatId;
+  byId("chat-stop").hidden = !chat || !chatIsRunning();
   byId("enqueue").hidden = chat;
   const hint = chat ? "Enter 发送 · Shift + Enter 换行" : "补充内容会加入当前任务队列";
   byId("note").placeholder = !chat ? "补充任务要求、背景或期望的结果…" : archived ? "此对话已归档，恢复后可继续。文档和图片仍可打开。" : editingArtifact ? "描述文档需要怎样修改…" : "向 CPclaw 提问…";
@@ -147,7 +154,7 @@ function renderChat() {
   byId("welcome").hidden = chatMessages.length > 0;
   byId("chat-view").hidden = !chatMessages.length;
   byId("task-title").textContent = chats.find(item => item.id === currentChatId)?.title ?? "新聊天";
-  renderKernelBadge(runningChatId === currentChatId && runningChatId ? "正在回复" : "");
+  renderKernelBadge(chatIsRunning() ? "正在回复" : "");
   const list = byId("chat-messages"); list.replaceChildren();
   if(chatNeedsMigration){const panel=document.createElement('div'),text=document.createElement('p'),attach=document.createElement('button');text.textContent='这是旧链路聊天。原记录会保留；关联后，内核可按需读取完整历史，不会自动重放旧任务。';attach.textContent='关联原历史并继续';attach.onclick=async()=>{const id=currentChatId;const r=await chatCall('chat.migrate',{chatId:id,mode:'attach-history'});if(!r.ok){setStatus(r.message);return;}if(id===currentChatId){chatNeedsMigration=false;renderChat();}};panel.append(text,attach);list.append(panel);}
 
@@ -197,7 +204,7 @@ function renderChat() {
             setStatus(result.mode==='mock'?'已生成 Mock Skill 草稿，请编辑后保存':'Skill 草稿已保存，审阅后可个人使用或提交审核。');
           });
           distill.classList.add('distill-skill');
-          distill.disabled=Boolean(runningChatId);
+          distill.disabled=runningChatIds.size>0;
           actions.append(distill);
         }
         if(message.state==='done'&&!chatArtifacts.some(a=>a.message===message.id)){
@@ -234,7 +241,7 @@ function renderChat() {
     list.append(article);
   }
   const last = chatMessages.at(-1);
-  byId("chat-retry").hidden = last?.issue?.code==='MODEL_QUOTA_EXHAUSTED'||Boolean(last?.hasServiceSteps&&!last?.safeToRetry) || Boolean(runningChatId) || !last || !["error", "cancelled", "interrupted"].includes(last.state);
+  byId("chat-retry").hidden = last?.issue?.code==='MODEL_QUOTA_EXHAUSTED'||Boolean(last?.hasServiceSteps&&!last?.safeToRetry) || chatIsRunning() || !last || !["error", "cancelled", "interrupted"].includes(last.state);
   if (nearBottom) requestAnimationFrame(() => { conversation.scrollTop = conversation.scrollHeight; });
 }
 async function loadChats() {
@@ -274,13 +281,13 @@ async function selectChat(id) {
   for(const record of result.skillResults??[]){const m=chatMessages.find(m=>m.id===record.message);if(m)m.skillResult=record.result;}
   window.restoreServicePanel?.(result.serviceSteps??[],chatExecution);
   chatArtifacts = [...(result.artifacts??[]),...(result.drafts??[])];renderDocumentList();
-  if (result.active) runningChatId = id;
+  markChatRunning(id, Boolean(result.active));
   void window.refreshConversationPermission?.();
   renderChat();
   const latest=chatMessages.at(-1);if(latest?.issue)void window.showTaskIssue?.(latest.issue,{automatic:true,messageId:latest.id});
 }
 async function sendChat(retry = false) {
-  if (runningChatId) { setStatus("请等待当前回复，或先停止生成。"); return; }
+  if (chatIsRunning()) { setStatus("请等待当前回复，或先停止生成。"); return; }
   if (!chatAccount) { openPanel("settings"); setStatus("请先设置平台地址并登录。"); return; }
   if(chatNeedsMigration){setStatus("请先明确关联原历史，或新建聊天。");return;}
   if(chats.find(item=>item.id===currentChatId)?.archived){setStatus("此对话已归档。恢复后可继续，文档和图片仍可打开。");return;}
@@ -294,7 +301,7 @@ async function sendChat(retry = false) {
   const configured=await chatCall('chat.configure',{chatId:currentChatId,...chatExecution});
   if(!configured.ok){setStatus(configured.message);return;}
   const id = currentChatId, requestId = crypto.randomUUID();
-  runningChatId = id; nearBottom = true;
+  markChatRunning(id, true); nearBottom = true;
   if (retry) {chatMessages.pop();}
   else { chatMessages.push({ id: requestId + "-user", role: "user", content: text, state: "done", request: requestId }); byId("note").value = ""; chatDrafts.delete(id); }
   chatMessages.push({ id: requestId, role: "assistant", content: "", state: "streaming", startedAt:Date.now(),request: requestId });
@@ -315,13 +322,13 @@ async function sendChat(retry = false) {
       if (message) { message.state = "error"; message.error = "连接中断，可重试"; }
     }
   } finally {
-    runningChatId = ""; renderChat(); await loadChats().catch(error => setStatus(error.message));
+    markChatRunning(id, false); renderChat(); await loadChats().catch(error => setStatus(error.message));
   }
 }
 window.cpclaw.onChatEvent(event => {
   if (event.actorId !== chatAccount || event.channel==='market' || event.channel==='project-wiki') return;
-  if (event.type === "start") runningChatId = event.chatId;
-  if (event.type === "finish") runningChatId = "";
+  if (event.type === "start") markChatRunning(event.chatId, true);
+  if (event.type === "finish") markChatRunning(event.chatId, false);
   if (currentChatId !== event.chatId) { if(event.type==='finish')void loadChats();renderChatList(); renderComposer(); return; }
   let message = chatMessages.find(item => item.role === "assistant" && item.request === event.requestId);
   if (!message && event.type !== "start") { message = { id: event.messageId, role: "assistant", content: "", state: "streaming", request: event.requestId }; chatMessages.push(message); }
@@ -370,7 +377,7 @@ async function loadAccount() {
 onAction("chat-send", () => sendChat());
 onAction("chat-retry", () => sendChat(true));
 onAction("chat-stop", async () => {
-  const result = await chatCall("chat.cancel", { chatId: runningChatId });
+  const result = await chatCall("chat.cancel", { chatId: currentChatId });
   if (!result.ok) setStatus(result.message);
 });
 onAction("rail-chat", async () => { await selectChat(""); byId("note").focus(); setStatus(chatAccount ? "输入问题开始新的聊天。" : "请先在设置中连接平台并登录。"); });
@@ -403,7 +410,7 @@ void refreshKernelStatus();
 loadAccount().then(async () => { if (chats.length) await selectChat(chats[0].id); else renderChat(); }).catch(error => { setStatus(error.message); renderChat(); });
 
 window.chooseExecutionService=async service=>{
-  if(runningChatId){setStatus('请先停止当前执行，再更换应用服务。');return false;}
+  if(chatIsRunning()){setStatus('请先停止当前执行，再更换应用服务。');return false;}
   if(currentChatId){const r=await chatCall('chat.configure',{chatId:currentChatId,mode:'chat',service:service.id});if(!r.ok){setStatus(r.message);return false;}}
   chatExecution={mode:'chat',service:service.id};renderComposer();window.showServiceWorkspace?.(service);return true;
 };

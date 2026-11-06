@@ -791,10 +791,12 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .chat-more-menu button{display:block;width:100%;margin:0;text-align:left;border:0;background:transparent;padding:8px 10px;font-size:12px;border-radius:7px}
 .chat-more-menu button:hover{background:#f0f3ec}
 .chat-more-menu button.danger{color:#8d3b32}
-#move-chat-dialog,#delete-chat-dialog{width:340px;max-width:90vw;border:1px solid #dfe5d8;border-radius:12px;padding:22px;color:#303b33}
-#move-chat-dialog::backdrop,#delete-chat-dialog::backdrop{background:#20301b40}
-#move-chat-dialog h2,#delete-chat-dialog h2{margin:0 0 16px;font-size:17px}
-#move-chat-dialog .button-row,#delete-chat-dialog .button-row{justify-content:flex-end;margin-top:20px}
+#move-chat-dialog,#rename-chat-dialog,#delete-chat-dialog{width:340px;max-width:90vw;border:1px solid #dfe5d8;border-radius:12px;padding:22px;color:#303b33}
+#move-chat-dialog::backdrop,#rename-chat-dialog::backdrop,#delete-chat-dialog::backdrop{background:#20301b40}
+#move-chat-dialog h2,#rename-chat-dialog h2,#delete-chat-dialog h2{margin:0 0 16px;font-size:17px}
+#move-chat-dialog .button-row,#rename-chat-dialog .button-row,#delete-chat-dialog .button-row{justify-content:flex-end;margin-top:20px}
+#rename-chat-dialog label{display:grid;gap:6px;font-size:13px}
+#rename-chat-dialog input{width:100%;box-sizing:border-box}
 #delete-chat-dialog p{margin:0;font-size:13px;line-height:1.6}
 #delete-chat-dialog .danger{background:#8d3b32;color:#fff;border-color:#8d3b32}
 #project-material-context{display:flex;align-items:center;gap:8px;padding:2px 6px 8px;color:#64765b;font-size:12px}#project-material-context button{border:0;padding:2px 6px;background:transparent;border-radius:999px}#project-material-context button:hover{background:#eef1e8}

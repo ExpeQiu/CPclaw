@@ -9,7 +9,7 @@ import {mergeConnectorViews,statusLabel} from './connector-health.mjs';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(code,message,extra={})=>({ok:false,code,message,...extra});
 /** 本机安装/运行事实只在宿主保存；平台安装记录仅是账号偏好。 */
-export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,isActive,createChat,emit,executeService}){
+export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,isActive,isChatActive=()=>false,createChat,emit,executeService}){
   db.exec(`CREATE TABLE IF NOT EXISTS local_skill_installs(account TEXT NOT NULL,release TEXT NOT NULL,skill TEXT NOT NULL,version TEXT NOT NULL,digest TEXT NOT NULL,enabled INTEGER NOT NULL,explicit INTEGER NOT NULL,updated INTEGER NOT NULL,PRIMARY KEY(account,release));
     CREATE TABLE IF NOT EXISTS local_skill_members(account TEXT NOT NULL,expert TEXT NOT NULL,member TEXT NOT NULL,PRIMARY KEY(account,expert,member));
     CREATE TABLE IF NOT EXISTS skill_bindings(chat TEXT PRIMARY KEY,body TEXT NOT NULL);
@@ -140,7 +140,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     };
   }
   async function useInternal(actor,input){
-    if(isActive())return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
+    if(isActive()||isChatActive(input.chatId))return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
     const item=getInternalSkill(input.id);if(!item)return fail('NOT_FOUND','没有这个内部技能');
     const values=input.values??{};if(!values||typeof values!=='object'||Array.isArray(values)||Object.entries(values).some(([k,v])=>typeof v!=='string'||v.length>8000))return fail('INPUT_INVALID','技能输入无效');
     const missing=item.inputs.filter(p=>p.required&&!String(values[p.name]??'').trim());if(missing.length)return fail('INPUT_REQUIRED','请补充：'+missing.map(p=>p.label).join('、'),{missing});
@@ -158,7 +158,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
   }
   async function use(actor,input,trial=false,migrating=false){
     const startingScope=scope(actor);
-    if(!migrating&&isActive())return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
+    if(!migrating&&(isActive()||isChatActive(input.chatId)))return fail('SLOT_BUSY','请等待或停止当前执行后再选用技能');
     if(isInternalSkillId(input.id))return useInternal(actor,input);
     const resolved=await remote(actor,'resolve',{id:input.id,trial});ensureScope(actor,startingScope);if(!resolved.ok)return resolved;
     const taskMember=resolved.item.kind==='expert'?resolved.resources.find(r=>r.item.id===input.taskMember&&r.item.id!==resolved.item.id):null;
@@ -186,7 +186,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
       const checked=readInstalledSkill(folder(actor),storageSkill,resource.item.version,resource.digest);if(!checked.ok)return fail('INSTALL_CORRUPT','本机技能文件需重新校验或安装：'+checked.message);
       resources.push({id:resource.item.id,skillId:resource.item.skillId,storageSkill,version:resource.item.version,digest:resource.digest,title:resource.item.title,revision:resource.item.revision});
     }
-    ensureScope(actor,startingScope);if(!migrating&&isActive())return fail('SLOT_BUSY','当前执行状态已变化，请稍后再选用');
+    ensureScope(actor,startingScope);if(!migrating&&(isActive()||isChatActive(input.chatId)))return fail('SLOT_BUSY','当前执行状态已变化，请稍后再选用');
     const chatId=input.chatId||createChat(actor,resolved.item.title,input.projectId);
     const value={account:account(actor),id:resolved.item.id,skillId:resolved.item.skillId,title:resolved.item.title,version:resolved.item.version,resources,values,trial,taskMember:taskMember?.item.id??null,created:Date.now()};
     db.prepare('INSERT INTO skill_bindings VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET body=excluded.body').run(chatId,JSON.stringify(value));
@@ -251,7 +251,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
     if(method==='market.cancel-install'){const c=installControllers.get(account(actor)+':'+input.id);if(c)c.abort(Error('安装已取消'));return {ok:true,message:c?'正在取消安装':'该安装操作已结束'};}
     if(method==='market.use'||method==='market.trial')return use(actor,input,method==='market.trial');
     if(method==='market.unbind'){
-      if(!owns(actor,input.chatId))return fail('NOT_FOUND','无权访问此聊天');if(isActive())return fail('SLOT_BUSY','请等待执行结束再解除技能');
+      if(!owns(actor,input.chatId))return fail('NOT_FOUND','无权访问此聊天');if(isActive()||isChatActive(input.chatId))return fail('SLOT_BUSY','请等待执行结束再解除技能');
       db.prepare('DELETE FROM skill_bindings WHERE chat=?').run(input.chatId);db.prepare('DELETE FROM chat_skills WHERE chat=?').run(input.chatId);return {ok:true};
     }
     if(method==='market.check'){
@@ -325,7 +325,7 @@ export function createMarketService({db,dataDir,scope,remote,owns,assertCurrent,
   }
   function unbindChat(actor,chatId){
     if(!owns(actor,chatId))return fail('NOT_FOUND','无权访问此聊天');
-    if(isActive())return fail('SLOT_BUSY','请等待执行结束再解除技能');
+    if(isActive()||isChatActive(chatId))return fail('SLOT_BUSY','请等待执行结束再解除技能');
     db.prepare('DELETE FROM skill_bindings WHERE chat=?').run(chatId);
     db.prepare('DELETE FROM chat_skills WHERE chat=?').run(chatId);
     return {ok:true};

@@ -50,6 +50,24 @@ test('archive keeps generated files and delete removes only that chat', async t 
   } finally { f.stop(); }
 });
 
+test('rename keeps the chosen title after the next reply', async t => {
+  const f = fixture(t, async i => { i.onAccepted('accepted'); return {finalResponse:'已回复'}; });
+  try {
+    const created = await f.service.dispatch('chat.create', f.actor, {});
+    const renamed = await f.service.dispatch('chat.rename', f.actor, {chatId:created.chatId, title:'  周报讨论  '});
+    assert.equal(renamed.ok, true, renamed.message);
+    assert.equal(renamed.title, '周报讨论');
+    await f.send(created.chatId, '这是一条很长的首条消息，不应当覆盖已经改过的名称', 'req-rename');
+    const listed = await f.service.dispatch('chat.list', f.actor, {});
+    assert.equal(listed.chats.find(chat => chat.id === created.chatId).title, '周报讨论');
+    assert.equal((await f.service.dispatch('chat.rename', f.actor, {chatId:created.chatId, title:'  '})).code, 'SCHEMA_INVALID');
+    assert.equal((await f.service.dispatch('chat.rename', f.actor, {chatId:'missing', title:'名称'})).code, 'NOT_FOUND');
+    const log = readFileSync(join(f.root, 'logs', 'desktop-worker.log'), 'utf8');
+    assert.match(log, /chat_renamed/);
+    assert.equal(log.includes('周报讨论'), false);
+  } finally { f.stop(); }
+});
+
 test('existing chats gain an archived flag without changing their rows', async t => {
   const root = mkdtempSync('/tmp/cpclaw-archive-migrate-');
   const db = new DatabaseSync(join(root, 'chat.sqlite'));
