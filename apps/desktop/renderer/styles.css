@@ -962,11 +962,14 @@ body.document-expanded:has(#panel-documents:not([hidden])) .inspector{width:100%
 .extension-kind-tab[aria-selected="true"],.extension-kind-tab[aria-selected="true"]:hover{background:#354d3c;border-color:#354d3c;color:#fff;font-weight:600}
 .extension-kind-tab[aria-selected="false"]{background:#fff;color:#5d6a55;font-weight:400}
 
-.preferred-locations{margin:4px 10px 2px;padding-top:8px;border-top:1px solid #e6e9e1}
-.preferred-locations>p:first-child{margin:0 0 6px;font-size:12px;font-weight:600;color:#3a4036}
-.preferred-locations ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
-.preferred-locations li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;font-size:12px;color:#3a4036}
-.preferred-locations li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.preferred-locations li button,.preferred-locations>#preferred-location-add{display:inline-flex;flex-direction:row;align-items:center;width:auto;height:auto;min-height:0;margin:0;padding:3px 8px;border:1px solid #d7ddd1;border-radius:999px;background:#f7f8f4;font-size:11px;line-height:1.4;white-space:nowrap}
-.preferred-locations>#preferred-location-add{margin-top:6px}
-.preferred-locations li button:hover,.preferred-locations>#preferred-location-add:hover{background:#eef1ea}
+.project-scope-action svg{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+#project-scope-dialog{width:min(520px,calc(100vw - 32px));padding:22px;border:0;border-radius:16px}
+#project-scope-dialog h2{margin:0 0 14px;font-size:18px}
+#project-scope-list{display:grid;gap:8px;margin:8px 0 12px}
+.project-scope-row{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #e4e8df;border-radius:10px}
+.project-scope-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.project-scope-row em{font-style:normal;font-size:11px;color:#6d7b66;background:#f3f6ef;border-radius:999px;padding:2px 8px}
+.project-scope-row button{width:auto;height:auto;min-height:0;padding:2px 8px;font-size:12px}
+.project-scope-actions{display:flex;align-items:center;gap:8px;margin-top:18px}
+.project-scope-actions span{flex:1}
+#project-scope-remove{color:#b42318;background:#fff5f3;border:1px solid #f0d0cb}

@@ -14,6 +14,14 @@ export function createConversationPermissions() {
     clearActor(actorId) { for(const key of entries.keys())if(JSON.parse(key)[0]===actorId)entries.delete(key); },
   };
 }
+const sandboxRisks = new Set(['read', 'preferred', 'workspace', 'external-read']);
+const boundaryRisks = new Set(['write', 'external-write', 'network', 'unknown']);
+/** Codex 三档：请求批准与帮我批准同为工作区可写；完全访问不再逐次询问。积分与 forceApproval 不在此放行。 */
 export function canAutoApprove(permission, risk, cost = 0) {
-  return cost===0 && (permission.mode==='full' || permission.mode==='auto' && (risk==='read' || risk==='preferred'));
+  if (cost !== 0) return permission?.mode === 'full';
+  if (permission?.mode === 'full') return true;
+  if (risk === 'unsafe') return false;
+  if (sandboxRisks.has(risk)) return permission?.mode === 'ask' || permission?.mode === 'auto';
+  if (boundaryRisks.has(risk)) return permission?.mode === 'auto';
+  return false;
 }

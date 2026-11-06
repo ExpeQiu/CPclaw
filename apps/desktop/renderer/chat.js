@@ -201,9 +201,9 @@ function renderChat() {
           actions.append(distill);
         }
         if(message.state==='done'&&!chatArtifacts.some(a=>a.message===message.id)){
-          const save=documentButton(message.hasServiceSteps?'保存创作过程.md':'保存为 .md',async()=>{
+          const save=documentButton('保存文档',async()=>{
             const actor=chatAccount,chatId=currentChatId;
-            const result=await chatCall('document.create',{chatId,messageId:message.id,...(message.hasServiceSteps?{kind:'process'}:{})});
+            const result=await chatCall('document.create',{chatId,messageId:message.id});
             if(actor!==chatAccount||chatId!==currentChatId)return;
             if(!result.ok)throw Error(result.message);
             addArtifact(result.artifact);renderChat();await showDocument(result.artifact.id);

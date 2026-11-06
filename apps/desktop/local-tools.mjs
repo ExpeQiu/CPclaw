@@ -27,6 +27,53 @@ function runTerminal(program,args,{cwd,env,signal,timeout,maxBuffer}) {
 export const localService={id:'local-terminal',title:'本机文件与终端',type:'CLI',target:process.platform==='win32'?'powershell.exe':'/bin/zsh',builtin:true};
 const inside=(root,path)=>{if(!root)return false;try{const rel=relative(realpathSync(root),path);return rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('../');}catch{return false;}};
 const insideAny=(roots,path)=>(roots||[]).some(root=>inside(root,path));
+const underRoot=(root,path)=>{if(!root||!path)return false;if(inside(root,path))return true;const base=root.endsWith('/')?root:root+'/';return path===root||path.startsWith(base);};
+export function workspaceRoots(context){
+  if(Array.isArray(context.projectRoots)&&context.projectRoots.length)return context.projectRoots;
+  if(context.projectRoot)return [context.projectRoot];
+  if(context.workingDirectory)return [context.workingDirectory];
+  return [];
+}
+export function isSensitivePath(path){
+  const name=String(path).replace(/\\/g,'/');
+  return /\/(\.ssh|\.aws|\.gnupg|\.kube|Keychains)(\/|$)/.test(name)||/\/id_rsa$/.test(name)||/\.(pem|p12|pfx)$/i.test(name);
+}
+function usesNetwork(command){
+  return /https?:\/\//i.test(command)
+    ||/\b(curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|ping|dig|nslookup)\b/i.test(command)
+    ||/\bgit\s+(push|pull|fetch|clone|ls-remote|submodule)\b/i.test(command)
+    ||/\b(npm|pnpm|yarn)\s+(install|i|add|update|ci|publish|dlx)\b/i.test(command)
+    ||/\bpip3?\s+install\b/i.test(command)
+    ||/\bbrew\s+install\b/i.test(command)
+    ||/\b(docker|podman)\s+(pull|push|login)\b/i.test(command)
+    ||/\bInvoke-WebRequest\b/i.test(command);
+}
+function isUnsafeCommand(command){
+  return /\b(sudo|doas)\b/.test(command)
+    ||/\brm\s+(-[^\s]*[rR][^\s]*[fF]|-[^\s]*[fF][^\s]*[rR]|--recursive)\b/.test(command)
+    ||/\b(mkfs|shutdown|reboot|halt)\b/.test(command)
+    ||/\bdiskutil\s+erase\b/.test(command)
+    ||/\bdd\s+if=/.test(command)
+    ||/\b(curl|wget)\b[\s\S]*\|\s*(sh|bash|zsh)\b/.test(command)
+    ||/\bgit\s+push\b[\s\S]*--force|\bgit\s+push\s+-f\b/.test(command)
+    ||/\bsecurity\s+(delete|dump|export)\b/.test(command)
+    ||/\bchmod\s+777\b/.test(command)
+    ||/(\.ssh|\.aws|\.gnupg|Keychains)/.test(command);
+}
+function commandEscapes(command,roots){
+  if(/(^|[\s'"`=])\.\.(\/|\s|$)/.test(command))return true;
+  for(const match of command.matchAll(/(?:^|[\s'"`=:])(\/[^\s'"`|;]+)/g)){
+    if(!roots.some(root=>underRoot(root,match[1])))return true;
+  }
+  return false;
+}
+/** 工作区内的读写和常规命令留在沙箱内；外部改写与联网越界；破坏性、凭据和提权记为风险。 */
+export function classifyCommand(command,cwd,roots){
+  if(isUnsafeCommand(command))return 'unsafe';
+  if(usesNetwork(command))return 'network';
+  if(!insideAny(roots,cwd)||commandEscapes(command,roots))return 'external-write';
+  return 'workspace';
+}
 export async function executeLocalTool({context,request,signal,authorize,run=runTerminal}) {
   signal.throwIfAborted();
   const cwd=realpathSync(resolve(context.workingDirectory||homedir(),request.cwd||'.'));
@@ -42,9 +89,12 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
     let path;try{path=realpathSync(candidate);}catch(e){if(e.code!=='ENOENT'||request.action!=='write_file')throw e;path=resolve(realpathSync(dirname(candidate)),basename(candidate));}
     const reading=request.action==='read_file';
     if(!reading&&(typeof request.content!=='string'||Buffer.byteLength(request.content)>512000))throw Error('文件正文需要是 512KB 以内的文本');
-    const trusted=inside(context.projectRoot,path)||insideAny(context.preferredRoots,path);
-    const remembered=!reading&&insideAny(context.preferredRoots,path);
-    await authorize({risk:reading&&trusted?'read':reading?'external-read':remembered?'preferred':'write',title:reading?'读取本机文件':'写入本机文件',message:`${reading?'读取':'写入'} ${path}`,detail:`文件：${path}\n${reading?'读取内容会提供给模型，用于当前任务。':remembered?'该文件夹已在优先访问位置中，写入会按已记住的范围执行。':`将写入 ${Buffer.byteLength(request.content)} 字节；已有内容会被覆盖。`}`});
+    const roots=workspaceRoots(context);
+    const listed=Array.isArray(context.projectRoots);
+    if(listed&&!insideAny(context.projectRoots,path))throw Object.assign(Error('该文件夹不在本项目可访问范围内'),{code:'OUT_OF_SCOPE'});
+    const trusted=insideAny(roots,path);
+    const risk=isSensitivePath(path)?'unsafe':reading?(trusted?'read':'external-read'):trusted?'workspace':'external-write';
+    await authorize({risk,title:reading?'读取本机文件':'写入本机文件',message:`${reading?'读取':'写入'} ${path}`,detail:`文件：${path}\n${reading?'读取内容会提供给模型，用于当前任务。':trusted?'位于当前工作区，可直接修改。':`工作区外写入 ${Buffer.byteLength(request.content)} 字节；已有内容会被覆盖。`}`});
     signal.throwIfAborted();
     if(reading){const st=statSync(path);if(!st.isFile()||st.size>512000)throw Error('只支持 512KB 以内的普通文本文件');return {ok:true,path,content:readFileSync(path,'utf8')};}
     writeFileSync(path,request.content,'utf8');
@@ -54,7 +104,10 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
   if(request.action!=='terminal'||typeof request.command!=='string'||!request.command.trim()||request.command.length>32000||request.command.includes('\0'))throw Error('终端请求需要有效的 command 字符串；请使用顶层字段，例如 {"action":"terminal","command":"pwd"}，不要将 command 放入 args。');
   const timeout=request.timeoutMs??60000;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>300000)throw Error('终端超时范围为 100–300000 毫秒');
-  await authorize({risk:request.command.trim()==='pwd'&&inside(context.projectRoot,cwd)?'read':'unknown',title:'终端执行授权',message:request.purpose||'执行当前任务的终端命令',detail:`工作目录：${cwd}\n命令：\n${request.command}\n超时：${timeout} 毫秒\n命令可以读取或修改本机文件并访问网络。优先访问位置不包含终端命令。`});
+  const roots=workspaceRoots({...context,workingDirectory:context.workingDirectory||cwd});
+  if(Array.isArray(context.projectRoots)&&!insideAny(context.projectRoots,cwd))throw Object.assign(Error('终端工作目录不在本项目可访问范围内'),{code:'OUT_OF_SCOPE'});
+  const risk=classifyCommand(request.command,cwd,roots);
+  await authorize({risk,title:'终端执行授权',message:request.purpose||'执行当前任务的终端命令',detail:`工作目录：${cwd}\n命令：\n${request.command}\n超时：${timeout} 毫秒\n判定：${risk==='workspace'?'工作区内常规命令':risk==='network'?'将访问网络':risk==='unsafe'?'检出风险操作':risk==='external-write'?'可能改写工作区外文件':'需确认'}`});
   signal.throwIfAborted();
   const program=process.platform==='win32'?'powershell.exe':'/bin/zsh';
   const args=process.platform==='win32'?['-NoProfile','-NonInteractive','-Command',request.command]:['-c',request.command];

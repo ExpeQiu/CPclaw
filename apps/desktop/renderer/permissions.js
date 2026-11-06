@@ -14,28 +14,7 @@
     const r=await window.cpclaw.extensionAction({action:'permission-status'});
     if(token===generation&&actor===chatAccount&&id===currentChatId&&r.chatId===id)render(r.mode);
   };
-  const locationList=document.getElementById('preferred-locations');
-  async function renderLocations(){
-    locationList.replaceChildren();
-    if(!chatAccount){const empty=document.createElement('li');empty.textContent='登录后可添加';locationList.append(empty);return;}
-    const result=await window.cpclaw.extensionAction({action:'preferred-locations'});
-    locationList.replaceChildren();
-    if(!result?.ok){const empty=document.createElement('li');empty.textContent=result?.message||'暂时无法读取';locationList.append(empty);return;}
-    if(!result.locations.length){const empty=document.createElement('li');empty.className='muted';empty.textContent='尚未添加';locationList.append(empty);return;}
-    for(const item of result.locations){
-      const row=document.createElement('li');const name=document.createElement('span');name.textContent=item.name;name.title=item.path;
-      const remove=document.createElement('button');remove.type='button';remove.textContent='移除';remove.onclick=async()=>{const next=await window.cpclaw.extensionAction({action:'preferred-location-remove',path:item.path});if(!next?.ok)setStatus(next?.message||'未能移除');await renderLocations();};
-      row.append(name,remove);locationList.append(row);
-    }
-  }
-  picker.addEventListener('toggle',()=>{if(picker.open){void window.refreshConversationPermission();void renderLocations();}});
-  document.getElementById('preferred-location-add').onclick=async()=>{
-    if(!chatAccount){setStatus('请先登录，再添加优先访问位置。');return;}
-    const result=await window.cpclaw.extensionAction({action:'preferred-location-add'});
-    if(!result?.ok)setStatus(result?.message||'未能添加');
-    else if(!result.cancelled)setStatus('已记住这个文件夹，后续读取和写入不再逐次询问。');
-    await renderLocations();
-  };
+  picker.addEventListener('toggle',()=>{if(picker.open)void window.refreshConversationPermission();});
   document.addEventListener('pointerdown',event=>{if(!picker.contains(event.target))picker.open=false;});
   picker.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();picker.open=false;label.focus();}});
   for(const button of picker.querySelectorAll('[data-permission-mode]'))button.onclick=async()=>{

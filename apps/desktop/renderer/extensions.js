@@ -273,7 +273,7 @@
   el('extension-native').onclick=()=>void mode(true);el('extension-cli').onclick=()=>void mode(false);
   el('extension-refresh').onclick=()=>native?void mode(true):void renderResults();
   el('extension-revoke').onclick=async()=>{const r=await action({action:'revoke-permission'});feedback(r.message);};
-  const permission=r=>{const grants=r.grants??[];const mode={ask:'请求批准 · 每次执行前询问',auto:'帮我批准 · 已知只读操作自动通过',full:'完全访问权限 · 当前对话的本机文件、终端与网络'}[r.mode]||'按当前对话权限执行';const grantText=grants.map(g=>`${g.service} · ${g.mode==='auto'?'本次对话已授权':'本次任务已授权'}${g.creditCeiling?` · 积分已预留 ${g.reservedCredits}/${g.creditCeiling}`:''}`).join('；');el('extension-permission').textContent=mode+(grantText?'；'+grantText:r.remembered?'；已允许即梦只读检查':'');el('extension-revoke').hidden=!r.remembered&&!grants.length&&(!r.mode||r.mode==='ask');};
+  const permission=r=>{const grants=r.grants??[];const mode={ask:'请求批准 · 编辑外部文件和使用互联网时询问',auto:'帮我批准 · 仅对检出的风险操作询问',full:'完全访问权限 · 互联网与本机任意文件'}[r.mode]||'按当前对话权限执行';const grantText=grants.map(g=>`${g.service} · ${g.mode==='auto'?'本次对话已授权':'本次任务已授权'}${g.creditCeiling?` · 积分已预留 ${g.reservedCredits}/${g.creditCeiling}`:''}`).join('；');el('extension-permission').textContent=mode+(grantText?'；'+grantText:r.remembered?'；已允许即梦只读检查':'');el('extension-revoke').hidden=!r.remembered&&!grants.length&&(!r.mode||r.mode==='ask');};
   void action({action:'permission-status'}).then(permission).catch(()=>{});
   function approvalScope(){
     const mode=el('service-approval-mode').value;

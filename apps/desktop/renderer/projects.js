@@ -73,6 +73,9 @@ function renderProjectChats(){
     group.ontoggle=()=>projectOpen.set(chatAccount+project.id,group.open);
     const summary=document.createElement('summary');const name=document.createElement('span');name.className='sidebar-text';name.textContent=project.name;name.title=project.folder||'尚未归入项目的聊天';summary.append(name);
     if(project.id){
+      const scope=documentButton('',()=>openProjectScope(project));scope.className='project-scope-action';scope.title='可访问文件夹';scope.setAttribute('aria-label','可访问文件夹：'+project.name);
+      const folderIcon=document.createElementNS('http://www.w3.org/2000/svg','svg');folderIcon.setAttribute('viewBox','0 0 24 24');folderIcon.setAttribute('aria-hidden','true');
+      const folderPath=document.createElementNS(folderIcon.namespaceURI,'path');folderPath.setAttribute('d','M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z');folderIcon.append(folderPath);scope.append(folderIcon);scope.addEventListener('click',event=>event.stopPropagation());summary.append(scope);
       const compress=documentButton('',()=>openProjectWiki(project));compress.className='project-wiki-action';compress.title='信息压缩 · 整理项目知识';compress.setAttribute('aria-label','信息压缩：'+project.name);
       const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
       const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M4 3h10l4 4v5M14 3v5h4M7 11h6M7 15h3M3 7v14h11M13 16h8m-3-3 3 3-3 3');svg.append(path);compress.append(svg);compress.addEventListener('click',e=>e.stopPropagation());summary.append(compress);
@@ -93,6 +96,52 @@ function renderProjectChats(){
   }
   if(!list.children.length)list.textContent='没有匹配的项目或聊天';
 }
+let scopeProjectId='', scopeFolders=[];
+function renderScopeList(){
+  const list=byId('project-scope-list');list.replaceChildren();
+  for(const folder of scopeFolders){
+    const row=document.createElement('div');row.className='project-scope-row';
+    const name=document.createElement('span');name.textContent=folder.name||folder.path;name.title=folder.path;
+    row.append(name);
+    if(folder.primary){const badge=document.createElement('em');badge.textContent='主要';row.append(badge);}
+    else{const make=document.createElement('button');make.type='button';make.textContent='设为主要';make.onclick=()=>{scopeFolders=scopeFolders.map(item=>({...item,primary:item.path===folder.path}));renderScopeList();};row.append(make);}
+    if(!folder.primary){const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','移出 '+folder.path);remove.onclick=()=>{scopeFolders=scopeFolders.filter(item=>item.path!==folder.path);renderScopeList();};row.append(remove);}
+    list.append(row);
+  }
+}
+function openProjectScope(project){
+  scopeProjectId=project.id;scopeFolders=(project.roots?.length?project.roots:[{path:project.folder,name:project.name,primary:true}]).map(item=>({...item}));
+  byId('project-scope-name').value=project.name;byId('project-scope-feedback').textContent='不在列表中的文件夹不能访问。名单内的读取和写入不再逐次询问。';
+  renderScopeList();byId('project-scope-dialog').showModal();
+}
+onAction('project-scope-add',async()=>{
+  const actor=chatAccount,id=scopeProjectId;
+  const result=await window.cpclaw.projectAction({action:'pick-folder',id});
+  if(actor!==chatAccount||id!==scopeProjectId)return;
+  if(!result.ok){byId('project-scope-feedback').textContent=result.message;return;}
+  if(result.cancelled)return;
+  if(scopeFolders.some(item=>item.path===result.path)){byId('project-scope-feedback').textContent='这个文件夹已经在列表中。';return;}
+  if(scopeFolders.length>=20){byId('project-scope-feedback').textContent='每个项目最多 20 个可访问文件夹。';return;}
+  const name=result.path.split(/[/\\]/).filter(Boolean).at(-1)||result.path;
+  scopeFolders.push({path:result.path,name,primary:false});renderScopeList();
+});
+onAction('project-scope-save',async()=>{
+  const actor=chatAccount,id=scopeProjectId;
+  const result=await chatCall('project.saveRoots',{id,name:byId('project-scope-name').value.trim(),folders:scopeFolders.map(item=>({path:item.path,primary:item.primary===true}))});
+  if(actor!==chatAccount)return;
+  if(!result.ok){byId('project-scope-feedback').textContent=result.message;return;}
+  byId('project-scope-dialog').close();await loadChats();setStatus('已保存本项目可访问的文件夹。');
+});
+onAction('project-scope-remove',async()=>{
+  const actor=chatAccount,id=scopeProjectId;
+  if(!window.confirm('移出这个本地项目后，其中的聊天会回到未归类。文件夹里的文件不会删除。'))return;
+  const result=await chatCall('project.remove',{id});
+  if(actor!==chatAccount)return;
+  if(!result.ok){byId('project-scope-feedback').textContent=result.message;return;}
+  if(currentProjectId===id)currentProjectId='';
+  byId('project-scope-dialog').close();await loadChats();setStatus('已移除本地项目，聊天仍保留。');
+});
+onAction('project-scope-cancel',()=>byId('project-scope-dialog').close());
 onAction('rail-project',async()=>{
   const actor=chatAccount;const r=await window.cpclaw.projectAction({action:'create'});if(actor!==chatAccount)return;if(!r.ok)throw Error(r.message);if(r.cancelled)return;
   await loadChats();await newProjectChat(r.project.id);setStatus('项目已关联：'+r.project.folder+'。新成果将自动保存到该文件夹。');

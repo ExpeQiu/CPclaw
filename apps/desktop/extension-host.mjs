@@ -2,7 +2,6 @@ import {inspectAppFolder} from './app-folder.mjs';
 import {addAppDriver} from './local-extensions.mjs';
 import {sourceRoot,discoverTpcstore,rememberSource,connectTpcstore} from './tpcstore-apps.mjs';
 import {createConversationPermissions} from './conversation-permissions.mjs';
-import {addPreferredLocation,listPreferredLocations,removePreferredLocation} from './preferred-locations.mjs';
 import { createServiceRuntime, serviceImageData } from './service-runtime.mjs';
 import {inspectServiceImage,localServiceImage} from './service-images.mjs';
 import { createNativePageController, isSensitiveUrl, pageOriginsForService, partitionForOrigins, validatePageUrl } from './computer-use.mjs';
@@ -184,21 +183,6 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
         const result=await connectTpcstore(dataDir,root,appId,{signal:controller.signal});
         if(actor!==getActor())throw Error('账号已变化');rememberSource(dataDir,root);return {ok:true,...result};
       }catch(e){return {ok:false,message:e.message};}finally{executionPending=false;}
-    }
-    if(input?.action==='preferred-locations'){
-      const actor=getActor();if(!actor)return {ok:false,message:'请先登录'};
-      return {ok:true,locations:listPreferredLocations(dataDir,actor)};
-    }
-    if(input?.action==='preferred-location-add'){
-      const actor=getActor();if(!actor)return {ok:false,message:'请先登录'};
-      const choice=await dialog.showOpenDialog(getWindow(),{title:'选择优先访问的文件夹',properties:['openDirectory']});
-      if(choice.canceled||!choice.filePaths[0])return {ok:true,cancelled:true,locations:listPreferredLocations(dataDir,actor)};
-      return addPreferredLocation(dataDir,actor,choice.filePaths[0]);
-    }
-    if(input?.action==='preferred-location-remove'){
-      const actor=getActor();if(!actor)return {ok:false,message:'请先登录'};
-      if(typeof input.path!=='string')return {ok:false,message:'位置无效'};
-      return removePreferredLocation(dataDir,actor,input.path);
     }
     if(input?.action==='set-permission-mode') {
       const c=effectiveContext();

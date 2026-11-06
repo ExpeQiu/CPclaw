@@ -1,7 +1,6 @@
 import {callTpcstore} from './tpcstore-apps.mjs';
 import {canAutoApprove} from './conversation-permissions.mjs';
 import {localService,executeLocalTool} from './local-tools.mjs';
-import {preferredRoots} from './preferred-locations.mjs';
 import {browserPageService,executeComputerUse,pageOriginsForService} from './computer-use.mjs';
 import {annotateService,SERVICE_KINDS,serviceKind} from './service-kinds.mjs';
 import { resolveFeishuCli } from './connector-health.mjs';
@@ -118,7 +117,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       notify({type:'image',path:image.path,dataUrl,actorId:context.actorId,chatId:context.chatId});
       return {ok:true,data:{...image,resourceId:request.resourceId,preview:{state:'ready'},deliveryVerified:true}};
     }
-    if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context:{...context,preferredRoots:preferredRoots(dataDir,context.actorId)},request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
+    if(service?.id===localService.id&&service.builtin===true)return sanitizeServiceResult(await executeLocalTool({context,request,signal,run:run===runFile?undefined:run,authorize:details=>consent(context,signal,details,JSON.stringify(['local-terminal',context.workingDirectory]))}));
     if(service.tpcstore&&['discover','app_call'].includes(request.action)) {
       await consent(context,signal,{risk:'unknown',title:'TPCstore 应用调用',message:'读取应用清单并调用已登记适配器',detail:`应用：${service.tpcstore.appId}\n来源：${service.tpcstore.root}\n操作：${request.operation||'discover'}`},JSON.stringify(['tpcstore',service.tpcstore.root,service.tpcstore.appId]));
       return sanitizeServiceResult(await callTpcstore(service,request,{signal}));
@@ -126,7 +125,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     if(serviceKind(service)===SERVICE_KINDS.appDriver&&service.type==='APP'&&typeof service.root==='string'){
       const root=realpathSync(service.root);
       return sanitizeServiceResult(await executeLocalTool({
-        context:{...context,workingDirectory:root,projectRoot:root,preferredRoots:preferredRoots(dataDir,context.actorId)},
+        context:{...context,workingDirectory:root,projectRoot:root,projectRoots:undefined},
         request,signal,run:run===runFile?undefined:run,
         authorize:details=>consent(context,signal,details,JSON.stringify(['app-driver',root])),
       }));
@@ -168,7 +167,8 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       try { return JSON.parse(stdout); } catch { return {ok:true,output:stdout.slice(0,48000)}; }
     }
     async function authorized(args, purpose, before=()=>{}) {
-      const risk=builtin&&/^(version|schema|model|voice|auth (status|account)|canvas (current|ls)|node (find|show|quote)|operation (status|wait)|resource get)( |$)/.test(args.join(' '))?'read':'unknown';
+      const joined=args.join(' ');
+      const risk=/^auth login( |$)/.test(joined)?'unsafe':builtin&&/^(version|schema|model|voice|auth (status|account)|canvas (current|ls)|node (find|show|quote)|operation (status|wait)|resource get)( |$)/.test(joined)?'read':'unknown';
       await consent(context,signal,{ risk, title:'工具执行授权', message:`允许 ${service.title} 完成当前任务吗？`, detail:`用途：${purpose}\n执行位置：当前电脑\n工作目录：${cwd}\n程序：${executable}\n当前指令参数：${JSON.stringify(builtin?['--non-interactive','--format','json',...args]:args)}\n\n授权范围由当前对话权限和本次选择决定；实际行为由该程序决定。` }, identity);
       before();return call(args);
     }
@@ -285,7 +285,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     const key=JSON.stringify([context.actorId,context.chatId,service.id,service.target]);
     let session=sessions.get(key);
     const tool=session?.tools?.find(t=>t.name===request.tool);
-    const risk=request.action==='discover'||tool?.annotations?.readOnlyHint===true&&tool?.annotations?.destructiveHint===false?'read':'unknown';
+    const risk=tool?.annotations?.destructiveHint===true?'unsafe':'network';
     await consent(context,signal,{risk,title:'工具执行授权',message:`允许 ${service.title} 完成当前任务吗？`,detail:`服务地址：${url.href}\n当前操作：${request.action==='discover'?'初始化并读取工具目录':request.tool}\n参数：${JSON.stringify(request.arguments??{})}\n授权范围由当前对话权限和本次选择决定。数据将发送给该服务，回执会交给 CPclaw 的模型服务以完成当前任务。服务自身的计费不受即梦积分上限约束。`}, url.href);
     async function rpc(method,params,notification=false) {
       check(context,signal);

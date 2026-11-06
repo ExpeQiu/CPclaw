@@ -3,16 +3,18 @@ import {sanitizeServiceResult} from './service-runtime.mjs';
 const str={type:'string'},num={type:'integer'},flag={type:'boolean'},strings={type:'array',items:str},object={type:'object',additionalProperties:true};
 const titles={list_resources:'查看关联资源',read_resource:'读取关联资料',discover_service:'发现服务能力',read_file:'读取文件',write_file:'写入文件',terminal:'执行终端命令',call_cli:'调用应用',call_mcp:'调用服务工具',deliver_document:'提交文档段落',register_document:'登记已有文档',submit_result:'提交结构化结果',read_tool_result:'读取结果后续内容'};
 const tool=(name,description,properties,required=[])=>({name,title:titles[name]||name,description,parameters:{type:'object',properties,required,additionalProperties:false}});
+/** 问答取证顺序：可访问文件夹 → 已关联知识库 → 互联网补充。 */
+export const answerRetrievalRule='问答时按此顺序取证，前一层已经足够回答就停止，不把没读到的内容说成已查过：1. 先检索本项目可访问文件夹，只用 list_resources 里 project.roots 的路径，通过 read_file 或 read_resource(kind=project)；名单外的路径会被拒绝。没有关联项目则跳过。2. 再检索本聊天已关联的知识库，用 read_resource(kind=knowledge)；没有关联知识库则跳过。3. 前两层仍不够时，才用 terminal 做互联网检索作为补充，并在回答中标明网络来源。没查到就说明未找到，不编造。';
 export const pipelineTools=[
  tool('diagnostic_inspect','只读检查本聊天指定请求；省略 requestId 时检查本轮输入之前的运行。scope 指定关注范围，报告保留完整证据。不重新生成。',{requestId:str,scope:{type:'string',enum:['task','model','services','delivery','environment']}}),
  tool('diagnostic_repair','执行检查返回的宿主动作 actionId；仅恢复已有成果或重装已绑定技能。不能传入权限或任意命令。',{actionId:str},['actionId']),
  tool('diagnostic_verify','按修复 receiptId 回读验证；verified 才表示该项修复通过，不代表整个任务完成。',{receiptId:str},['receiptId']),
  tool('list_resources','列出本聊天显式关联的项目、资料、知识库、技能、成果和可用服务，不授予额外权限。',{}),
- tool('read_resource','读取明确资源；结果按字符偏移分页。history 仅限本聊天；knowledge 的 id 为已关联库 ID，path 为文档 ID。',{kind:{type:'string',enum:['context','history','execution','project','knowledge','skill','document','draft','input','result']},id:str,path:str,offset:num,limit:num},['kind']),
+ tool('read_resource','读取明确资源；结果按字符偏移分页。问答先读 kind=project 的可访问文件夹，再读 kind=knowledge 的已关联知识库。history 仅限本聊天；knowledge 的 id 为已关联库 ID，path 为文档 ID。',{kind:{type:'string',enum:['context','history','execution','project','knowledge','skill','document','draft','input','result']},id:str,path:str,offset:num,limit:num},['kind']),
  tool('discover_service','发现指定服务的实际能力和参数。',{serviceId:str},['serviceId']),
- tool('read_file','通过宿主文件权限读取文件，返回原文及 SHA-256，可用于登记成果快照。',{path:str},['path']),
+ tool('read_file','问答时优先读取本项目可访问文件夹中的文件，返回原文及 SHA-256。路径必须在 project.roots 内。',{path:str},['path']),
  tool('write_file','通过宿主文件权限写入文件。',{path:str,content:str},['path','content']),
- tool('terminal','通过宿主授权执行终端命令；网络访问也可用此工具。',{command:str,cwd:str,timeoutMs:num},['command']),
+ tool('terminal','通过宿主授权执行终端命令。互联网检索只在可访问文件夹和已关联知识库都不够回答时使用，并标明网络来源。',{command:str,cwd:str,timeoutMs:num},['command']),
  tool('call_cli','按已发现 schema 调用指定 CLI；本机终端请使用 terminal。',{serviceId:str,args:strings},['serviceId','args']),
  tool('call_mcp','调用指定 MCP 服务已发现的工具。',{serviceId:str,tool:str,arguments:object},['serviceId','tool','arguments']),
  ...['open','snapshot','click','type','scroll','press'].map(action=>tool('browser_'+action,'按 browser-page 发现结果执行 '+action+'，敏感操作必须由宿主确认。',{serviceId:str,url:str,ref:str,text:str,direction:str,amount:num,key:str},[])),

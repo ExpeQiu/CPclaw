@@ -3,6 +3,12 @@ import { relative } from 'node:path';
 export async function performProjectAction({input,actor,request,isCurrent,dialog,shell,parent}) {
   if(!actor)return {ok:false,message:'请先登录'};
   try {
+    if(input?.action==='pick-folder'){
+      const choice=await dialog.showOpenDialog(parent,{title:'添加可访问文件夹',properties:['openDirectory']});
+      if(choice.canceled||!choice.filePaths[0])return {ok:true,cancelled:true};
+      if(!isCurrent(actor))throw Error('账号已变化');
+      return {ok:true,path:realpathSync(choice.filePaths[0])};
+    }
     if(input?.action==='create'){
       const choice=await dialog.showOpenDialog(parent,{title:'选择项目文件夹',properties:['openDirectory','createDirectory']});
       if(choice.canceled)return {ok:true,cancelled:true};

@@ -3,6 +3,18 @@ import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, lstatSync,
 import { join, dirname, basename, relative, isAbsolute } from 'node:path';
 
 export const documentHash = body => createHash('sha256').update(body).digest('hex');
+/** 把到选定回复为止的对话整理成一份 Markdown。 */
+export function conversationMarkdown(title, messages) {
+  const heading = String(title || '对话').replace(/[#\r\n]/g, ' ').trim().slice(0, 80) || '对话';
+  const lines = [`# ${heading}`, ''];
+  for (const message of messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    const text = String(message.content || '').trim();
+    if (!text) continue;
+    lines.push(`## ${message.role === 'user' ? '你' : 'CPclaw'}`, '', text, '');
+  }
+  return lines.join('\n').trim() + '\n';
+}
 const UUID_FOLDER=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function filename(text, body) {
   const explicit = text.match(/(?:^|[\s"'`：“”])([\p{L}\p{N}_\-][\p{L}\p{N}_\-.]{0,70}\.md)\b/iu)?.[1];
