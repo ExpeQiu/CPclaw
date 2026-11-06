@@ -1,3 +1,4 @@
+import {resolveHarnessBodyLimit} from '@cpclaw/contracts';
 import {modelTransportFailure,transportCode} from './transport-error.js';
 import { inspectHarnessProcess } from "./process-inspection.js";
 import { execFileSync } from "node:child_process";
@@ -219,18 +220,19 @@ export async function cancelHarness(input: {
 export async function harnessGatewayError(response: Response): Promise<Error> {
   const value: unknown = await response.json().catch(() => null);
   const record = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const code = ['QUOTA_EXCEEDED','AUTH_REQUIRED','SESSION_REVOKED','FORBIDDEN','CONFLICT','CONFIG_INVALID','NOT_FOUND','MODEL_OUTPUT_LIMIT'].includes(String(record.code)) ? String(record.code) : '';
+  const code = ['QUOTA_EXCEEDED','AUTH_REQUIRED','SESSION_REVOKED','FORBIDDEN','CONFLICT','CONFIG_INVALID','NOT_FOUND','MODEL_OUTPUT_LIMIT','REQUEST_BODY_TOO_LARGE'].includes(String(record.code)) ? String(record.code) : '';
   let reason = '';
   if(code==='QUOTA_EXCEEDED') reason=record.message==='并发已达上限'?'平台模型并发位已满':record.message==='额度不足'?'平台模型额度不足':'平台模型额度或并发受限';
   else if(['AUTH_REQUIRED','SESSION_REVOKED'].includes(code)) reason='平台登录会话不可用';
   else if(code==='FORBIDDEN') reason='平台权限不足';
+  else if(code==='REQUEST_BODY_TOO_LARGE'||response.status===413) reason='请求上下文超过平台传输上限；原任务及草稿保留，请调整传输配置或缩减上下文后续接';
   else if(response.status===429) reason='请求受限，请核实平台模型额度与并发';
   const retryAfter=Number(response.headers.get('retry-after'));
   return Object.assign(new Error(`远程 Harness 网关返回 ${response.status}${reason?'：'+reason:''}${code?'（'+code+'）':''}`),{
     httpStatus:response.status,platformCode:code,
     diagnostic:record.diagnostic,
     ...(code==='MODEL_OUTPUT_LIMIT'&&typeof record.checkpoint==='string'&&record.checkpoint.length<=128000?{checkpoint:record.checkpoint}:{}),
-    ...(code==='MODEL_OUTPUT_LIMIT'?{code}:{}),
+    ...(code==='MODEL_OUTPUT_LIMIT'||code==='REQUEST_BODY_TOO_LARGE'||response.status===413?{code:response.status===413?'REQUEST_BODY_TOO_LARGE':code}:{}),
     ...(Number.isFinite(retryAfter)&&retryAfter>0?{retryAfterSeconds:retryAfter}:{}),
   });
 }
@@ -251,6 +253,7 @@ export async function runReportLoop(input: {
   service?: { context: string; execute: (request: string) => Promise<string> };
 }): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean | null; cleanupWarning?: { code: string; message: string };handoff?:boolean }> {
   const budget = input.service||input.pipeline ? serviceModelBudget() : null;
+  const pipelineBodyLimit=resolveHarnessBodyLimit(process.env.CPCLAW_HARNESS_MAX_BODY_BYTES);
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
   const { mkdtempSync } = await import("node:fs");
@@ -293,9 +296,10 @@ export async function runReportLoop(input: {
       let charged = false;let idleTimer:ReturnType<typeof setTimeout>|undefined;
       const idleAbort=new AbortController();const touch=()=>{if(input.pipeline){clearTimeout(idleTimer);idleTimer=setTimeout(()=>idleAbort.abort(Error('模型连续未返回数据，连接已中止')),input.pipeline.idleMs??70000);idleTimer.unref?.();}};
       try {touch();
-        let raw = "";
-        for await (const chunk of req) { raw += String(chunk); if (Buffer.byteLength(raw) > (input.pipeline ? 2_000_000 : input.service ? 240_000 : 16_000)) throw new Error("模型上下文超过验证上限"); }
-        const body: unknown = JSON.parse(raw);
+        const chunks:Buffer[]=[];let requestBytes=0;
+        const requestLimitBytes=input.pipeline?pipelineBodyLimit:input.service?240_000:16_000;
+        for await (const chunk of req) {requestBytes+=chunk.length;if(requestBytes>requestLimitBytes)throw Object.assign(Error('请求上下文超过本机传输上限；已有任务和草稿保留'),{code:'REQUEST_BODY_TOO_LARGE',diagnostic:{code:'REQUEST_BODY_TOO_LARGE',stage:'platform_validate',httpStatus:413,requestBytes,requestLimitBytes}});chunks.push(chunk);}
+        const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if(input.service&&input.shouldFinalize?.()){
           handoff=true;res.writeHead(200,{'content-type':'text/event-stream'});
           res.end('data: '+JSON.stringify({id:'cpclaw-handoff',object:'chat.completion.chunk',model:'MiniMax-M3',choices:[{index:0,delta:{role:'assistant',content:'资料收集阶段结束，交由宿主完成分段交付。'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');return;
@@ -303,11 +307,12 @@ export async function runReportLoop(input: {
         if (modelCalls >= (budget?.limit ?? 8)) throw Error("模型步骤达到上限，请继续当前任务");
         input.beforeCall(); charged = true; modelCalls++;
         modelRequestId=`loop-${randomUUID()}`;fetchStarted=true;
+        const forwardedBody=JSON.stringify(budget&&!input.pipeline ? prepareServiceCompletion(body, modelCalls - 1, budget) : body);
         const response = await fetch(`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
           method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": modelRequestId,"x-cpclaw-harness-final":"v1",...(input.pipeline?{"x-cpclaw-pipeline":"v1"}:{}),"x-trace-id":input.traceId||modelRequestId,"x-parent-request-id":input.parentRequestId||"","x-chat-id":input.chatId||"","x-harness-session-id":input.sessionId||"" },
-          body: JSON.stringify(budget&&!input.pipeline ? prepareServiceCompletion(body, modelCalls - 1, budget) : body), signal: AbortSignal.any([input.signal,idleAbort.signal]),
+          body: forwardedBody, signal: AbortSignal.any([input.signal,idleAbort.signal]),
         });
-        try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,traceId:input.traceId||modelRequestId});}catch{ /* Diagnostic observers do not control execution. */ }
+        try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,traceId:input.traceId||modelRequestId,requestBytes:Buffer.byteLength(forwardedBody)});}catch{ /* Diagnostic observers do not control execution. */ }
         if (!response.ok) {const failure=await harnessGatewayError(response);const checkpoint=Reflect.get(failure,'checkpoint');if(typeof checkpoint==='string'&&!input.pipeline)input.onFinalDraft?.(checkpoint);try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,diagnostic:Reflect.get(failure,'diagnostic')});}catch{}throw failure;}
         networkStage='model_stream';
         if(input.pipeline&&response.body){

@@ -19,3 +19,5 @@ export type { CatalogService, ServiceType } from './service-catalog.js';
 export { checkSkill, checkSkillOutput, compareSkillVersions, readSkillMetadata, skillFiles, skillInstruction, skillVersionPattern } from './market.js';
 export type { MarketItem, SkillCheck, SkillDependency, SkillExample, SkillFile, SkillInput, SkillMetadata } from './market.js';
 export { skillPackage } from './market.js';
+
+export {resolveHarnessBodyLimit,DEFAULT_HARNESS_BODY_BYTES} from './harness-budget.js';

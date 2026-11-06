@@ -1,7 +1,7 @@
 import type {TokenUsage} from '@cpclaw/contracts';
 /** Metadata only: never persist prompts, tool arguments, headers or provider error bodies. */
 export type RequestDiagnostic = {
-  transportCode?: string; code: string; stage: string; outcome: string; model: string; durationMs: number;
+  requestBytes?: number; requestLimitBytes?: number; transportCode?: string; code: string; stage: string; outcome: string; model: string; durationMs: number;
   httpStatus: number; providerRequestId: string; finishReason: string; sawDone: boolean;
   normalEof: boolean; chunks: number; responseBytes: number; textChars: number; reasoningChars?: number;
   toolName: string; toolArgumentBytes: number; toolJsonValid: boolean | null;
@@ -35,7 +35,7 @@ export function cleanRequestDiagnostic(value: unknown): Partial<RequestDiagnosti
   for(const key of ['code','stage','outcome','model','providerRequestId','finishReason','toolName']){
     const v=input[key];if(typeof v==='string'&&/^[A-Za-z0-9._:-]{0,128}$/.test(v))out[key]=v;
   }
-  for(const key of ['durationMs','httpStatus','chunks','responseBytes','textChars','reasoningChars','toolArgumentBytes','lastDataAgeMs','outputLimit']){
+  for(const key of ['durationMs','httpStatus','chunks','responseBytes','textChars','reasoningChars','toolArgumentBytes','lastDataAgeMs','outputLimit','requestBytes','requestLimitBytes']){
     const v=input[key];if(typeof v==='number'&&Number.isFinite(v)&&v>=0)out[key]=v;
   }
   for(const key of ['sawDone','normalEof','toolJsonValid']){const v=input[key];if(typeof v==='boolean'||key==='toolJsonValid'&&v===null)out[key]=v;}

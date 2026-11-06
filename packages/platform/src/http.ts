@@ -1,3 +1,4 @@
+import {resolveHarnessBodyLimit,DEFAULT_HARNESS_BODY_BYTES} from '@cpclaw/contracts';
 import {requestTraces} from './request-traces.js';
 import {randomUUID} from 'node:crypto';
 import {HarnessFinalCheckpointError,errorMetadata,RequestDiagnosticError,type RequestDiagnostic} from '@cpclaw/model-gateway';
@@ -16,6 +17,9 @@ import { checkReport, SERVICE_TYPES, invalidCatalogReason } from "@cpclaw/contra
 const traceStores = new WeakMap<PlatformApp,ReturnType<typeof requestTraces>>();
 const loginGuards = new WeakMap<PlatformApp, LoginGuard>();
 const MAX_BODY = 16_384;
+class BodyTooLargeError extends Error {
+  constructor(readonly receivedBytes:number,readonly limitBytes:number){super('BODY_TOO_LARGE');}
+}
 /** 平台接受的应用服务类型白名单；桌面端按此裁剪服务目录，避免整轮对话被 400 拒绝。 */
 const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 
@@ -102,17 +106,19 @@ function bearer(req: IncomingMessage): string | undefined {
 function readBody(req: IncomingMessage, maxBody = MAX_BODY): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    let size = 0;
+    let size = 0, exceeded = false;
     req.on("data", (chunk: Buffer) => {
+      if(exceeded)return;
       size += chunk.length;
       if (size > maxBody) {
-        reject(new Error("BODY_TOO_LARGE"));
-        req.destroy();
+        exceeded=true;chunks.length=0;
+        reject(new BodyTooLargeError(size,maxBody));
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
+      if(exceeded)return;
       if (size === 0) {
         resolve({});
         return;
@@ -177,11 +183,12 @@ function modelField(body: Record<string, unknown>): { ok: true; model?: string }
 
 export function listenPlatform(
   app: PlatformApp,
-  options: { port: number; dataDir: string; listenHost?: string; reportGateway?: RealGatewayConfig; aiMockMode?: boolean },
+  options: { port: number; dataDir: string; listenHost?: string; reportGateway?: RealGatewayConfig; aiMockMode?: boolean; harnessMaxBodyBytes?: number },
 ): Promise<{ port: number; close: () => Promise<void> }> {
+  const harnessMaxBody=resolveHarnessBodyLimit(options.harnessMaxBodyBytes??process.env.CPCLAW_HARNESS_MAX_BODY_BYTES);
   const listenHost = options.listenHost ?? "127.0.0.1";
   const server = createServer((req, res) => {
-    void handle(app, options.dataDir, req, res, options.reportGateway, options.aiMockMode ?? true);
+    void handle(app, options.dataDir, req, res, options.reportGateway, options.aiMockMode ?? true,harnessMaxBody);
   });
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
@@ -215,7 +222,7 @@ export function listenPlatform(
   });
 }
 
-async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, res: ServerResponse, reportGateway?: RealGatewayConfig, aiMockMode = true): Promise<void> {
+async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, res: ServerResponse, reportGateway?: RealGatewayConfig, aiMockMode = true,harnessMaxBody=DEFAULT_HARNESS_BODY_BYTES): Promise<void> {
   let requestId = readRequestId(req.headers["x-request-id"]);
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const path = url.pathname;
@@ -233,6 +240,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         mode: aiMockMode ? "mock" : "real",
         aiMockMode,
         serviceTypes: ALLOWED_SERVICE_TYPES,
+        harnessMaxBodyBytes:harnessMaxBody,
       });
       return;
     }
@@ -252,7 +260,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       res.end(html);
       return;
     }
-    const body = req.method === "POST" ? objectOf(await readBody(req, path === "/v1/diagnostics" ? 524_288 : path === "/v1/harness/completions" || path === "/v1/chat/stream" || path === "/v1/market" || path === "/v1/knowledge" ? 262_144 : MAX_BODY)) : {};
+    const body = req.method === "POST" ? objectOf(await readBody(req, path === "/v1/harness/completions" ? harnessMaxBody : path === "/v1/diagnostics" ? 524_288 : path === "/v1/chat/stream" || path === "/v1/market" || path === "/v1/knowledge" ? 262_144 : MAX_BODY)) : {};
     if(typeof body?.requestId==='string')requestId=readRequestId(body.requestId)||requestId;
     if (body === undefined) {
       sendFailure(res, { ok: false, code: "CONFIG_INVALID", message: "请求体必须是 JSON 对象" });
@@ -714,6 +722,10 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
     platformLog(dataDir, "info", "not_found", "拒绝未知路径", { method: req.method ?? "" }, requestId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "请求失败";
+    if(error instanceof BodyTooLargeError&&!res.headersSent){
+      platformLog(dataDir,'warn','request_body_rejected','请求体超过传输上限',{receivedBytes:error.receivedBytes,limitBytes:error.limitBytes},requestId);
+      sendJson(res,413,{ok:false,code:'REQUEST_BODY_TOO_LARGE',message:'请求上下文超过平台传输上限，原任务及已有成果保留；请缩减上下文或调整平台传输配置',diagnostic:{code:'REQUEST_BODY_TOO_LARGE',stage:'platform_validate',outcome:'rejected',httpStatus:413,requestBytes:error.receivedBytes,requestLimitBytes:error.limitBytes}});return;
+    }
     if (!res.headersSent) {
       sendFailure(res, { ok: false, code: "CONFIG_INVALID", message: message === "BODY_TOO_LARGE" ? "请求体过大" : "请求体无法解析" });
     }

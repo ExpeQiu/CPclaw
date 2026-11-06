@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-06",
+  "scope": "source and controlled validation only",
+  "changes": {
+    "sharedDefaultBytes": 8388608,
+    "configuration": "CPCLAW_HARNESS_MAX_BODY_BYTES",
+    "allowedRangeBytes": [
+      262144,
+      33554432
+    ],
+    "overLimit": "HTTP 413 / REQUEST_BODY_TOO_LARGE",
+    "tokenWindowChanged": false,
+    "userDraftsChanged": false
+  },
+  "checks": [
+    {
+      "command": "pnpm build",
+      "result": "passed"
+    },
+    {
+      "command": "node --test packages/platform/test/harness-body-budget.test.mjs packages/harness-adapter/test/context-body.test.mjs",
+      "passed": 4,
+      "failed": 0,
+      "covers": [
+        "UTF8 context above old256KiB reaches upstream intact",
+        "chunked oversized upload gets JSON413 with no model call",
+        "server usable after rejection",
+        "proxy UTF8 chunk boundaries",
+        "request byte evidence",
+        "safe413classification"
+      ]
+    },
+    {
+      "command": "node --test apps/desktop/test/context-budget-resume.test.mjs apps/desktop/test/diagnostic-tools.test.mjs apps/desktop/test/unified-harness.test.mjs apps/desktop/test/task-issue.test.mjs packages/contracts/test/harness-budget.test.mjs",
+      "passed": 20,
+      "failed": 0,
+      "covers": [
+        "same session draft continuation",
+        "exact full document and single publication",
+        "visible413details",
+        "existing diagnostics and unified pipeline",
+        "bounded configuration"
+      ]
+    },
+    {
+      "command": "bash scripts/verify.sh",
+      "result": "passed after test-boundary correction",
+      "note": "initial static boundary check rejected direct adapter import in desktop test; adapter conversion is now tested in adapter suite, desktop test injects bridge error via existing fixture seam; no scanner modification"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "notPerformed": [
+    "production deployment",
+    "installed app replacement",
+    "real model acceptance",
+    "signed package validation"
+  ],
+  "rolloutOrder": [
+    "platform first",
+    "desktop next",
+    "existing user explicitly resumes draft through native session"
+  ]
+}

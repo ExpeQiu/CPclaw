@@ -25,7 +25,8 @@ function runTerminal(program,args,{cwd,env,signal,timeout,maxBuffer}) {
   });
 }
 export const localService={id:'local-terminal',title:'本机文件与终端',type:'CLI',target:process.platform==='win32'?'powershell.exe':'/bin/zsh',builtin:true};
-const inProject=(root,path)=>{if(!root)return false;const rel=relative(realpathSync(root),path);return rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('../');};
+const inside=(root,path)=>{if(!root)return false;try{const rel=relative(realpathSync(root),path);return rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('../');}catch{return false;}};
+const insideAny=(roots,path)=>(roots||[]).some(root=>inside(root,path));
 export async function executeLocalTool({context,request,signal,authorize,run=runTerminal}) {
   signal.throwIfAborted();
   const cwd=realpathSync(resolve(context.workingDirectory||homedir(),request.cwd||'.'));
@@ -41,7 +42,9 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
     let path;try{path=realpathSync(candidate);}catch(e){if(e.code!=='ENOENT'||request.action!=='write_file')throw e;path=resolve(realpathSync(dirname(candidate)),basename(candidate));}
     const reading=request.action==='read_file';
     if(!reading&&(typeof request.content!=='string'||Buffer.byteLength(request.content)>512000))throw Error('文件正文需要是 512KB 以内的文本');
-    await authorize({risk:reading&&inProject(context.projectRoot,path)?'read':reading?'external-read':'write',title:reading?'读取本机文件':'写入本机文件',message:`${reading?'读取':'写入'} ${path}`,detail:`文件：${path}\n${reading?'读取内容会提供给模型，用于当前任务。':`将写入 ${Buffer.byteLength(request.content)} 字节；已有内容会被覆盖。`}`});
+    const trusted=inside(context.projectRoot,path)||insideAny(context.preferredRoots,path);
+    const remembered=!reading&&insideAny(context.preferredRoots,path);
+    await authorize({risk:reading&&trusted?'read':reading?'external-read':remembered?'preferred':'write',title:reading?'读取本机文件':'写入本机文件',message:`${reading?'读取':'写入'} ${path}`,detail:`文件：${path}\n${reading?'读取内容会提供给模型，用于当前任务。':remembered?'该文件夹已在优先访问位置中，写入会按已记住的范围执行。':`将写入 ${Buffer.byteLength(request.content)} 字节；已有内容会被覆盖。`}`});
     signal.throwIfAborted();
     if(reading){const st=statSync(path);if(!st.isFile()||st.size>512000)throw Error('只支持 512KB 以内的普通文本文件');return {ok:true,path,content:readFileSync(path,'utf8')};}
     writeFileSync(path,request.content,'utf8');
@@ -51,7 +54,7 @@ export async function executeLocalTool({context,request,signal,authorize,run=run
   if(request.action!=='terminal'||typeof request.command!=='string'||!request.command.trim()||request.command.length>32000||request.command.includes('\0'))throw Error('终端请求需要有效的 command 字符串；请使用顶层字段，例如 {"action":"terminal","command":"pwd"}，不要将 command 放入 args。');
   const timeout=request.timeoutMs??60000;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>300000)throw Error('终端超时范围为 100–300000 毫秒');
-  await authorize({risk:request.command.trim()==='pwd'&&inProject(context.projectRoot,cwd)?'read':'unknown',title:'终端执行授权',message:request.purpose||'执行当前任务的终端命令',detail:`工作目录：${cwd}\n命令：\n${request.command}\n超时：${timeout} 毫秒\n命令可以读取或修改本机文件并访问网络。`});
+  await authorize({risk:request.command.trim()==='pwd'&&inside(context.projectRoot,cwd)?'read':'unknown',title:'终端执行授权',message:request.purpose||'执行当前任务的终端命令',detail:`工作目录：${cwd}\n命令：\n${request.command}\n超时：${timeout} 毫秒\n命令可以读取或修改本机文件并访问网络。优先访问位置不包含终端命令。`});
   signal.throwIfAborted();
   const program=process.platform==='win32'?'powershell.exe':'/bin/zsh';
   const args=process.platform==='win32'?['-NoProfile','-NonInteractive','-Command',request.command]:['-c',request.command];

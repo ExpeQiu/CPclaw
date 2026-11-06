@@ -1,0 +1,14 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';import {join} from 'node:path';
+import {runReportLoop,harnessGatewayError} from '../dist/index.js';
+test('local Harness proxy preserves UTF-8 split across upload chunks and records request bytes',async t=>{
+ const root=mkdtempSync('/tmp/cpclaw-context-body-'),sdk=join(root,'node_modules/@deepseek-ai/dsh-sdk-client/lib');mkdirSync(sdk,{recursive:true});
+ writeFileSync(join(sdk,'index.js'),`const fs=require('fs'),http=require('http');exports.DeepSeekHarness=class{constructor(o){this.o=o;}async run(){const base=fs.readFileSync(this.o.dshHome+'/settings.yaml','utf8').match(/baseURL: (.+)\\/v1/)[1];const raw=Buffer.from(JSON.stringify({messages:[{role:'user',content:'资料'.repeat(70000)}]}));await new Promise((resolve,reject)=>{const req=http.request(base+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+this.o.env.CPCLAW_LOOP_KEY}},res=>{res.resume();res.on('end',resolve);});req.on('error',reject);for(let n=0;n<raw.length;n+=65535)req.write(raw.subarray(n,n+65535));req.end();});return {finalResponse:'ok'};}async close(){}};`);
+ const before=process.env.CPCLAW_HARNESS_BUNDLE,original=globalThis.fetch,records=[];let content='';process.env.CPCLAW_HARNESS_BUNDLE=root;
+ t.mock.method(globalThis,'fetch',(url,...args)=>{if(String(url).startsWith('http://budget-fixture.invalid')){content=JSON.parse(args[0].body).messages[0].content;return Promise.resolve(new Response('data: '+JSON.stringify({choices:[{delta:{content:'ok'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}));}return original(url,...args);});
+ try{const r=await runReportLoop({homeParent:root,platformBase:'http://budget-fixture.invalid',accessToken:'fixture',goal:'test',materials:[],signal:new AbortController().signal,beforeCall(){},unknownUsage(){},pipeline:{context:'fixture',tools:[],execute:async()=>({ok:true})},onDiagnostic:r=>records.push(r)});assert.equal(r.finalResponse,'ok');assert.equal(content.length,140000);assert.equal(content,'资料'.repeat(70000));assert(records.some(r=>r.requestBytes>262144));}
+ finally{if(before===undefined)delete process.env.CPCLAW_HARNESS_BUNDLE;else process.env.CPCLAW_HARNESS_BUNDLE=before;rmSync(root,{recursive:true,force:true});}
+});
+test('HTTP 413 carries an explicit non-network code without echoing arbitrary platform bodies',async()=>{
+ const e=await harnessGatewayError(Response.json({code:'REQUEST_BODY_TOO_LARGE',message:'secret-is-not-displayable',diagnostic:{code:'REQUEST_BODY_TOO_LARGE',stage:'platform_validate',httpStatus:413,requestLimitBytes:8388608}},{status:413}));assert.equal(e.code,'REQUEST_BODY_TOO_LARGE');assert.equal(e.httpStatus,413);assert.match(e.message,/传输/);assert(!e.message.includes('secret-is-not-displayable'));
+});

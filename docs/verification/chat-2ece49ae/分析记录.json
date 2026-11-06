@@ -1,0 +1,44 @@
+{
+  "chatId": "2ece49ae-6796-4b9d-985c-0b373af89f7d",
+  "appVersion": "0.0.45",
+  "requestId": "95b32009-9efe-4160-b5fc-6684c757146d",
+  "date": "2026-11-06",
+  "timezone": "Asia/Shanghai",
+  "timeline": [
+    {
+      "time": "17:38:59.465",
+      "event": "归档请求开始"
+    },
+    {
+      "time": "17:39:16.231",
+      "event": "第1次模型调用成功",
+      "inputTokens": 68730,
+      "outputTokens": 1593
+    },
+    {
+      "time": "17:39:16.180—17:39:16.186",
+      "event": "deliver_document part=0写入草稿",
+      "chars": 3650,
+      "committed": false
+    },
+    {
+      "time": "17:39:18.287",
+      "event": "桌面记录MODEL_CONNECTION_FAILED / UND_ERR_SOCKET"
+    },
+    {
+      "time": "17:39:18.320",
+      "event": "同一模型请求平台记录HTTP 400"
+    }
+  ],
+  "failedModelRequestId": "loop-265aa896-3c1f-4279-9081-45a807a3bfeb",
+  "draft": {
+    "filename": "CPclaw 与 TPCstore 项目熟悉报告.md",
+    "parts": 1,
+    "chars": 3650,
+    "complete": false,
+    "publishedDocuments": 0
+  },
+  "conclusion": "平台请求体超限为高置信度推断：256KiB限制仍在；错误组合与已受控复现路径一致；失败原始HTTP请求体未保留，不能宣称精确实测请求字节。模型上下文未达到内核声明的262144token容量。",
+  "causeOfDraft": "第一段committed=false保存成功，第二次模型请求失败，未继续追加或原子发布。",
+  "mutations": "本次仅只读分析及保存验收证据；未修改代码、原对话、草稿或生产服务。"
+}

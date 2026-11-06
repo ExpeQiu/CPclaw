@@ -15,5 +15,5 @@ export function createConversationPermissions() {
   };
 }
 export function canAutoApprove(permission, risk, cost = 0) {
-  return cost===0 && (permission.mode==='full' || permission.mode==='auto' && risk==='read');
+  return cost===0 && (permission.mode==='full' || permission.mode==='auto' && (risk==='read' || risk==='preferred'));
 }
