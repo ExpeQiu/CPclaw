@@ -119,7 +119,7 @@ HTTP 有限重试只适用于确认未受理或具备已验证幂等保证的请
 | M3 | `packages/harness-adapter/src/index.ts` shouldFinalize 合成答复；`loop-budget.ts` 注入收尾 system 指令 | 保留显式硬限额和结构化错误，删除宿主业务收尾决策 |
 | M3 | `apps/desktop/renderer/chat.js` 自然语言短语映射重试；`chat-service.mjs` 按相同参数缓存成功回执 | 文本由内核理解；恢复命令和同次调用的去重独立建模 |
 | M4 | `knowledge-service.mjs`、`project-wiki.mjs`、`learning-flow.mjs`、聊天诊断/Skill 提炼等入口 | 清点语义作业调用点，统一 Harness；不改变原有授权与人工审核 |
-| M4 | 平台 `/v1/chat/stream` 和 `/v1/harness/completions` 各自的工具/结束原因业务处理 | 用户任务只保留内核调用链；平台模型代理保留认证、额度、协议与诊断，旧协议待消费者迁完再退役 |
+| M4 | 平台 `/v1/chat/stream` 和 `/v1/harness/completions` 各自的工具/结束原因业务处理 | 桌面在登录时领取 `/v1/me/model-access` 并直连 MiniMax；本机按账号累计用量，阀值用尽后申请新阀值并重新核对授权。平台保留登录和旧代理，不再接收这条链路的对话正文 |
 
 实施先建立单会话普通消息闭环和文档工具，再移除旧路由与补丁；不能先删除保护却留下没有接收者的工具结果。旧聊天没有完整内核历史时，不把宿主拼接摘要当作已恢复：保留旧记录，明确选择有序原文导入的迁移方案并去重，或让用户显式建立新聊天。不静默合并不同聊天或复制敏感历史。
 

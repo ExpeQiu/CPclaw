@@ -1,8 +1,8 @@
-import {resolveHarnessBodyLimit} from '@cpclaw/contracts';
+import {createLogEvent,readTokenUsage,resolveHarnessBodyLimit} from '@cpclaw/contracts';
 import {modelTransportFailure,transportCode} from './transport-error.js';
 import { inspectHarnessProcess } from "./process-inspection.js";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -249,6 +249,9 @@ export async function runReportLoop(input: {
   onDelta?: (text:string)=>void;
   onDiagnostic?: (record: Record<string, unknown>) => void;
   goal: string; materials: { fileName: string; paragraphs: { id: string; text: string }[] }[];
+  /** 已获云端授权时，内核请求直连供应商，不再把对话正文交给平台。 */
+  directModel?: { baseUrl: string; apiKey: string };
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
   signal: AbortSignal; beforeCall: () => void; unknownUsage: () => void;
   service?: { context: string; execute: (request: string) => Promise<string> };
 }): Promise<{ finalResponse: string; toolCalls: number; modelCalls: number; childCommandSeenAfterClose: boolean | null; cleanupWarning?: { code: string; message: string };handoff?:boolean }> {
@@ -297,8 +300,13 @@ export async function runReportLoop(input: {
       const idleAbort=new AbortController();const touch=()=>{if(input.pipeline){clearTimeout(idleTimer);idleTimer=setTimeout(()=>idleAbort.abort(Error('模型连续未返回数据，连接已中止')),input.pipeline.idleMs??70000);idleTimer.unref?.();}};
       try {touch();
         const chunks:Buffer[]=[];let requestBytes=0;
-        const requestLimitBytes=input.pipeline?pipelineBodyLimit:input.service?240_000:16_000;
-        for await (const chunk of req) {requestBytes+=chunk.length;if(requestBytes>requestLimitBytes)throw Object.assign(Error('请求上下文超过本机传输上限；已有任务和草稿保留'),{code:'REQUEST_BODY_TOO_LARGE',diagnostic:{code:'REQUEST_BODY_TOO_LARGE',stage:'platform_validate',httpStatus:413,requestBytes,requestLimitBytes}});chunks.push(chunk);}
+        const requestLimitBytes=pipelineBodyLimit;
+        for await (const chunk of req) {requestBytes+=chunk.length;if(requestBytes<=requestLimitBytes)chunks.push(chunk);}
+        if(requestBytes>requestLimitBytes){
+          const created=createLogEvent({timestamp:new Date().toISOString(),level:'warn',service:'cpclaw-harness-adapter',event:'harness_body_rejected',message:'请求上下文超过本机传输上限',fields:{requestBytes,requestLimitBytes,chatId:input.chatId||'',sessionId:input.sessionId||''}});
+          process.stderr.write(`${JSON.stringify(created.ok?created.event:{level:'error',event:'log_rejected',message:created.ok?'':created.message})}\n`);
+          throw Object.assign(Error('请求上下文超过本机传输上限；已有任务和草稿保留'),{code:'REQUEST_BODY_TOO_LARGE',diagnostic:{code:'REQUEST_BODY_TOO_LARGE',stage:'platform_validate',httpStatus:413,requestBytes,requestLimitBytes}});
+        }
         const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if(input.service&&input.shouldFinalize?.()){
           handoff=true;res.writeHead(200,{'content-type':'text/event-stream'});
@@ -307,28 +315,32 @@ export async function runReportLoop(input: {
         if (modelCalls >= (budget?.limit ?? 8)) throw Error("模型步骤达到上限，请继续当前任务");
         input.beforeCall(); charged = true; modelCalls++;
         modelRequestId=`loop-${randomUUID()}`;fetchStarted=true;
-        const forwardedBody=JSON.stringify(budget&&!input.pipeline ? prepareServiceCompletion(body, modelCalls - 1, budget) : body);
-        const response = await fetch(`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
-          method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": modelRequestId,"x-cpclaw-harness-final":"v1",...(input.pipeline?{"x-cpclaw-pipeline":"v1"}:{}),"x-trace-id":input.traceId||modelRequestId,"x-parent-request-id":input.parentRequestId||"","x-chat-id":input.chatId||"","x-harness-session-id":input.sessionId||"" },
+        const prepared=budget&&!input.pipeline ? prepareServiceCompletion(body, modelCalls - 1, budget) : body;
+        const direct=input.directModel;
+        const forwardedBody=JSON.stringify(direct&&prepared&&typeof prepared==='object'?{...prepared,stream:true,stream_options:{include_usage:true}}:prepared);
+        const response = await fetch(direct?`${direct.baseUrl.replace(/\/$/, "")}/chat/completions`:`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
+          method: "POST", headers: direct?{ authorization: `Bearer ${direct.apiKey}`, "content-type": "application/json" }:{ authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": modelRequestId,"x-cpclaw-harness-final":"v1",...(input.pipeline?{"x-cpclaw-pipeline":"v1"}:{}),"x-trace-id":input.traceId||modelRequestId,"x-parent-request-id":input.parentRequestId||"","x-chat-id":input.chatId||"","x-harness-session-id":input.sessionId||"" },
           body: forwardedBody, signal: AbortSignal.any([input.signal,idleAbort.signal]),
         });
         try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,traceId:input.traceId||modelRequestId,requestBytes:Buffer.byteLength(forwardedBody)});}catch{ /* Diagnostic observers do not control execution. */ }
-        if (!response.ok) {const failure=await harnessGatewayError(response);const checkpoint=Reflect.get(failure,'checkpoint');if(typeof checkpoint==='string'&&!input.pipeline)input.onFinalDraft?.(checkpoint);try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,diagnostic:Reflect.get(failure,'diagnostic')});}catch{}throw failure;}
+        if (!response.ok) {if(direct){const failure=Object.assign(Error(response.status===429?'模型额度或并发受限':'模型服务拒绝了本次请求'),{code:response.status===429?'QUOTA_EXCEEDED':'MODEL_CONNECTION_FAILED',diagnostic:{code:response.status===429?'QUOTA_EXCEEDED':'MODEL_CONNECTION_FAILED',stage:'model_connect',httpStatus:response.status}});try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,diagnostic:failure.diagnostic});}catch{}throw failure;}const failure=await harnessGatewayError(response);const checkpoint=Reflect.get(failure,'checkpoint');if(typeof checkpoint==='string'&&!input.pipeline)input.onFinalDraft?.(checkpoint);try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,diagnostic:Reflect.get(failure,'diagnostic')});}catch{}throw failure;}
         networkStage='model_stream';
+        let knownUsage:{inputTokens:number;outputTokens:number}|undefined;
+        const noteUsage=(value:unknown)=>{const next=readTokenUsage(value);if(next.state==='known')knownUsage={inputTokens:next.inputTokens,outputTokens:next.outputTokens};};
         if(input.pipeline&&response.body){
           res.writeHead(200,{'content-type':'text/event-stream'});const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',finish='';let textChars=0;
           try{while(true){const part=await reader.read();if(part.value){touch();if(!res.write(part.value))await new Promise<void>((resolve,reject)=>{const cleanup=()=>{res.off('drain',done);res.off('close',closed);};const done=()=>{cleanup();resolve();};const closed=()=>{cleanup();reject(Error('内核模型通道关闭'));};res.once('drain',done);res.once('close',closed);});}
-            buffer+=decoder.decode(part.value,{stream:!part.done});let at;while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at).trim();buffer=buffer.slice(at+1);if(line.startsWith('data:')&&line.slice(5).trim()!=='[DONE]'){const item=JSON.parse(line.slice(5)),choice=item.choices?.[0];if(typeof choice?.delta?.content==='string'){const text=choice.delta.content;textChars+=text.length;input.onDelta?.(text);}if(choice?.finish_reason)finish=choice.finish_reason;}}
+            buffer+=decoder.decode(part.value,{stream:!part.done});let at;while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at).trim();buffer=buffer.slice(at+1);if(line.startsWith('data:')&&line.slice(5).trim()!=='[DONE]'){const item=JSON.parse(line.slice(5)),choice=item.choices?.[0];noteUsage(item.usage);if(typeof choice?.delta?.content==='string'){const text=choice.delta.content;textChars+=text.length;input.onDelta?.(text);}if(choice?.finish_reason)finish=choice.finish_reason;}}
             if(part.done)break;}
           }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
-          lastModelFinish=finish;input.onDiagnostic?.({requestId:modelRequestId,diagnostic:{code:finish==='length'?'MODEL_OUTPUT_LIMIT':'',stage:'model_stream',finishReason:finish,textChars}});res.end();
-        }else{const text = await response.text();res.writeHead(200, { "content-type": "text/event-stream" }); res.end(text);}
+          lastModelFinish=finish;if(knownUsage)input.onUsage?.(knownUsage);input.onDiagnostic?.({requestId:modelRequestId,diagnostic:{code:finish==='length'?'MODEL_OUTPUT_LIMIT':'',stage:'model_stream',finishReason:finish,textChars}});res.end();
+        }else{const text = await response.text();for(const line of text.split('\n'))if(line.startsWith('data:')&&line.slice(5).trim()!=='[DONE]'){try{noteUsage(JSON.parse(line.slice(5)).usage);}catch{ /* 用量缺失时保持未知。 */ }}if(knownUsage)input.onUsage?.(knownUsage);res.writeHead(200, { "content-type": "text/event-stream" }); res.end(text);}
       } catch (error) {
         if (charged) input.unknownUsage();
         fatal = input.signal.aborted?input.signal.reason:idleAbort.signal.aborted?Object.assign(Error('模型连续未返回数据，连接已中止；已保存的文件和回执保留。'),{code:'MODEL_STREAM_TIMEOUT',diagnostic:{code:'MODEL_STREAM_TIMEOUT',stage:networkStage,outcome:'error'}}):fetchStarted&&(error instanceof TypeError||transportCode(error))?modelTransportFailure(error,networkStage):error;
         const diagnostic=fatal&&typeof fatal==='object'?Reflect.get(fatal,'diagnostic'):undefined;
         if(diagnostic)try{input.onDiagnostic?.({requestId:modelRequestId,modelCall:modelCalls,diagnostic});}catch{};
-        if(!res.headersSent){res.writeHead(502);res.end();}else res.destroy();
+        if(!res.headersSent){const failure=fatal!==null&&typeof fatal==='object'?fatal:{};const code=Reflect.get(failure,'code');if(code==='REQUEST_BODY_TOO_LARGE'){res.writeHead(413,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,code,message:failure instanceof Error?failure.message:'请求上下文超过本机传输上限',diagnostic:Reflect.get(failure,'diagnostic')}));}else{res.writeHead(502);res.end();}}else res.destroy();
         void harness?.close().catch(() => undefined);
       }finally{clearTimeout(idleTimer);}
     })().catch(() => { res.destroy(); });
@@ -337,7 +349,9 @@ export async function runReportLoop(input: {
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("本地工具网关没有端口");
   const base = `http://127.0.0.1:${address.port}`;
-  writeFileSync(join(homeDir, "settings.yaml"), `llm-pi-ai:\n  providers:\n    cpclaw-real:\n      apiKeyEnv: CPCLAW_LOOP_KEY\n      api: openai-completions\n      baseURL: ${base}/v1\n      models:\n        - id: MiniMax-M3\n`);
+  const providerBase=input.directModel?input.directModel.baseUrl.replace(/\/$/,''):`${base}/v1`;
+  const modelKeyEnv=input.directModel?'CPCLAW_MODEL_KEY':'CPCLAW_LOOP_KEY';
+  writeFileSync(join(homeDir, "settings.yaml"), `llm-pi-ai:\n  providers:\n    cpclaw-real:\n      apiKeyEnv: ${modelKeyEnv}\n      api: openai-completions\n      baseURL: ${providerBase}\n      models:\n        - id: MiniMax-M3\n          contextWindow: 1000000\n`);
   const patch = markerPatch(homeDir);
   const plugin = fileURLToPath(new URL(input.pipeline ? "../src/pipeline-plugin.mjs" : input.service ? "../src/service-plugin.mjs" : "../src/material-plugin.mjs", import.meta.url));
   writeFileSync(patch, [
@@ -347,13 +361,14 @@ export async function runReportLoop(input: {
     "- id: persistent-pwsh\n  disabled: true",
     "- id: session-log-deepseek\n  disabled: true",
     `- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: false\n    personaPrefix: ${JSON.stringify(input.pipeline ? input.pipeline.context : input.service ? input.service.context + " 对资料查询类问题，只查询回答所需的信息；已有证据足够时立即整理答复，不扩展到无关源码、用户目录或测试夹具。区分内置、项目和用户安装的技能。" : "你是报告助手。必须先调用 read_material，再依据返回材料生成中文报告，不得编造来源。只输出报告正文，必须逐字使用这四个标题（井号后有空格）：# 任务目标、# 材料与来源、# 要点、# 未覆盖项。每段材料都必须引用 fileName#段落id。")}`,
-    `- insert:\n    - id: llm-pi-ai\n      name: '@deepseek-ai/dsh-llm-pi-ai'\n      config: ${JSON.stringify({ providers: { 'cpclaw-real': { apiKeyEnv: 'CPCLAW_LOOP_KEY', api: 'openai-completions', baseURL: base + '/v1', models: [{ id: 'MiniMax-M3' }] } } })}\n    - id: cpclaw-service\n      name: ${JSON.stringify(plugin)}`,
+    `- insert:\n    - id: token-meter\n      name: '@deepseek-ai/dsh-token-meter'\n    - id: tool-result-pruner\n      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'\n    - id: compaction-basic\n      name: '@deepseek-ai/dsh-compaction-basic'\n    - id: llm-pi-ai\n      name: '@deepseek-ai/dsh-llm-pi-ai'\n      config: ${JSON.stringify({ providers: { 'cpclaw-real': { apiKeyEnv: modelKeyEnv, api: 'openai-completions', baseURL: providerBase, models: [{ id: 'MiniMax-M3', contextWindow: 1_000_000 }] } } })}\n    - id: cpclaw-service\n      name: ${JSON.stringify(plugin)}`,
   ].join("\n"));
+  if(input.directModel&&(`${readFileSync(join(homeDir,'settings.yaml'),'utf8')}\n${readFileSync(patch,'utf8')}`).includes(input.directModel.apiKey))throw Error('模型认证不能写入内核配置');
   if(input.pipeline)writeFileSync(join(homeDir,'cpclaw-tools.json'),JSON.stringify(input.pipeline.tools),{mode:0o600});
   const env = scrubbedEnv(homeDir);
   if(input.pipeline)env.CPCLAW_TOOL_MANIFEST=join(homeDir,'cpclaw-tools.json');
   delete env.CPCLAW_MOCK_LLM_KEY;
-  env.CPCLAW_LOOP_KEY = nonce; env.CPCLAW_TOOL_URL = base;
+  env.CPCLAW_LOOP_KEY = nonce; if(input.directModel)env.CPCLAW_MODEL_KEY=input.directModel.apiKey; env.CPCLAW_TOOL_URL = base;
   const abort = () => { void harness?.close().catch(() => undefined); };
   try {
     const sdk = await loadSdk();
@@ -367,6 +382,7 @@ export async function runReportLoop(input: {
       if(!accepted&&notification.method==='session.event'&&notification.params.sessionId===input.sessionId&&event?.type==='agent/inbox/spliced'){
         const id=event.data?.inserted?.[0]?.id;if(id){accepted=true;input.onAccepted?.(id);}
       }
+      if(event?.type==='assistant/message'){const data=event.data;const usage=readTokenUsage(data&&Reflect.get(data,'usage'));if(usage.state==='known')input.onUsage?.({inputTokens:usage.inputTokens,outputTokens:usage.outputTokens});const message=data&&typeof data==='object'?Reflect.get(data,'message'):undefined;const content=message&&typeof message==='object'?Reflect.get(message,'content'):undefined;const text=typeof content==='string'?content:Array.isArray(content)?content.flatMap(block=>block&&typeof block==='object'&&Reflect.get(block,'type')==='text'&&typeof Reflect.get(block,'text')==='string'?[Reflect.get(block,'text')]:[]).join(''):'';if(text)input.onDelta?.(text);}
     }}); }
     catch (error) { throw fatal ?? error; }
     if (fatal) throw fatal;

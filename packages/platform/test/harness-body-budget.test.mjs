@@ -13,6 +13,13 @@ const body=content=>JSON.stringify({model:'MiniMax-M3',messages:[{role:'user',co
 test('default Harness budget transmits UTF-8 context larger than 256KiB without dropping content',async()=>{
  const f=await fixture();try{const content='资料'.repeat(70000),raw=body(content);assert(Buffer.byteLength(raw)>262144);const r=await fetch(f.base+'/v1/harness/completions',{method:'POST',headers:{...f.headers,'x-request-id':'large-context'},body:raw});assert.equal(r.status,200);assert((await r.text()).includes('完成'));assert.equal(f.lastContent,content);assert.equal(f.calls,1);}finally{await f.close();}
 });
+test('non-harness routes still cap at 16KiB and return 413 after the body finishes',async()=>{
+ const f=await fixture(262144);try{
+  const raw='{"pad":"'+ 'x'.repeat(20000) +'"}';
+  const response=await new Promise((resolve,reject)=>{const req=request(f.base+'/v1/not-a-route',{method:'POST',headers:{'content-type':'application/json','content-length':Buffer.byteLength(raw)}},res=>{let text='';res.on('data',c=>text+=c);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(text)}));});req.on('error',reject);req.end(raw);});
+  assert.equal(response.status,413);assert.equal(response.body.code,'REQUEST_BODY_TOO_LARGE');assert.equal(response.body.diagnostic.requestLimitBytes,16384);assert(response.body.diagnostic.requestBytes>16384);assert.equal(f.calls,0);
+ }finally{await f.close();}
+});
 test('oversized chunked upload returns readable 413 and does not call a model; server accepts next request',async()=>{
  const f=await fixture(262144);try{
   const raw=body('x'.repeat(300000));const response=await new Promise((resolve,reject)=>{const req=request(f.base+'/v1/harness/completions',{method:'POST',headers:{...f.headers,'x-request-id':'too-large'}},res=>{let text='';res.on('data',c=>text+=c);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(text)}));});req.on('error',reject);for(let i=0;i<raw.length;i+=16000)req.write(raw.slice(i,i+16000));req.end();});

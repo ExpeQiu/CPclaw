@@ -1,7 +1,7 @@
 /** Current desktop/cloud ownership. Reserved domain APIs are not advertised as live desktop features. */
 export const managementCatalog = [
   { id:'account', title:'账号与设备会话', scope:'cloud', desktop:'企业端登录、退出、自动续期', endpoints:['/v1/session/login','/v1/session/refresh','/v1/session/logout','/v1/me/sessions'], management:'员工、角色、口令与会话撤销', page:'employees' },
-  { id:'quota', title:'模型与用量', scope:'cloud', desktop:'聊天、报告、项目 Wiki、技能草稿', endpoints:['/v1/me/quota','/v1/me/quota-requests','/v1/chat/stream','/v1/reports/generate','/v1/harness/completions','/v1/models/reserve','/v1/models/settle','/v1/models/invoke'], management:'额度、并发、用量台账、增额记录；无聊天正文', page:'usage' },
+  { id:'quota', title:'模型与用量', scope:'cloud', desktop:'聊天、报告、项目 Wiki、技能草稿', endpoints:['/v1/me/quota','/v1/me/quota-requests','/v1/me/model-access','/v1/chat/stream','/v1/reports/generate','/v1/harness/completions','/v1/models/reserve','/v1/models/settle','/v1/models/invoke'], management:'额度阀值与本机直连授权；聊天正文不进入云端', page:'usage' },
   { id:'market', title:'技能与场景专家', scope:'cloud', desktop:'技能市场、草稿、审核、发布与安装偏好', endpoints:['/v1/market'], management:'版本审核、发布、下架与紧急停用', page:'skills' },
   { id:'connector', title:'应用服务连接器', scope:'mixed', desktop:'CLI / MCP 自定义服务连接；本机实际执行', endpoints:['/v1/market'], management:'云端登记连接器台账、组织禁用；本机凭证与授权仍在桌面', page:'connectors' },
   { id:'knowledge', title:'企业知识库', scope:'cloud', desktop:'平台企业 Wiki、成员权限、文档与引用', endpoints:['/v1/knowledge'], management:'企业库、成员、文档维护；个人库不进入组织管理', page:'knowledge' },

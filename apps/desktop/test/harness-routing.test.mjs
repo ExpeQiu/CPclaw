@@ -11,6 +11,7 @@ for(const warning of [null,{code:'HARNESS_CLEANUP_UNKNOWN',message:'fixture'}]) 
  writeFileSync(join(root,'desktop-connection.json'),JSON.stringify({platformUrl:'https://fixture.invalid'}));
  t.mock.method(globalThis,'fetch',async url=>{
   if(url.endsWith('/v1/session/refresh'))return Response.json({employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh-token',accessToken:'fixture-access'});
+  if(url.endsWith('/v1/me/model-access'))return Response.json({schemaVersion:1,mode:'mock',model:'MiniMax-M3',limitTokens:100000000});
   if(url.endsWith('/v1/market'))return Response.json({connectors:[],items:[]});
   if(url.endsWith('/v1/chat/stream'))return new Response(JSON.stringify({event:'service_request',request:{serviceId:''}})+'\n'+JSON.stringify({event:'done'})+'\n',{headers:{'content-type':'application/x-ndjson'}});
   throw Error('Unexpected route');
@@ -40,6 +41,7 @@ test('chat bindings survive restart, isolate histories and share a project direc
  writeFileSync(join(root,'desktop-connection.json'),JSON.stringify({platformUrl:'https://fixture.invalid'}));
  t.mock.method(globalThis,'fetch',async url=>{
   if(url.endsWith('/v1/session/refresh'))return Response.json({employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh',accessToken:'fixture-access'});
+  if(url.endsWith('/v1/me/model-access'))return Response.json({schemaVersion:1,mode:'mock',model:'MiniMax-M3',limitTokens:100000000});
   if(url.endsWith('/v1/market'))return Response.json({connectors:[],items:[]});
   if(url.endsWith('/v1/chat/stream'))return new Response(JSON.stringify({event:'service_request',request:{serviceId:''}})+'\n'+JSON.stringify({event:'done'})+'\n',{headers:{'content-type':'application/x-ndjson'}});
   throw Error('Unexpected route');

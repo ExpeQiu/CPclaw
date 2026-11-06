@@ -14,6 +14,7 @@ function setup(t,options={}){
  const modelRequests=[];let route='text',target='';
  t.mock.method(globalThis,'fetch',async(url,init)=>{
   if(url.endsWith('/v1/session/refresh'))return Response.json({employeeId:'employee-a',sessionId:'fixture-session',refreshToken:'fixture-refresh',accessToken:tokens['employee-a']});
+  if(url.endsWith('/v1/me/model-access'))return Response.json({schemaVersion:1,mode:'mock',model:'MiniMax-M3',limitTokens:100000000});
   if(url.endsWith('/v1/market')){const {action,input={}}=JSON.parse(init.body);return Response.json(app.market(tokens['employee-a'],action,input));}
   if(url.endsWith('/v1/chat/stream')){const body=JSON.parse(init.body);modelRequests.push(body);const events=[{event:'start',mode:'mock'}];if(route==='service')events.push({event:'service_request',request:{serviceId:target,purpose:'受控测试'}});else if(route==='document')events.push({event:'document',document:{filename:'核对报告.md',sourceId:'',content:'## 结论\n已核对\n## 来源\n明确材料'}});else events.push({event:'delta',text:'## 结论\n已核对\n## 来源\n明确材料'});events.push({event:'done'});return new Response(events.map(e=>JSON.stringify(e)).join('\n')+'\n',{headers:{'content-type':'application/x-ndjson'}});}
   throw Error('未知测试请求 '+url);

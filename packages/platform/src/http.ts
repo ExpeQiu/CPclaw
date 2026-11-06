@@ -106,33 +106,21 @@ function bearer(req: IncomingMessage): string | undefined {
 function readBody(req: IncomingMessage, maxBody = MAX_BODY): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    let size = 0, exceeded = false;
+    let size = 0, exceeded = false, settled = false;
+    const fail = (error: Error) => { if (settled) return; settled = true; reject(error); };
+    const succeed = (value: unknown) => { if (settled) return; settled = true; resolve(value); };
     req.on("data", (chunk: Buffer) => {
-      if(exceeded)return;
       size += chunk.length;
-      if (size > maxBody) {
-        exceeded=true;chunks.length=0;
-        reject(new BodyTooLargeError(size,maxBody));
-        return;
-      }
+      if (size > maxBody) { exceeded = true; chunks.length = 0; return; }
       chunks.push(chunk);
     });
     req.on("end", () => {
-      if(exceeded)return;
-      if (size === 0) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "解析失败";
-        reject(new Error(message));
-      }
+      if (exceeded) { fail(new BodyTooLargeError(size, maxBody)); return; }
+      if (size === 0) { succeed({}); return; }
+      try { succeed(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+      catch (error) { fail(error instanceof Error ? error : new Error("解析失败")); }
     });
-    req.on("error", (error) => {
-      reject(error);
-    });
+    req.on("error", fail);
   });
 }
 
@@ -372,6 +360,22 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         return;
       }
       sendJson(res, 200, { schemaVersion: 1, quota: result.quota, quotaPolicy:{approvalMode:'auto',maxAdditionalTokens:300_000_000} });
+      return;
+    }
+    if (req.method === "GET" && path === "/v1/me/model-access") {
+      const result = app.readOwnQuota(token);
+      if (!result.ok) {
+        sendFailure(res, result);
+        return;
+      }
+      const model = "MiniMax-M3";
+      if (!reportGateway) {
+        platformLog(dataDir, "info", "model_access_issued", "签发本机模型授权", { mode: "mock", model, limitTokens: result.quota.limitTokens }, requestId);
+        sendJson(res, 200, { schemaVersion: 1, mode: "mock", model, limitTokens: result.quota.limitTokens });
+        return;
+      }
+      platformLog(dataDir, "info", "model_access_issued", "签发本机模型授权", { mode: "real", model, limitTokens: result.quota.limitTokens }, requestId);
+      sendJson(res, 200, { schemaVersion: 1, mode: "real", model, baseUrl: reportGateway.baseUrl, apiKey: reportGateway.apiKey, limitTokens: result.quota.limitTokens });
       return;
     }
     if(req.method==='POST'&&path==='/v1/me/quota-requests'){
