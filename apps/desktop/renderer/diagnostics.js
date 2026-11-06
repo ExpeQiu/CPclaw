@@ -36,7 +36,7 @@ function planRepairs(result) {
   const codes = new Set((result?.findings || []).filter((f) => f.status === 'error').map((f) => f.code));
   const seen = new Set();
   for (const action of result?.repairActions || []) {
-    if (!action.runnable || action.executed) continue;
+    if ((!action.runnable && !(action.manualOnly&&action.needsConfirm)) || action.executed) continue;
     if (seen.has(action.code)) continue;
     seen.add(action.code);
     plans.push({ ...action, kind: 'server' });
@@ -127,14 +127,18 @@ function syncRepairButton(result) {
 }
 
 function renderDiagnoseReport(body, result) {
+  lastDiagnoseResult=result;lastDiagnoseChatId=currentChatId;
   body.replaceChildren();
   const explain=document.createElement('button');explain.textContent='由内核解释诊断';
-  explain.onclick=async()=>{explain.disabled=true;const id=currentChatId;try{const r=await chatCall('chat.explain-diagnosis',{chatId:id});if(!r.ok)throw Error(r.message||r.error||'内核诊断未完成');diagnosticsDialog.close();await loadChats();await selectChat(r.chatId||id);}catch(e){diagParagraph(body,e.message);explain.disabled=false;}};body.append(explain);
+  explain.onclick=async()=>{explain.disabled=true;const id=currentChatId;try{const r=await chatCall('chat.explain-diagnosis',{chatId:id,requestId:result.requestId,scope:result.scope});if(!r.ok)throw Error(r.message||r.error||'内核诊断未完成');diagnosticsDialog.close();await loadChats();await selectChat(r.chatId||id);}catch(e){diagParagraph(body,e.message);explain.disabled=false;}};body.append(explain);
+  const scopes=[['task','检查当前任务'],['model','检查模型连接'],['services','检查工具与服务'],['delivery','检查已有成果'],['environment','检查运行环境']];
+  for(const [scope,label] of scopes){const button=document.createElement('button');button.textContent=label;button.disabled=result.scope===scope;button.onclick=async()=>{button.disabled=true;try{const next=await chatCall('diagnostic.inspect',{chatId:currentChatId,requestId:result.requestId,scope});if(!next.ok)throw Error(next.message);renderDiagnoseReport(body,next);}catch(e){diagParagraph(body,e.message);button.disabled=false;}};body.append(button);}
+  if(result.focusFindings){diagSection(body,'当前检查范围');for(const finding of result.focusFindings)diagParagraph(body,`${statusLabel(finding.status)} · ${finding.detail}`);if(!result.focusFindings.length)diagParagraph(body,'该范围没有已识别的问题；完整证据保留如下。');}
   if(result.summary){
     const summary=result.summary;
     diagParagraph(body,`检查完成 · ${{none:'未执行修复',verified:'本次修复已验证',failed:'修复仍有未通过项'}[summary.repairState]||'待核实'} · 当前待处理 ${summary.unresolved} 项`);
   }
-  if(result.authority==='system-diagnostic')diagParagraph(body,'系统维护权限 · 自动恢复已有任务，修复后验证并记录经验','muted');
+  if(result.readOnly)diagParagraph(body,'只读检查 · 修复需执行宿主提供的动作，原任务不会整轮重放','muted');
   if(result.issue?.action==='quota'){
     const button=document.createElement('button');button.className='primary';button.textContent='申请新额度';
     button.onclick=()=>void window.showTaskIssue?.(result.issue,{messageId:result.messageId});body.append(button);
@@ -263,7 +267,8 @@ function renderDiagnoseReport(body, result) {
 
 async function executeOneRepair(action, log) {
   if (action.kind === 'server' || action.kind === 'catalog' || (['SKILL_INSTALL_MISSING', 'SKILL_BINDING_STALE'].includes(action.code) && action.kind !== 'dreamina')) {
-    const fixed = await chatCall('chat.diagnoseRepair', { chatId: currentChatId, code: action.code });
+    const fixed = action.actionId ? await chatCall('diagnostic.repair', { chatId: currentChatId, actionId: action.actionId }) : action.needsConfirm||action.kind==='catalog' ? await chatCall('chat.diagnoseRepair',{chatId:currentChatId,code:action.code}) : {ok:false,message:'请重新检查并取得有效修复动作'};
+    if(fixed.receiptId){const check=await chatCall('diagnostic.verify',{chatId:currentChatId,receiptId:fixed.receiptId});if(!check.ok||!check.verified)throw Error(check.message||'修复回读验证未通过');}
     if (!fixed.ok) throw Error(fixed.message || `${action.label}失败`);
     const line = (fixed.repairs || []).map((r) => `${r.verified ? '已验证' : '未通过'} · ${r.detail}`).join('；') || action.label;
     log(line);
@@ -429,7 +434,7 @@ async function runRepairPlan(plans, { single = false } = {}) {
     }
     if (!closedForUi && currentChatId) {
       append('→ 重新运行自诊断…');
-      const again = await chatCall('chat.diagnose', { chatId: currentChatId });
+      const again = await chatCall('diagnostic.inspect', { chatId: currentChatId });
       if (again.ok) {
         lastDiagnoseResult = again;
         lastDiagnoseChatId = currentChatId;
@@ -488,7 +493,7 @@ byId('chat-diagnose').onclick = async () => {
   diagnosticsDialog.showModal();
   const current = () => actor === chatAccount && chatId === currentChatId && generation === selectedChatGeneration;
   try {
-    const result = await chatCall('chat.diagnose', { chatId });
+    const result = await chatCall('diagnostic.inspect', { chatId });
     if (!current()) return;
     if (!result.ok) throw Error(result.message);
     lastDiagnoseResult = result;

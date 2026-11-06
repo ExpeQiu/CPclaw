@@ -127,6 +127,10 @@ settingsById("settings-save").addEventListener("click", async () => {
   }
 });
 
+settingsById("settings-request-quota").addEventListener("click", () => {
+  void window.openQuotaRequest?.();
+});
+
 settingsById("settings-sync-env").addEventListener("click", async () => {
   const button = settingsById("settings-sync-env");
   const feedback = settingsById("settings-feedback");

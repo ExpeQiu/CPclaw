@@ -51,7 +51,7 @@ function dispatch(message) {
   const input = isRecord(message.input) ? message.input : {};
   const actorId = message.actorId;
   if(maintenance&&!message.method?.startsWith("doctor.")&&message.method!=="chat.history")return fail("SLOT_BUSY","运行环境正在修复，请稍后再试。");
-  if (message.method?.startsWith("extensions.") || message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.") || message.method?.startsWith("learning.") || message.method === "formal.tracks") return chat.dispatch(message.method, actorId, input);
+  if (message.method?.startsWith("extensions.") || message.method?.startsWith("knowledge.") || message.method?.startsWith("project.") || message.method?.startsWith("chat.") || message.method?.startsWith("diagnostic.") || message.method?.startsWith("account.") || message.method?.startsWith("market.") || message.method?.startsWith("document.") || message.method?.startsWith("learning.") || message.method === "formal.tracks") return chat.dispatch(message.method, actorId, input);
   if (typeof actorId !== "string") {
     return fail("SCHEMA_INVALID", "缺少员工标识");
   }

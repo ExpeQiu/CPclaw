@@ -4,6 +4,9 @@ const str={type:'string'},num={type:'integer'},flag={type:'boolean'},strings={ty
 const titles={list_resources:'查看关联资源',read_resource:'读取关联资料',discover_service:'发现服务能力',read_file:'读取文件',write_file:'写入文件',terminal:'执行终端命令',call_cli:'调用应用',call_mcp:'调用服务工具',deliver_document:'提交文档段落',register_document:'登记已有文档',submit_result:'提交结构化结果',read_tool_result:'读取结果后续内容'};
 const tool=(name,description,properties,required=[])=>({name,title:titles[name]||name,description,parameters:{type:'object',properties,required,additionalProperties:false}});
 export const pipelineTools=[
+ tool('diagnostic_inspect','只读检查本聊天指定请求；省略 requestId 时检查本轮输入之前的运行。scope 指定关注范围，报告保留完整证据。不重新生成。',{requestId:str,scope:{type:'string',enum:['task','model','services','delivery','environment']}}),
+ tool('diagnostic_repair','执行检查返回的宿主动作 actionId；仅恢复已有成果或重装已绑定技能。不能传入权限或任意命令。',{actionId:str},['actionId']),
+ tool('diagnostic_verify','按修复 receiptId 回读验证；verified 才表示该项修复通过，不代表整个任务完成。',{receiptId:str},['receiptId']),
  tool('list_resources','列出本聊天显式关联的项目、资料、知识库、技能、成果和可用服务，不授予额外权限。',{}),
  tool('read_resource','读取明确资源；结果按字符偏移分页。history 仅限本聊天；knowledge 的 id 为已关联库 ID，path 为文档 ID。',{kind:{type:'string',enum:['context','history','execution','project','knowledge','skill','document','draft','input','result']},id:str,path:str,offset:num,limit:num},['kind']),
  tool('discover_service','发现指定服务的实际能力和参数。',{serviceId:str},['serviceId']),

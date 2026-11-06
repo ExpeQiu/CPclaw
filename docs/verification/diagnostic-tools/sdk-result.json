@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "packaged": false,
+  "actualSdk": true,
+  "allMessagesThroughHarness": true,
+  "typedTools": true,
+  "nativeDocumentParts": true,
+  "sessionRecovery": true,
+  "crossChatIsolation": true,
+  "liveDeltas": true,
+  "modelCalls": 7
+}

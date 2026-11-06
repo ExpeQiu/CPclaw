@@ -4,7 +4,7 @@ const keyOf = c => JSON.stringify([c.actorId, c.chatId]);
 export function createConversationPermissions() {
   const entries = new Map();
   return {
-    get(context) { return context.actorId && context.chatId ? {...(entries.get(keyOf(context)) ?? {mode:'ask',revision:0})} : {mode:'ask',revision:0}; },
+    get(context) { return context.actorId && context.chatId ? {...(entries.get(keyOf(context)) ?? {mode:'auto',revision:0})} : {mode:'auto',revision:0}; },
     set(context, mode) {
       if (!context.actorId || !context.chatId) throw Error('请先选择已登录账号的对话');
       if (!modes.has(mode)) throw Error('无效的对话权限模式');

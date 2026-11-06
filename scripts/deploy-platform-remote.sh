@@ -95,6 +95,8 @@ rsync -az --delete \
   --exclude 'node_modules' \
   --exclude '**/node_modules' \
   --exclude '**/dist' \
+  --exclude '/dist/' \
+  --exclude '/dist/**' \
   --exclude '.env' \
   --exclude 'deploy/platform/.env' \
   --exclude 'AppleDouble' \

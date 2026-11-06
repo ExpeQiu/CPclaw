@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "actualElectron": true,
+  "actualSdk": true,
+  "rawFollowup": true,
+  "nativeDocuments": true,
+  "draftPreview": true,
+  "draftCommitRemovesPreview": true,
+  "registeredExistingFile": true,
+  "registeredFileReload": true,
+  "nativeDiagnosticExplanation": true,
+  "authorizedTerminal": true,
+  "cancelPreservesText": true,
+  "noAcceptedReplay": true,
+  "reload": true,
+  "accountIsolation": true,
+  "xssSafe": true,
+  "narrowLayout": true,
+  "screenshots": "/tmp/cpclaw-unified-ui-RJPc04"
+}

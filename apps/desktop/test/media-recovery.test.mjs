@@ -44,6 +44,42 @@ test('diagnosis recovers existing image, persists delivery, survives restart and
   assert.equal(lines.at(-1).fields.verified,0);assert.equal(lines.at(-1).fields.repairState,'none');
  }finally{service.stop();db.close();rmSync(root,{recursive:true,force:true});}
 });
+test('read-only inspection issues a repair token and verifies offline local recovery',async t=>{
+ const root=mkdtempSync('/tmp/cpclaw-media-recovery-'),actor='media-user',events=[],calls=[];
+ writeAccountSession(root,{schemaVersion:1,employeeId:actor,sessionId:'fixture-session',refreshToken:'fixture-refresh-token'},{makeCurrent:true});
+ // Offline platform must not prevent recovering an already downloaded image.
+ t.mock.method(globalThis,'fetch',async()=>{throw Error('offline');});
+ const runtime=createServiceRuntime({dataDir:root,isCurrent:()=>true,notify:e=>events.push(e),run:()=>{throw Error('No CLI allowed for local recovery');}});
+ const options={executeService:async(c,s)=>{calls.push(c.request);return runtime.execute(c,c.request,s);}};
+ let service=createChatService(root,()=>{},options);
+ const db=new DatabaseSync(join(root,'chat.sqlite'));
+ const {chatId}=await service.dispatch('chat.create',actor,{});
+ const dir=join(root,'service-artifacts',createHash('sha256').update(actor).digest('hex').slice(0,16),chatId);mkdirSync(dir,{recursive:true});
+ const path=join(dir,`dreamina-${resource}.png`);writeFileSync(path,png);
+ db.prepare('INSERT INTO chat_messages(id,chat,role,content,state,error,request) VALUES(?,?,?,?,?,?,?)').run('message',chatId,'assistant','本轮回复未完成，已恢复执行记录。','error','模型步骤达到上限，请继续当前任务','fixture');
+ const steps=[record(1,['node','run','--node-id','node_0123456789'],{ok:true,recovery:{projectId:project,items:[{submitId:submit,nodeId:'node_0123456789'}]},data:{items:[{submitId:submit,nodeId:'node_0123456789',state:'accepted',resources:[{resourceId:resource}]}]}}),record(2,['operation','wait',submit],{ok:true,data:{state:'succeeded',resources:[{resourceId:resource,state:'succeeded'}]}}),record(3,['resource','get',resource],{ok:true,data:{resourceId:resource,type:'image',status:'success'}}),record(4,['resource','download',resource],{ok:false,code:'SERVICE_FAILED',message:'图片文件为空或超过预览限制'})];
+ for(const s of steps)db.prepare('INSERT INTO chat_service_steps VALUES(?,?,?)').run('message',s.step,JSON.stringify(s));
+ try{
+  const inspection=await service.dispatch('diagnostic.inspect',actor,{chatId,requestId:'fixture',scope:'delivery'});
+  assert.equal(calls.length,0);assert.deepEqual(inspection.repairs,[]);
+  const action=inspection.repairActions.find(a=>a.code==='MEDIA_RESUME');assert(action?.actionId);
+  const fixed=await service.dispatch('diagnostic.repair',actor,{chatId,actionId:action.actionId});assert(fixed.ok,JSON.stringify(fixed));
+  const check=await service.dispatch('diagnostic.verify',actor,{chatId,receiptId:fixed.receiptId});assert.equal(check.verified,true,JSON.stringify(check));
+  const report={...check.report,repairs:fixed.repairs};
+  assert.equal(report.task?.status,'delivered');assert.equal(report.task.images[0].resourceId,resource);
+  assert(report.repairs.some(r=>r.code==='MEDIA_DELIVERY'&&r.verified));
+  assert(events.some(e=>e.type==='image'&&e.path===realpathSync(path)));
+  assert.equal(calls.length,1);assert.equal(calls[0].action,'recover_image');
+  const history=await service.dispatch('chat.history',actor,{chatId});assert.equal(history.messages.at(-1).content,'本轮回复未完成，已恢复执行记录。');
+  assert.equal(history.messages.at(-1).state,'error'); // Preserve original execution failure.
+  assert(history.serviceSteps.some(s=>s.request.action==='recover_image'&&s.result.data.path===realpathSync(path)));
+  service.stop();service=createChatService(root,()=>{},options);
+  const again=await service.dispatch('chat.diagnose',actor,{chatId});assert.equal(again.task.status,'delivered');assert.equal(again.repairs.length,0);assert.equal(calls.length,1);
+  assert.equal((await service.dispatch('chat.diagnose', 'other', {chatId})).ok,false);
+  const lines=(await import('node:fs')).readFileSync(join(root,'logs/desktop-worker.log'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(lines.at(-1).fields.verified,0);assert.equal(lines.at(-1).fields.repairState,'none');
+ }finally{service.stop();db.close();rmSync(root,{recursive:true,force:true});}
+});
 
 test('large valid image can be read while mismatched hashes remain rejected',()=>{
  const root=mkdtempSync('/tmp/cpclaw-large-image-');try{

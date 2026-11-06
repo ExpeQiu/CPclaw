@@ -1,0 +1,6 @@
+{
+  "requestBytes": 270178,
+  "httpResponse": null,
+  "clientError": "fetch failed",
+  "transportCode": "UND_ERR_SOCKET"
+}

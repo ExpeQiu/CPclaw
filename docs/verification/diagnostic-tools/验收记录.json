@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-06",
+  "scope": "source and controlled integration; no deployment or installed app replacement",
+  "checks": {
+    "targetedTests": {
+      "passed": 30,
+      "failed": 0,
+      "log": "targeted-tests.log"
+    },
+    "workspaceBuild": "passed",
+    "repositoryVerify": "passed; excludes real MiniMax, signed package, external OIDC as declared by script",
+    "cloudDiagnosticIntegration": "passed; local fixture platform",
+    "actualHarnessSDK": "passed; invokes diagnostic_inspect and reads its report",
+    "actualElectron": "passed; readonly report, model shortcut, same-session explanation, account isolation, cancellation and narrow layout"
+  },
+  "notVerified": [
+    "real model diagnostic tool selection quality",
+    "production platform update",
+    "packaged or installed app"
+  ],
+  "implementation": "../../design/Harness统一诊断工具.md"
+}

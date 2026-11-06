@@ -60,7 +60,6 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
   const sessions = new Map();
   const attempted = new Map();
   const grants = new Map();
-  const taskPermissions=new Map();
   let revision = 0;
   const scopeKey = (context, identity) => JSON.stringify([context.actorId, context.chatId, context.service.id, context.service.type, context.service.target, identity]);
   function status(context) {
@@ -68,11 +67,10 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
   }
   function check(context, signal) {
     signal.throwIfAborted(); if (!isCurrent(context)) throw Error('会话或账号已变化，已停止后续操作');
-    if(context.taskId&&context.authority!==DIAGNOSTIC_AUTHORITY){const key=JSON.stringify([context.actorId,context.chatId]),policy=getPermission(context),prior=taskPermissions.get(key);
-      if(prior?.taskId===context.taskId&&prior.revision!==policy.revision)throw Object.assign(Error('对话权限已改变，请重新发起任务。'),{code:'DENIED'});
-      taskPermissions.set(key,{taskId:context.taskId,revision:policy.revision});}
+
   }
   async function consent(context, signal, details, identity, cost = 0) {
+    while(true){
     check(context,signal);
     if(context.authority===DIAGNOSTIC_AUTHORITY&&!details.forceApproval&&cost===0)return;
     const permission=getPermission(context);
@@ -93,6 +91,7 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
     const canAuthorizeAuto = Boolean(context.actorId && context.chatId);
     const accepted = await approve({ ...details, signal, service: context.service.title, mode: grant?.mode ?? 'task', canAuthorizeTask, canAuthorizeAuto, conversationMode: permission.mode, creditManaged: context.service.builtin === true && context.service.id === 'dreamina', requiredCredits: cost, reservedCredits: grant?.reservedCredits ?? 0, creditCeiling: grant?.creditCeiling ?? 0, budgetExceeded: Boolean(grant) });
     check(context,signal);
+    if(permission.revision!==getPermission(context).revision)continue;
     if (revision !== startRevision) throw Error('授权已撤销，已停止后续操作');
     if (accepted === true) return; // 兼容单次授权调用方。
     if (!accepted || !['once','task','auto'].includes(accepted.mode)) throw Object.assign(Error('用户拒绝授权，未执行该操作。'), { code:'DENIED' });
@@ -103,6 +102,8 @@ export function createServiceRuntime({ dataDir, approve, isCurrent, notify = () 
       if (!context.actorId || !context.chatId || (accepted.mode === 'task' && !context.taskId)) throw Error('缺少任务或对话，无法保存授权');
       grants.set(key, {actorId:context.actorId, chatId:context.chatId, service:context.service.title, taskId:context.taskId, mode:accepted.mode, creditCeiling, reservedCredits:reservedCredits + cost});
       notify({type:'permission', ...status(context)});
+    }
+    return;
     }
   }
   async function execute(context, request, signal) {

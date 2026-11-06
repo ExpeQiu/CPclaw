@@ -333,7 +333,7 @@ export async function completeHarness(config: RealGatewayConfig, body: Record<st
     const chunk = JSON.parse(data);record.chunks++;
     const delta=chunk.choices?.[0]?.delta;if(typeof delta?.content==='string')finalText+=delta.content;
     if(Array.isArray(delta?.tool_calls)&&delta.tool_calls.length)hasTools=true;
-    const call=delta?.tool_calls?.[0];if(call?.function?.name)record.toolName=['service_action','read_material','list_resources','read_resource','discover_service','read_file','write_file','terminal','call_cli','call_mcp','browser_open','browser_snapshot','browser_click','browser_type','browser_scroll','browser_press','deliver_document','register_document','submit_result','read_tool_result'].includes(call.function.name)?call.function.name:'unknown';
+    const call=delta?.tool_calls?.[0];if(call?.function?.name)record.toolName=['service_action','read_material','list_resources','read_resource','discover_service','read_file','write_file','terminal','call_cli','call_mcp','browser_open','browser_snapshot','browser_click','browser_type','browser_scroll','browser_press','deliver_document','register_document','submit_result','read_tool_result','diagnostic_inspect','diagnostic_repair','diagnostic_verify'].includes(call.function.name)?call.function.name:'unknown';
     if(typeof call?.function?.arguments==='string')record.toolArgumentBytes+=Buffer.byteLength(call.function.arguments);
     if (chunk.error || (chunk.base_resp && chunk.base_resp.status_code !== 0)) throw new Error("模型返回错误");
     if (chunk.usage) usage = readTokenUsage(chunk.usage);

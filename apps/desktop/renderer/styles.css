@@ -93,7 +93,8 @@ hr {
   font-size:10px;
   font-weight:400;
   color:#858a80;
-  margin-left:auto}
+  margin-left:auto;
+  white-space:nowrap}
 .new-task {
   display:flex;
   align-items:center;

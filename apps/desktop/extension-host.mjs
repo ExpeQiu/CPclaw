@@ -188,7 +188,7 @@ export function registerExtensionHost({ dataDir, ipcMain, getWindow, getActor = 
       const c=effectiveContext();
       if(!c.actorId||!c.chatId||input.chatId!==c.chatId)return {ok:false,message:'对话已变化，请重新选择权限模式。'};
       try{permissions.set(c,input.mode);}catch(error){return {ok:false,message:error.message};}
-      serviceController?.abort();runtime.revoke();authorization.revoke();connectorAuthorization?.revoke();
+      runtime.revoke();authorization.revoke();connectorAuthorization?.revoke();
       approvalPending?.settle(false);
       const status=permissionStatus();send({state:'permission',...status});return {ok:true,...status};
     }

@@ -2,8 +2,8 @@
   const picker=document.getElementById('conversation-permissions'),label=document.getElementById('permission-mode-label');
   const labels={ask:'请求批准',auto:'帮我批准',full:'完全访问权限'};
   let generation=0,busy=false;
-  function render(mode='ask') {
-    label.textContent=labels[mode]||labels.ask;picker.dataset.mode=mode;
+  function render(mode='auto') {
+    label.textContent=labels[mode]||labels.auto;picker.dataset.mode=mode;
     label.title='对话权限：'+label.textContent+' · 仅当前对话，本次应用会话内有效';
     for(const button of picker.querySelectorAll('[data-permission-mode]'))button.setAttribute('aria-checked',String(button.dataset.permissionMode===mode));
   }

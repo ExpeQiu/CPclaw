@@ -1,0 +1,27 @@
+{
+  "oldProcess": 46842,
+  "oldPath": "/Applications/CPclaw 0.0.40 backup-041-20261105T094430Z.app/Contents/MacOS/CPclaw",
+  "newVersion": "0.0.43",
+  "currentProcesses": [
+    "90135     1 /Applications/CPclaw.app/Contents/MacOS/CPclaw",
+    "90185 90135 /Applications/CPclaw.app/Contents/Resources/runtime/bin/node /Applications/CPclaw.app/Contents/Resources/app/workspace-worker.mjs"
+  ],
+  "before": {
+    "chats": 17,
+    "messages": 98,
+    "streaming": 0
+  },
+  "after": {
+    "chats": 17,
+    "messages": 98,
+    "streaming": 0
+  },
+  "checks": {
+    "actualPackagedSdk": true,
+    "controlledProvider": true,
+    "nativeDocumentParts": true,
+    "sessionRecovery": true,
+    "crossChatIsolation": true,
+    "originalTaskReplayed": false
+  }
+}

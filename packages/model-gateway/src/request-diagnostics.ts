@@ -1,7 +1,7 @@
 import type {TokenUsage} from '@cpclaw/contracts';
 /** Metadata only: never persist prompts, tool arguments, headers or provider error bodies. */
 export type RequestDiagnostic = {
-  code: string; stage: string; outcome: string; model: string; durationMs: number;
+  transportCode?: string; code: string; stage: string; outcome: string; model: string; durationMs: number;
   httpStatus: number; providerRequestId: string; finishReason: string; sawDone: boolean;
   normalEof: boolean; chunks: number; responseBytes: number; textChars: number; reasoningChars?: number;
   toolName: string; toolArgumentBytes: number; toolJsonValid: boolean | null;
@@ -39,6 +39,7 @@ export function cleanRequestDiagnostic(value: unknown): Partial<RequestDiagnosti
     const v=input[key];if(typeof v==='number'&&Number.isFinite(v)&&v>=0)out[key]=v;
   }
   for(const key of ['sawDone','normalEof','toolJsonValid']){const v=input[key];if(typeof v==='boolean'||key==='toolJsonValid'&&v===null)out[key]=v;}
+  const transport=input.transportCode;if(typeof transport==='string'&&/^(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|EPIPE|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY_LEAF_SIGNATURE|DEPTH_ZERO_SELF_SIGNED_CERT)$/.test(transport))out.transportCode=transport;
   const result=out as Partial<RequestDiagnostic>;
   if(Array.isArray(input.attempts))result.attempts=input.attempts.slice(0,3).filter(v=>v&&typeof v==='object'&&['attempt','httpStatus','waitMs'].every(k=>typeof v[k]==='number'&&Number.isFinite(v[k])&&v[k]>=0)).map(v=>({attempt:v.attempt,httpStatus:v.httpStatus,waitMs:v.waitMs}));
   return result;

@@ -18,7 +18,8 @@ test('own quota application is automatically approved, auditable, isolated and i
   const repeat=app.requestOwnQuota(a.accessToken,{requestId:'request-a',additionalTokens:1000000});assert.equal(repeat.replayed,true);assert.equal(repeat.quota.limitTokens,first.quota.limitTokens);
   assert.equal(app.requestOwnQuota(a.accessToken,{requestId:'request-a',additionalTokens:1}).code,'CONFLICT');
   assert.equal(app.readOwnQuota(b.accessToken).quota.limitTokens,1000);
-  for(const n of [0,-1,0.5,1000001,Infinity])assert.equal(app.requestOwnQuota(a.accessToken,{requestId:'invalid-'+n,additionalTokens:n}).ok,false);
+  assert.equal(app.requestOwnQuota(a.accessToken,{requestId:'request-max',additionalTokens:300_000_000}).ok,true);
+  for(const n of [0,-1,0.5,300_000_001,Infinity])assert.equal(app.requestOwnQuota(a.accessToken,{requestId:'invalid-'+n,additionalTokens:n}).ok,false);
   assert.equal(app.requestOwnQuota('invalid',{requestId:'forged',additionalTokens:1000}).ok,false);
   assert(app.listAudit(admin.accessToken).entries.some(e=>e.action==='quota_request_approved'));
   assert.equal(app.readOwnQuota(a.accessToken).quota.settledKnown,before.settledKnown);
@@ -34,6 +35,8 @@ test('quota request HTTP route authenticates the caller and ignores forged emplo
  try{
   const r=await fetch(base+'/v1/me/quota-requests',{method:'POST',headers:{authorization:`Bearer ${a.accessToken}`,'content-type':'application/json'},body:JSON.stringify({requestId:'http-request',additionalTokens:5000,employeeId:'employee-b'})});
   assert.equal(r.status,200);const result=await r.json();assert.equal(result.status,'approved');assert.equal(result.quota.limitTokens,6000);
+  const quota=await fetch(base+'/v1/me/quota',{headers:{authorization:`Bearer ${a.accessToken}`}});
+  assert.equal(quota.status,200);assert.equal((await quota.json()).quotaPolicy.maxAdditionalTokens,300_000_000);
   const unauth=await fetch(base+'/v1/me/quota-requests',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({requestId:'bad',additionalTokens:5000})});assert.equal(unauth.status,401);
  }finally{await server.close();opened.app.close();rmSync(dataDir,{recursive:true,force:true});}
 });

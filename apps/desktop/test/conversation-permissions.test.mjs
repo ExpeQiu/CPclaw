@@ -8,11 +8,11 @@ import {localService} from '../local-tools.mjs';
 
 const context={actorId:'a',chatId:'c'};
 test('conversation modes are isolated by account and chat, survive switching, and reset on new host',()=>{
- const p=createConversationPermissions();assert.equal(p.get(context).mode,'ask');p.set(context,'full');
- assert.equal(p.get({...context,chatId:'other'}).mode,'ask');assert.equal(p.get({...context,actorId:'b'}).mode,'ask');assert.equal(p.get(context).mode,'full');
+ const p=createConversationPermissions();assert.equal(p.get(context).mode,'auto');p.set(context,'full');
+ assert.equal(p.get({...context,chatId:'other'}).mode,'auto');assert.equal(p.get({...context,actorId:'b'}).mode,'auto');assert.equal(p.get(context).mode,'full');
  assert.throws(()=>p.set(context,'forged'));assert.throws(()=>p.set({...context,chatId:''},'full'));
  const revision=p.get(context).revision;p.set(context,'ask');assert(p.get(context).revision>revision);
- p.set(context,'full');p.clearActor('a');assert.equal(p.get(context).mode,'ask');assert.equal(createConversationPermissions().get(context).mode,'ask');
+ p.set(context,'full');p.clearActor('a');assert.equal(p.get(context).mode,'auto');assert.equal(createConversationPermissions().get(context).mode,'auto');
 });
 function fixture(mode,approve=false){
  const root=mkdtempSync('/tmp/cpclaw-permission-tools-'),project=join(root,'project'),external=join(root,'outside');mkdirSync(project);mkdirSync(external);writeFileSync(join(project,'input.txt'),'project input');writeFileSync(join(external,'private.txt'),'external fixture');
@@ -40,11 +40,11 @@ test('full mode performs real external file writes and terminal commands without
   const failed=await f.execute({action:'terminal',command:"printf 'failure detail' >&2; exit 7"});assert.equal(failed.ok,false);assert.equal(failed.exitCode,7);assert.match(failed.stderr,/failure detail/);
  }finally{f.close();}
 });
-test('mode downgrade invalidates the existing task and requires a new task under the new policy',async()=>{
+test('mode downgrade keeps the same task alive and asks under the new policy',async()=>{
  const f=fixture('full');try{
   await f.execute({action:'read_file',path:'input.txt'});f.policy.set(context,'ask');f.runtime.revoke();
   await assert.rejects(f.execute({action:'terminal',command:'pwd'}),e=>e.code==='DENIED');
-  f.c.taskId='task-2';await assert.rejects(f.execute({action:'terminal',command:'pwd'}),e=>e.code==='DENIED');assert.equal(f.approvals.length,1);
+  assert.equal(f.c.taskId,'task-1');assert.equal(f.approvals.length,1);
  }finally{f.close();}
 });
 test('revocation or context change during an approval cannot execute a stale command',async()=>{
@@ -116,4 +116,14 @@ test('narrowing to a single operation drops the saved task grant from the report
   assert.equal(grants[0].mode,'task');
   assert.equal(grants[0].reservedCredits,0);
  }finally{f.close();}
+});
+
+test('switching from ask to full during approval rechecks permission and continues the same operation',async()=>{
+ const root=mkdtempSync('/tmp/cpclaw-permission-live-'),policy=createConversationPermissions();policy.set(context,'ask');
+ let resolveApproval,requests=0;
+ const runtime=createServiceRuntime({dataDir:root,isCurrent:()=>true,getPermission:c=>policy.get(c),approve:()=>{requests++;return new Promise(r=>{resolveApproval=r;});}});
+ try{const pending=runtime.execute({...context,taskId:'live-task',service:localService,workingDirectory:root},{action:'terminal',command:'printf continued'},new AbortController().signal);
+  while(!resolveApproval)await new Promise(r=>setTimeout(r,1));policy.set(context,'full');runtime.revoke();resolveApproval(false);
+  const result=await pending;assert.equal(result.stdout,'continued');assert.equal(requests,1);
+ }finally{rmSync(root,{recursive:true,force:true});}
 });

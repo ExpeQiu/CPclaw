@@ -35,15 +35,21 @@ function renderKernelBadge(detail) {
   ].filter(Boolean).join(" · ");
 }
 
+function showAppEdition(version) {
+  const badge = byId("app-edition");
+  if (badge && version) badge.textContent = `桌面版 ${version}`;
+}
 async function refreshKernelStatus() {
   try {
     const status = await window.cpclaw.runtimeStatus();
     if (status?.ok) kernelStatus = status;
+    if (status?.appVersion) showAppEdition(status.appVersion);
   } catch {
     kernelStatus = { name: "未配置", ready: false, source: "none", version: "" };
   }
   renderKernelBadge(runningChatId === currentChatId && runningChatId ? "正在回复" : "");
 }
+window.cpclaw.settingsGet?.().then(view => showAppEdition(view?.appVersion)).catch(() => {});
 window.refreshKernelStatus = refreshKernelStatus;
 window.renderKernelBadge = renderKernelBadge;
 const conversation = byId("conversation");

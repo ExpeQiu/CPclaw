@@ -1,3 +1,4 @@
+import {modelTransportFailure,transportCode} from './transport-error.js';
 import { inspectHarnessProcess } from "./process-inspection.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -288,6 +289,7 @@ export async function runReportLoop(input: {
         return;
       }
       if (req.method !== "POST" || req.url !== "/v1/chat/completions") { res.writeHead(404); res.end(); return; }
+      let modelRequestId='',networkStage:'model_connect'|'model_stream'='model_connect',fetchStarted=false;
       let charged = false;let idleTimer:ReturnType<typeof setTimeout>|undefined;
       const idleAbort=new AbortController();const touch=()=>{if(input.pipeline){clearTimeout(idleTimer);idleTimer=setTimeout(()=>idleAbort.abort(Error('模型连续未返回数据，连接已中止')),input.pipeline.idleMs??70000);idleTimer.unref?.();}};
       try {touch();
@@ -300,13 +302,14 @@ export async function runReportLoop(input: {
         }
         if (modelCalls >= (budget?.limit ?? 8)) throw Error("模型步骤达到上限，请继续当前任务");
         input.beforeCall(); charged = true; modelCalls++;
-        const modelRequestId=`loop-${randomUUID()}`;
+        modelRequestId=`loop-${randomUUID()}`;fetchStarted=true;
         const response = await fetch(`${input.platformBase.replace(/\/$/, "")}/v1/harness/completions`, {
           method: "POST", headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json", "x-request-id": modelRequestId,"x-cpclaw-harness-final":"v1",...(input.pipeline?{"x-cpclaw-pipeline":"v1"}:{}),"x-trace-id":input.traceId||modelRequestId,"x-parent-request-id":input.parentRequestId||"","x-chat-id":input.chatId||"","x-harness-session-id":input.sessionId||"" },
           body: JSON.stringify(budget&&!input.pipeline ? prepareServiceCompletion(body, modelCalls - 1, budget) : body), signal: AbortSignal.any([input.signal,idleAbort.signal]),
         });
         try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,traceId:input.traceId||modelRequestId});}catch{ /* Diagnostic observers do not control execution. */ }
         if (!response.ok) {const failure=await harnessGatewayError(response);const checkpoint=Reflect.get(failure,'checkpoint');if(typeof checkpoint==='string'&&!input.pipeline)input.onFinalDraft?.(checkpoint);try{input.onDiagnostic?.({requestId:modelRequestId,status:response.status,modelCall:modelCalls,diagnostic:Reflect.get(failure,'diagnostic')});}catch{}throw failure;}
+        networkStage='model_stream';
         if(input.pipeline&&response.body){
           res.writeHead(200,{'content-type':'text/event-stream'});const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',finish='';let textChars=0;
           try{while(true){const part=await reader.read();if(part.value){touch();if(!res.write(part.value))await new Promise<void>((resolve,reject)=>{const cleanup=()=>{res.off('drain',done);res.off('close',closed);};const done=()=>{cleanup();resolve();};const closed=()=>{cleanup();reject(Error('内核模型通道关闭'));};res.once('drain',done);res.once('close',closed);});}
@@ -317,7 +320,9 @@ export async function runReportLoop(input: {
         }else{const text = await response.text();res.writeHead(200, { "content-type": "text/event-stream" }); res.end(text);}
       } catch (error) {
         if (charged) input.unknownUsage();
-        fatal = idleAbort.signal.aborted?idleAbort.signal.reason:error;
+        fatal = input.signal.aborted?input.signal.reason:idleAbort.signal.aborted?Object.assign(Error('模型连续未返回数据，连接已中止；已保存的文件和回执保留。'),{code:'MODEL_STREAM_TIMEOUT',diagnostic:{code:'MODEL_STREAM_TIMEOUT',stage:networkStage,outcome:'error'}}):fetchStarted&&(error instanceof TypeError||transportCode(error))?modelTransportFailure(error,networkStage):error;
+        const diagnostic=fatal&&typeof fatal==='object'?Reflect.get(fatal,'diagnostic'):undefined;
+        if(diagnostic)try{input.onDiagnostic?.({requestId:modelRequestId,modelCall:modelCalls,diagnostic});}catch{};
         if(!res.headersSent){res.writeHead(502);res.end();}else res.destroy();
         void harness?.close().catch(() => undefined);
       }finally{clearTimeout(idleTimer);}

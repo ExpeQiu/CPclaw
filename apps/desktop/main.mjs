@@ -79,7 +79,7 @@ ipcMain.handle("runtime.status", () => {
     ready: Boolean(status.ready),
     source: String(status.source || "none").slice(0, 32),
   });
-  return status;
+  return { ...status, appVersion: appVersion() };
 });
 
 async function repairRuntime() {
@@ -159,7 +159,7 @@ ipcMain.handle("workspace.call", async (_event, call) => {
   }
   if (actorId === null && !["account.status", "account.login", "account.logout", "formal.tracks", "learning.grant"].includes(call.method)) return { ok: false, code: "AUTH_REQUIRED", message: "请先在设置中登录平台" };
   if (['account.login', 'account.logout'].includes(call.method)) extensionHost.clearContext();
-  if (['chat.history', 'chat.send', 'chat.diagnose', 'chat.diagnoseRepair'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
+  if (['chat.history', 'chat.send', 'chat.diagnose', 'chat.diagnoseRepair','diagnostic.inspect','diagnostic.repair','diagnostic.verify'].includes(call.method)) extensionHost.setContext(actorId, call.input?.chatId ?? '');
   const result = await workspaceClient.request({ method: call.method, input: call.input, actorId });
   if (call.method === 'market.probe' && result.code === 'LOCAL_EXECUTION_REQUIRED') {
     const probed = await extensionHost.probeConnector(result.localExecution, actorId);

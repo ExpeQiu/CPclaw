@@ -23,7 +23,7 @@ app.whenReady().then(async()=>{
   const js=s=>win.webContents.executeJavaScript(s),settle=()=>js('new Promise(r=>setTimeout(r,30))');
   const until=async code=>{for(let i=0;i<100;i++){if(await js(code))return;await settle();}throw Error('condition timed out '+code);};
   host.setContext(actor,'chat-1');await js('refreshConversationPermission()');
-  assert.equal(await js("document.getElementById('permission-mode-label').textContent"),'请求批准');
+  assert.equal(await js("document.getElementById('permission-mode-label').textContent"),'帮我批准');
   const choose=async mode=>{await js(`document.querySelector('[data-permission-mode="${mode}"]').click()`);await until(`document.getElementById('conversation-permissions').dataset.mode==='${mode}'`);};
   const execute=(request,taskId='task-'+Date.now())=>host.executeService({actorId:actor,chatId:'chat-1',taskId,service:localService,workingDirectory:project,projectRoot:project,request},new AbortController().signal);
   await choose('full');
@@ -54,15 +54,15 @@ app.whenReady().then(async()=>{
   await js("document.getElementById('service-approval-confirm').click()");assert.equal((await ask).ok,true);
   const reused=execute({action:'read_file',path:'input.txt'},reuseTask);
   assert.equal((await reused).ok,true);assert.equal(await js("document.getElementById('service-approval').open"),false);
-  await choose('full');const running=execute({action:'terminal',command:'sleep 10'},'running-task');await settle();await choose('ask');assert.equal((await running).ok,false);
-  const after=await execute({action:'terminal',command:'pwd'},'running-task');assert.equal(after.code,'DENIED');
-  await choose('full');host.setContext(actor,'chat-2');await js("currentChatId='chat-2';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'ask');
+  await choose('full');const running=execute({action:'terminal',command:'sleep 0.3'},'running-task');await settle();await choose('ask');assert.equal((await running).ok,true);
+  const next=execute({action:'terminal',command:'pwd'},'running-task');await until("document.getElementById('service-approval').open");await js("document.getElementById('service-approval-deny').click()");assert.equal((await next).code,'DENIED');
+  await choose('full');host.setContext(actor,'chat-2');await js("currentChatId='chat-2';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'auto');
   host.setContext(actor,'chat-1');await js("currentChatId='chat-1';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'full');
-  actor='employee-b';host.setContext(actor,'chat-1');await js("chatAccount='employee-b';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'ask');
+  actor='employee-b';host.setContext(actor,'chat-1');await js("chatAccount='employee-b';refreshConversationPermission()");assert.equal(await js("document.getElementById('conversation-permissions').dataset.mode"),'auto');
   const invalid=await js("cpclaw.extensionAction({action:'set-permission-mode',chatId:'other-chat',mode:'full'})");assert.equal(invalid.ok,false);
   win.setSize(680,640);await js("document.getElementById('conversation-permissions').open=true");await settle();
   assert(await js("document.querySelector('.permission-menu').getBoundingClientRect().right<=innerWidth"));
   writeFileSync(join(temp,'permission-modes-narrow.png'),(await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(errors,[]);clearTimeout(deadline);console.log(JSON.stringify({ok:true,checks:['three-modes','full-real-file-write','full-real-terminal','auto-read','external-read-prompts','ask-offers-task-and-conversation','ask-once-never-reused','ask-task-reused-in-task','no-native-readonly-dialog','downgrade-aborts','chat-isolation','account-isolation','stale-mode-rejected','narrow-layout'],screenshots:temp}));app.exit(0);
+  assert.deepEqual(errors,[]);clearTimeout(deadline);console.log(JSON.stringify({ok:true,checks:['three-modes','full-real-file-write','full-real-terminal','auto-read','external-read-prompts','ask-offers-task-and-conversation','ask-once-never-reused','ask-task-reused-in-task','no-native-readonly-dialog','default-auto','downgrade-preserves-running-operation','next-operation-uses-new-policy','chat-isolation','account-isolation','stale-mode-rejected','narrow-layout'],screenshots:temp}));app.exit(0);
  }catch(error){clearTimeout(deadline);console.error(error);app.exit(1);}
 });

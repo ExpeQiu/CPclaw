@@ -865,7 +865,7 @@ function createApp(db: DatabaseSync, config: PlatformConfig): PlatformApp {
     requestOwnQuota(accessToken,input) {
       const actor=principal(accessToken);
       if(!actor.ok)return actor;
-      if(!requestIdOk(input.requestId)||!Number.isSafeInteger(input.additionalTokens)||input.additionalTokens<1||input.additionalTokens>1_000_000)return failure('CONFIG_INVALID','每次可申请新增1至1000000 tokens，请填写整数。');
+      if(!requestIdOk(input.requestId)||!Number.isSafeInteger(input.additionalTokens)||input.additionalTokens<1||input.additionalTokens>300_000_000)return failure('CONFIG_INVALID','每次可申请新增1至300000000 tokens，请填写整数。');
       const decision=withTx(db,()=>{
         const existing=rowOf(db.prepare('SELECT additional_tokens FROM quota_requests WHERE employee_id=? AND request_id=?').get(actor.employeeId,input.requestId));
         if(existing&&numberOf(existing,'additional_tokens')!==input.additionalTokens)return failure('CONFLICT','该申请编号已用于其他金额，请核实原申请结果。');

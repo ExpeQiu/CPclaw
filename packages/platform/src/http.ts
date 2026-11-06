@@ -363,7 +363,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
         sendFailure(res, result);
         return;
       }
-      sendJson(res, 200, { schemaVersion: 1, quota: result.quota, quotaPolicy:{approvalMode:'auto',maxAdditionalTokens:1_000_000} });
+      sendJson(res, 200, { schemaVersion: 1, quota: result.quota, quotaPolicy:{approvalMode:'auto',maxAdditionalTokens:300_000_000} });
       return;
     }
     if(req.method==='POST'&&path==='/v1/me/quota-requests'){
@@ -482,7 +482,7 @@ async function handle(app: PlatformApp, dataDir: string, req: IncomingMessage, r
       const save=()=>{try{if(id)traces.save(actor,id,evidence);}catch{process.stderr.write('{"event":"request_trace_write_failed"}\n');}};save();
       res.once('finish',()=>{if(!evidence.finishedAt){evidence.finishedAt=Date.now();evidence.httpStatus=res.statusCode;evidence.state=res.statusCode>=400?'rejected':'done';evidence.code=res.statusCode>=400?'PLATFORM_HTTP_'+res.statusCode:'';save();}});
       const pipeline=req.headers['x-cpclaw-pipeline']==='v1';
-      const pipelineTools=new Set(['list_resources','read_resource','discover_service','read_file','write_file','terminal','call_cli','call_mcp','browser_open','browser_snapshot','browser_click','browser_type','browser_scroll','browser_press','deliver_document','register_document','submit_result','read_tool_result']);
+      const pipelineTools=new Set(['list_resources','read_resource','discover_service','read_file','write_file','terminal','call_cli','call_mcp','browser_open','browser_snapshot','browser_click','browser_type','browser_scroll','browser_press','deliver_document','register_document','submit_result','read_tool_result','diagnostic_inspect','diagnostic_repair','diagnostic_verify']);
       const toolsValid=Array.isArray(body.tools)&&(pipeline?body.tools.length>=1&&body.tools.length<=pipelineTools.size&&body.tools.every(t=>pipelineTools.has(String(objectOf(objectOf(t)?.function)?.name))):body.tools.length===1&&['read_material','service_action'].includes(String(objectOf(objectOf(body.tools[0])?.function)?.name)));
       if(!id||body.model!=='MiniMax-M3'||!Array.isArray(body.messages)||body.messages.length<1||body.messages.length>(pipeline?256:128)||!toolsValid){sendJson(res,400,{ok:false,message:'Harness 模型或注册工具契约无效'});return;}
       const held = app.beginReport(token, id);

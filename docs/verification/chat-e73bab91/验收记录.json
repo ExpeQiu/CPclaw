@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-06",
+  "targetedTests": {
+    "passed": 35,
+    "failed": 0
+  },
+  "electronPermissions": "passed",
+  "repositoryVerify": "passed on rerun; first run cleanup test EPIPE, isolated rerun passed",
+  "sourceChanges": [
+    "default auto",
+    "permission changes do not abort conversation",
+    "recheck permissions after pending approval",
+    "complete new issues and enrich historical issue details"
+  ],
+  "productionChanged": false,
+  "installedAppChanged": false,
+  "requestBodyLimit": "controlled reproduction confirmed 400 server log + client UND_ERR_SOCKET at 270178 bytes; remediation pending"
+}
